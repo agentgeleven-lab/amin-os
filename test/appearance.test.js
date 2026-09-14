@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createAppearance,defaults,themeVariables,validate} from '../settings/appearance.js';
+import {createAppearance,defaults,themeVariables,validate,resolveFloor} from '../settings/appearance.js';
 import {drawerPlacement,clampPosition} from '../window-state.js';
 test('appearance follows global defaults while explicit app overrides persist across reloads',()=>{
  const ctx={extensionSettings:{other:{keep:true}},saveSettingsDebounced(){}};const service=createAppearance(()=>ctx);
@@ -22,4 +22,13 @@ test('configured wide desktop window stays inside desktop and mobile viewports',
 test('unified palette drives map and status alongside shell font and surface settings',()=>{
  const vars=themeVariables({...defaults().global,theme:'paper',fontSize:17,radius:6,density:'compact'});
  assert.equal(vars['--amin-bg'],vars['--wsh-bg']);assert.equal(vars['--amin-bg'],vars['--dm-bg']);assert.equal(vars['--wsh-scheme'],'light');assert.equal(vars['--amin-font'],'17px');assert.equal(vars['--amin-gap'],'8px');assert.equal(vars['--wsh-radius'],'6px');
+});
+test('floor dimensions migrate, share defaults, and allow independent overrides',()=>{
+ const state=validate({floor:{width:800,desktopHeight:60,mobileHeight:50}});
+ assert.equal(state.floor.alignment,'left');assert.equal(state.floor.sizeMode,'fixed');
+ assert.equal(resolveFloor(state,'map').width,800);assert.equal(resolveFloor(state,'status').width,800);
+ state.floor.overrides.map={width:500,desktopHeight:45,mobileHeight:40};state.floor.alignment='right';
+ const saved=validate(state);assert.equal(resolveFloor(saved,'map').width,500);assert.equal(resolveFloor(saved,'status').width,800);
+ delete saved.floor.overrides.map;assert.equal(resolveFloor(saved,'map').width,800);
+ assert.throws(()=>validate({...saved,floor:{...saved.floor,alignment:'bad'}}));
 });

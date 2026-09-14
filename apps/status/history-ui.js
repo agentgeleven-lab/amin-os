@@ -1,3 +1,4 @@
+import {mountFloorControl} from '../../settings/floor-layout.js';
 export function historyView({ history, node, floor = null }) {
   const root = node('section', undefined, 'wsh-history');
   const nav = node('div', undefined, 'wsh-history-nav');
@@ -45,9 +46,9 @@ export function installFloorButtons({ history, node, enabled }) {
       if (view) { view.dispose(); view.element.remove(); view = null; button.setAttribute('aria-expanded', 'false'); }
       else { history.sync(); view = historyView({ history, node, floor: Number(element.getAttribute('mesid') ?? floor) }); host.append(view.element); button.setAttribute('aria-expanded', 'true'); }
     };
-    host.append(button); element.append(host); host.hidden = !enabled();
-    const dispose = () => { view?.dispose(); host.remove(); mounted.delete(element); };
-    mounted.set(element, { host, dispose }); return dispose;
+    const dock=mountFloorControl(element,'status',host,button);dock.setVisible(enabled());
+    const dispose = () => { view?.dispose(); dock.dispose(); mounted.delete(element); };
+    mounted.set(element, { host, dispose, dock }); return dispose;
   }
   const surface = window.__TAURITAVERN__?.api?.chatSurface;
   const managed = surface?.isManagedOwnershipRequired?.() === true;
@@ -57,7 +58,7 @@ export function installFloorButtons({ history, node, enabled }) {
       for (const [element, item] of mounted) if (!element.isConnected) item.dispose();
       for (const element of document.querySelectorAll('#chat .mes[mesid]')) mount(element, Number(element.getAttribute('mesid')));
     }
-    for (const item of mounted.values()) item.host.hidden = !enabled();
+    for (const item of mounted.values()) item.dock.setVisible(enabled());
   }
   return { refresh };
 }

@@ -7,11 +7,12 @@ export const PALETTES = {
  mono:{name:'极简墨白',bg:'#f4f5f6',card:'#ffffff',control:'#e9ecef',text:'#202b37',muted:'#586674',line:'#c7cdd4',accent:'#304d66',ink:'#ffffff',scheme:'light'},
 };
 export const APP_NAMES={map:'地图',status:'世界状态',reply:'回复选项',ai:'AI 设置'};
-export const defaults=()=>({global:{theme:'mint',fontSize:13,radius:14,density:'comfortable',opacity:100,blur:12},window:{width:448,height:720},apps:{},floor:{width:900,desktopHeight:65,mobileHeight:55}});
+export const defaults=()=>({global:{theme:'mint',fontSize:13,radius:14,density:'comfortable',opacity:100,blur:12},window:{width:448,height:720},apps:{},floor:{width:900,desktopHeight:65,mobileHeight:55,alignment:'left',sizeMode:'fixed',overrides:{}}});
 const clone=x=>structuredClone(x);
 function number(value,min,max){if(!Number.isFinite(value)||value<min||value>max)throw Error(`数值需在 ${min}–${max} 之间`);return value;}
 function appearance(value){if(!PALETTES[value.theme])throw Error('主题无效');if(!['comfortable','compact'].includes(value.density))throw Error('间距无效');return {theme:value.theme,fontSize:number(value.fontSize,11,20),radius:number(value.radius,0,24),density:value.density,opacity:number(value.opacity,70,100),blur:number(value.blur,0,24)};}
-export function validate(value){const d=defaults();const result={global:appearance({...d.global,...value.global}),window:{width:number(value.window?.width??448,340,800),height:number(value.window?.height??720,400,1000)},floor:{width:number(value.floor?.width??900,320,1400),desktopHeight:number(value.floor?.desktopHeight??65,30,90),mobileHeight:number(value.floor?.mobileHeight??55,30,85)},apps:{}};for(const id of Object.keys(APP_NAMES))if(value.apps?.[id])result.apps[id]=appearance({...result.global,...value.apps[id]});return result;}
+export function validate(value){const d=defaults();const result={global:appearance({...d.global,...value.global}),window:{width:number(value.window?.width??448,340,800),height:number(value.window?.height??720,400,1000)},floor:{width:number(value.floor?.width??900,320,1400),desktopHeight:number(value.floor?.desktopHeight??65,30,90),mobileHeight:number(value.floor?.mobileHeight??55,30,85)},apps:{}};result.floor.alignment=value.floor?.alignment??'left';result.floor.sizeMode=value.floor?.sizeMode??'fixed';if(!['left','center','right'].includes(result.floor.alignment)||!['fixed','auto'].includes(result.floor.sizeMode))throw Error('楼层窗口布局无效');result.floor.overrides={};for(const id of ['map','status'])if(value.floor?.overrides?.[id]){const f=value.floor.overrides[id];result.floor.overrides[id]={width:number(f.width,320,1400),desktopHeight:number(f.desktopHeight,30,90),mobileHeight:number(f.mobileHeight,30,85)};}for(const id of Object.keys(APP_NAMES))if(value.apps?.[id])result.apps[id]=appearance({...result.global,...value.apps[id]});return result;}
+export function resolveFloor(state,id){return {...state.floor,...state.floor.overrides?.[id]};}
 export function createAppearance(getContext){
  const key='amin_os_appearance_v1';let value;try{value=validate(getContext()?.extensionSettings?.[key]??defaults());}catch{value=defaults();}
  const listeners=new Set();
@@ -34,13 +35,16 @@ export function installAppearance(document){
   style(document.getElementById('amin-os'));
   for(const e of document.querySelectorAll('#amin-os .amin-app-pane'))style(e,e.dataset.app==='settings'?'':e.dataset.app);
   for(const e of document.querySelectorAll('.dynamic-map-panel'))style(e,'map');
-  for(const e of document.querySelectorAll('.amin-status-embedded,.wsh-floor-host')){style(e,'status');const f=ai.snapshot().floor;e.style.setProperty('--amin-floor-width',f.width+'px');e.style.setProperty('--amin-floor-desktop',f.desktopHeight+'dvh');e.style.setProperty('--amin-floor-mobile',f.mobileHeight+'dvh');}
+  const floor=ai.snapshot().floor;
+  for(const e of document.querySelectorAll('.amin-floor')){style(e,'');e.dataset.alignment=floor.alignment;e.dataset.sizeMode=floor.sizeMode;}
+  for(const e of document.querySelectorAll('.dm-message-map,.wsh-floor-host')){const id=e.matches('.dm-message-map')?'map':'status';style(e,id);const f=resolveFloor(ai.snapshot(),id);e.style.setProperty('--amin-floor-width',f.width+'px');e.style.setProperty('--amin-floor-desktop',f.desktopHeight+'dvh');e.style.setProperty('--amin-floor-mobile',f.mobileHeight+'dvh');}
+  for(const e of document.querySelectorAll('.amin-status-embedded'))style(e,'status');
   for(const frame of document.querySelectorAll('#amin-os .wsh-dialog iframe')){
    const paint=()=>{try{const root=frame.contentDocument?.documentElement;if(root){root.removeAttribute('data-wsh-style');root.setAttribute('data-wsh-glass','off');style(root,'status');}}catch{}};
    if(!frames.has(frame)){frames.add(frame);frame.addEventListener('load',paint);}paint();
   }
  }
- const selector='.dynamic-map-panel,.amin-app-pane,.wsh-floor-host,.wsh-dialog,iframe';
+ const selector='.amin-floor,.dm-message-map,.dynamic-map-panel,.amin-app-pane,.wsh-floor-host,.wsh-dialog,iframe';
  let queued=false;const schedule=()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;apply();});}};
  const observer=new MutationObserver(records=>{if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1&&(n.matches(selector)||n.querySelector(selector)))))schedule();});
  observer.observe(document.body,{childList:true,subtree:true});ai.subscribe(apply);apply();return {apply};

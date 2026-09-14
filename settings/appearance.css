@@ -61,3 +61,21 @@
 #amin-os [data-amin-density=compact] label{margin:8px 0}
 #amin-os [data-amin-density=compact] :is(.dm-page p,.wsh-generation-page p){margin:6px 0}
 #amin-os[data-amin-surface] .amin-home-apps{gap:var(--amin-gap)}
+/* Shared message toolbar and outer window dimensions. */
+.amin-floor{display:flex;flex-direction:column;align-items:flex-start;gap:0;width:100%;min-width:0;max-width:100%;margin:8px 0;container-type:inline-size;box-sizing:border-box;clear:both}
+.amin-floor[hidden],.amin-floor [hidden]{display:none!important}
+.amin-floor-toolbar{display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:6px;width:100%;margin:0;padding:0;line-height:1.4}
+.amin-floor[data-alignment=center]{align-items:center}.amin-floor[data-alignment=right]{align-items:flex-end}
+.amin-floor[data-alignment=center]>.amin-floor-toolbar{justify-content:center}.amin-floor[data-alignment=right]>.amin-floor-toolbar{justify-content:flex-end}
+.amin-floor>.amin-floor-toolbar>button{display:inline-flex;align-items:center;justify-content:center;min-height:32px;margin:0!important;padding:5px 10px!important;max-width:100%;border:1px solid var(--amin-line)!important;border-radius:var(--amin-radius)!important;background:var(--amin-card)!important;color:var(--amin-accent)!important;font:var(--amin-font)/1.4 'Segoe UI','Microsoft YaHei',sans-serif!important;cursor:pointer;opacity:1;box-sizing:border-box;white-space:nowrap}
+.amin-floor-toolbar>[data-floor-app=map]{order:0}.amin-floor-toolbar>[data-floor-app=status]{order:1}
+.amin-floor>.dm-message-map{order:1}.amin-floor>.wsh-floor-host{order:2}
+.amin-floor>[data-floor-app]{--amin-floor-height:var(--amin-floor-desktop);width:min(100%,var(--amin-floor-width));max-width:100%;min-width:0;padding:0;margin:0;box-sizing:border-box}
+.amin-floor>.dm-message-map>.dynamic-map-panel.dm-inline,.amin-floor>.wsh-floor-host>.wsh-history{width:100%;max-width:100%;height:auto;max-height:var(--amin-floor-height);margin:8px 0 0;box-sizing:border-box;border-radius:var(--amin-radius)!important;overflow:auto}
+.amin-floor[data-size-mode=fixed]>.dm-message-map>.dynamic-map-panel.dm-inline:not(.dm-collapsed),.amin-floor[data-size-mode=fixed]>.wsh-floor-host>.wsh-history{height:var(--amin-floor-height)}
+.amin-floor>.dm-message-map>.dynamic-map-panel.dm-inline{overflow:hidden}
+.amin-floor>.dm-message-map>.dynamic-map-panel.dm-inline .dm-content{flex:1;min-height:0;max-height:none;overflow:auto}
+.dynamic-map-panel[data-amin-surface] :is(.dm-canvas,.dm-svg,.dm-detail-card,.dm-role-location,.dm-settings-section,.dm-change-preview,.dm-connection-row){border-radius:var(--amin-radius)!important}
+.dynamic-map-panel[data-amin-surface] :is(input,select,textarea,button){border-radius:var(--amin-radius)!important}
+@container(max-width:520px){.amin-floor>[data-floor-app]{--amin-floor-height:var(--amin-floor-mobile)}}
+@media(max-width:600px){.amin-floor>[data-floor-app]{--amin-floor-height:var(--amin-floor-mobile)}}
