@@ -36,7 +36,7 @@ export function createShell(){
         const tab=el('button','amin-app-tab',app.name);tab.type='button';tab.dataset.app=app.id;tab.addEventListener('click',()=>showApp(app.id));tabs[app.id]=tab;nav.append(tab);
         const card=el('button',`amin-app-card amin-${app.color}`);card.type='button';card.dataset.tile=app.id;card.setAttribute('aria-label',`打开${app.name}`);
         const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name));card.title=app.sub;const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));cards.append(card);
-        const pane=el('section','amin-app-pane');pane.dataset.app=app.id;pane.hidden=true;pane.setAttribute('aria-label',app.name);panes[app.id]=pane;
+        const pane=el('section','amin-app-pane amin-ui');pane.dataset.app=app.id;pane.hidden=true;pane.setAttribute('aria-label',app.name);panes[app.id]=pane;
     }
     const notice=el('div','amin-notice');notice.hidden=true;notice.setAttribute('role','status');
     const message=el('p'),retry=el('button','amin-retry','重试');retry.type='button';retry.addEventListener('click',()=>showApp(active));notice.append(message,retry);

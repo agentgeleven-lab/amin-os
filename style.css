@@ -3,3 +3,5 @@
 @import url('./settings/appearance.css');
 
 @import url('./metro.css');
+
+@import url('./ui/standard.css');

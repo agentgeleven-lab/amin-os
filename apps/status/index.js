@@ -170,7 +170,7 @@ async function showHud(page = selectedPage) {
   <\/script>`;
   html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" data-wsh-frame data-wsh-theme="nexus">');
   html = html.replace('</head>', '<link rel="stylesheet" href="' + new URL('./themes.css', import.meta.url).href + '"></head>');
-  if(embeddedMount)html=html.replace('</head>','<link rel="stylesheet" href="'+new URL('../../ui-status.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../settings/appearance-frame.css',import.meta.url).href+'"></head>');
+  if(embeddedMount)html=html.replace('</head>','<link rel="stylesheet" href="'+new URL('../../ui-status.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../settings/appearance-frame.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../ui/standard.css',import.meta.url).href+'"></head>');
   html = html.replace('<head>', '<head>' + bridge);
   const listener = event => {
     if (event.source !== frame.contentWindow || event.data?.wsh !== token) return;
