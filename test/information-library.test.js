@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {empty,apply,compile,groupRecords,KEY} from '../apps/information/model.js';
+import {createInformation} from '../apps/information/service.js';
+const chat=[{name:'a',mes:'hello',is_user:true}];
+const record=()=>{const fields=[{id:'f',category:'身份',label:'职业',value:'守卫',status:'known'},{id:'g',category:'档案',label:'年龄',value:'20',status:'known'}];return {id:'r',name:'甲',kind:'person',mode:'retcon',fields,baselineFields:structuredClone(fields)};};
+test('generated archive survives character switch and reload without changing story',async()=>{
+ const make=id=>({chatMetadata:{},chat,characters:[{avatar:id}],characterId:0,getCurrentChatId:()=>id,saveMetadata:async()=>{}}),a=make('a'),b=make('b');let ctx=a;
+ const api=createInformation(()=>ctx);await api.saveRecord(api.capture(),record(),{report:{included:1}});assert.equal(a.chatMetadata[KEY],undefined);
+ ctx=b;assert.equal(api.library().length,0);ctx={...a,chatMetadata:JSON.parse(JSON.stringify(a.chatMetadata))};assert.equal(api.library()[0].record.name,'甲');assert.equal(compile(api.read(),chat),'');
+});
+test('only changed fields and deletions affect story; restoring baseline clears overrides',()=>{
+ const r=record(),initial=apply(empty(),chat,r);assert.equal(compile(initial,chat),'');
+ r.fields[0].value='名医';r.fields[0].status='edited';const changed=apply(initial,chat,r);const prompt=compile(changed,chat);assert.match(prompt,/名医/);assert.doesNotMatch(prompt,/年龄|20/);
+ r.fields[0].value='守卫';assert.equal(compile(apply(changed,chat,r),chat),'');
+ r.fields=r.fields.filter(f=>f.id!=='g');assert.match(compile(apply(changed,chat,r),chat),/年龄/);
+});
+test('object shelves group repeated searches while separating names and kinds',()=>{
+ const a=record();const groups=groupRecords([a,{...a,id:'b'},{...a,id:'c',kind:'thing'},{...a,id:'d',name:'乙'}]);assert.equal(groups.length,3);assert.equal(groups[0].records.length,2);
+});
+test('archive save failure restores prior library and stale chat cannot receive a result',async()=>{
+ let fail=false,ctx={chatMetadata:{},chat,getCurrentChatId:()=> 'a',saveMetadata:async()=>{if(fail)throw Error('disk');}};const api=createInformation(()=>ctx);
+ await api.saveRecord(api.capture(),record());const old=JSON.stringify(api.library());fail=true;await assert.rejects(api.saveRecord(api.capture(),{...record(),name:'changed'}),/disk/);assert.equal(JSON.stringify(api.library()),old);
+ const token=api.capture();ctx={...ctx,chatMetadata:{},getCurrentChatId:()=> 'b'};await assert.rejects(api.saveRecord(token,record()),/变化/);assert.equal(api.library().length,0);
+});
