@@ -32,3 +32,12 @@ test('floor dimensions migrate, share defaults, and allow independent overrides'
  delete saved.floor.overrides.map;assert.equal(resolveFloor(saved,'map').width,800);
  assert.throws(()=>validate({...saved,floor:{...saved.floor,alignment:'bad'}}));
 });
+
+test('floor button visibility migrates and reply sizes persist independently',()=>{
+ const old=validate({floor:{width:800}});assert.deepEqual(old.floor.buttons,{map:true,status:true,reply:true});
+ old.floor.buttons.status=false;old.floor.overrides.reply={width:500,desktopHeight:40,mobileHeight:45};
+ const ctx={extensionSettings:{},saveSettingsDebounced(){}};createAppearance(()=>ctx).save(old);
+ const restored=createAppearance(()=>ctx).snapshot();assert.equal(restored.floor.buttons.status,false);
+ assert.equal(restored.floor.buttons.reply,true);assert.equal(resolveFloor(restored,'reply').width,500);
+ assert.equal(resolveFloor(restored,'map').width,800);
+});

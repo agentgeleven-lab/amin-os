@@ -31,3 +31,8 @@
 #amin-os[data-amin-surface] .amin-tiles-editing .amin-app-card.is-drop-target{outline:3px dashed var(--amin-text);outline-offset:-5px}
 #amin-os .amin-tile-ghost{position:fixed!important;z-index:2147483100!important;pointer-events:none!important;opacity:.8;border-radius:0!important;background:var(--amin-accent)!important;color:var(--amin-ink)!important;box-shadow:0 8px 24px #0004!important}
 @media(max-width:400px){#amin-os[data-amin-surface] .amin-home{padding-left:12px;padding-right:12px}#amin-os .amin-start-heading h2{font-size:27px}}
+/* Theme-safe native controls in the Metro editor, including host overrides. */
+#amin-os[data-amin-surface] .amin-tile-editor :is(select,button),#amin-os[data-amin-surface] .amin-start-heading button{background:var(--amin-card)!important;color:var(--amin-text)!important;border:1px solid var(--amin-line)!important;font-family:inherit!important;font-size:var(--amin-font)!important;font-weight:400!important;border-radius:0!important;min-height:34px;box-shadow:none!important;text-shadow:none!important;filter:none!important;opacity:1}
+#amin-os[data-amin-surface] .amin-tile-editor select{appearance:auto!important;-webkit-appearance:menulist!important;color-scheme:inherit;padding:6px 9px!important}
+#amin-os[data-amin-surface] .amin-tile-editor option{background:var(--amin-card)!important;color:var(--amin-text)!important}
+#amin-os[data-amin-surface] .amin-tile-editor button:disabled{opacity:.45;cursor:default}

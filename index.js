@@ -1,3 +1,4 @@
+import {installReplyFloorButtons} from './apps/reply/floor-ui.js';
 import {initializeAppearance,installAppearance} from './settings/appearance.js';
 import {initializeAI} from './ai/service.js';
 import { createShell } from './shell.js';
@@ -40,9 +41,10 @@ export function initialize() {
             await result.value?.open?.();
         });
     }
+    installReplyFloorButtons();
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.4.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.4.1',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

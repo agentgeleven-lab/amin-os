@@ -110,3 +110,30 @@
 #amin-os[data-amin-surface] .amin-launcher-name{font-size:clamp(13px,calc(var(--amin-font) + 1px),15px)}
 #amin-os[data-amin-surface] .amin-launcher{gap:8px;padding:9px 10px}
 #amin-os[data-amin-surface] .amin-launcher .amin-mark{width:22px;height:24px;flex-basis:22px}
+/* Reply floor window participates in the same size and palette system. */
+.amin-floor-toolbar>[data-floor-app=reply]{order:2}
+.amin-floor>.amin-reply-floor>.amin-reply-floor-window{display:flex;flex-direction:column;width:100%;max-width:100%;height:auto;max-height:var(--amin-floor-height);margin:8px 0 0;box-sizing:border-box;overflow:hidden;background:var(--amin-bg);color:var(--amin-text);border:1px solid var(--amin-line);border-radius:var(--amin-radius);font:var(--amin-font)/1.5 'Segoe UI','Microsoft YaHei',sans-serif;text-align:left}
+.amin-floor[data-size-mode=fixed]>.amin-reply-floor>.amin-reply-floor-window{height:var(--amin-floor-height)}
+.amin-reply-floor-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;flex-shrink:0;border-bottom:1px solid var(--amin-line)}
+.amin-reply-floor-body{padding:14px;overflow:auto;min-height:0;flex:1}
+.amin-reply-floor-window :is(button,input,select,textarea){font:inherit!important;background:var(--amin-control)!important;color:var(--amin-text)!important;border:1px solid var(--amin-line)!important;border-radius:var(--amin-radius)!important;box-sizing:border-box;box-shadow:none!important;text-shadow:none!important;max-width:100%;padding:7px 10px}
+.amin-reply-floor-window button{cursor:pointer;margin:0}
+.amin-reply-floor-window button:disabled{opacity:.5;cursor:default}
+.amin-reply-floor-window button:focus-visible{outline:2px solid var(--amin-accent);outline-offset:2px}
+.amin-reply-floor-window :is(.amin-reply-floor-note,.ro-status){color:var(--amin-muted);font-size:calc(var(--amin-font) - 1px);overflow-wrap:anywhere;margin:0 0 12px}
+.amin-reply-floor-window .ro-panel{border:0;padding:0;margin:0;background:transparent;color:inherit;width:100%;box-sizing:border-box}
+.amin-reply-floor-window .ro-panel>summary{display:none}
+.amin-reply-floor-window .amin-reply-heading h2{font-size:calc(var(--amin-font) + 4px);margin:0 0 8px;font-weight:500;color:var(--amin-text)}
+.amin-reply-floor-window .amin-reply-heading p{display:none}
+.amin-reply-floor-window .ro-controls{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+.amin-reply-floor-window .ro-options{display:grid;gap:10px}
+.amin-reply-floor-window .ro-card{display:block;width:100%;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--amin-card)!important}
+.amin-reply-floor-window .ro-card strong,.amin-reply-floor-window .ro-card span{display:block}
+.amin-reply-floor-window .ro-card strong{color:var(--amin-accent);margin-bottom:6px}
+.amin-reply-floor-window .ro-card[aria-pressed=true]{border-color:var(--amin-accent)!important}
+.amin-reply-floor-window .ro-settings{padding:10px 0}
+.amin-reply-floor-window .ro-settings label{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
+.amin-reply-floor-window textarea{width:100%;min-height:80px}
+.amin-reply-floor-window input[type=number]{width:80px}
+.amin-reply-floor-window .ro-settings p{font-size:calc(var(--amin-font) - 1px);color:var(--amin-muted)}
+.amin-reply-floor-window [hidden]{display:none!important}

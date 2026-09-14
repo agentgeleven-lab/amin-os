@@ -8,11 +8,11 @@ export function installMessageButtons(createInlinePanel, preferences, root=docum
         const b=root.createElement('button');b.type='button';b.className='dm-message-button';b.textContent='🗺 地图';b.title='在这条消息末尾展开地图窗口';b.setAttribute('aria-expanded','false');host.append(b);
         const dock=mountFloorControl(element,'map',host,b,root);
         let panel;
-        const close=()=>{if(!panel)return;panel.destroy();panel=null;b.setAttribute('aria-expanded','false');b.textContent='🗺 地图';};
-        b.addEventListener('click',()=>{if(panel)close();else{panel=createInlinePanel(host);b.setAttribute('aria-expanded','true');b.textContent='🗺 关闭地图';}});
+        const close=()=>{if(!panel)return;panel.destroy();panel=null;dock.setOpen(false);b.setAttribute('aria-expanded','false');b.textContent='🗺 地图';};
+        b.addEventListener('click',()=>{if(panel)close();else{panel=createInlinePanel(host);dock.setOpen(true);b.setAttribute('aria-expanded','true');b.textContent='🗺 关闭地图';}});
         const dispose=()=>{close();dock.dispose();mounted.delete(element);};mounted.set(element,{host,dispose,close,dock});reflect();return dispose;
     }
-    function reflect(){const p=preferences.snapshot();for(const {host,close,dock}of mounted.values()){if(!p.messageButtons)close();dock.setVisible(p.messageButtons);host.dataset.theme=p.theme;}}
+    function reflect(){const p=preferences.snapshot();for(const {host,close,dock}of mounted.values()){dock.setVisible(true);host.dataset.theme=p.theme;}}
     const managed=surface?.isManagedOwnershipRequired?.()===true;
     let unregister;
     if(managed){unregister=surface.registerParticipant({id:'dynamic-map/message-button',protocolVersion:surface.protocolVersion,didMount:({element})=>mount(element)});}

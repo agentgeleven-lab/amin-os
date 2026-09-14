@@ -43,10 +43,10 @@ export function installFloorButtons({ history, node, enabled }) {
     const button = node('button', '◇ 状态', 'wsh-floor-button'); button.type = 'button'; button.title = '查看这一楼的状态记录'; button.setAttribute('aria-expanded', 'false');
     let view;
     button.onclick = () => {
-      if (view) { view.dispose(); view.element.remove(); view = null; button.setAttribute('aria-expanded', 'false'); }
-      else { history.sync(); view = historyView({ history, node, floor: Number(element.getAttribute('mesid') ?? floor) }); host.append(view.element); button.setAttribute('aria-expanded', 'true'); }
+      if (view) { view.dispose(); view.element.remove(); view = null; dock.setOpen(false); button.setAttribute('aria-expanded', 'false'); }
+      else { history.sync(); view = historyView({ history, node, floor: Number(element.getAttribute('mesid') ?? floor) }); host.append(view.element); dock.setOpen(true); button.setAttribute('aria-expanded', 'true'); }
     };
-    const dock=mountFloorControl(element,'status',host,button);dock.setVisible(enabled());
+    const dock=mountFloorControl(element,'status',host,button);dock.setVisible(true);
     const dispose = () => { view?.dispose(); dock.dispose(); mounted.delete(element); };
     mounted.set(element, { host, dispose, dock }); return dispose;
   }
@@ -58,7 +58,7 @@ export function installFloorButtons({ history, node, enabled }) {
       for (const [element, item] of mounted) if (!element.isConnected) item.dispose();
       for (const element of document.querySelectorAll('#chat .mes[mesid]')) mount(element, Number(element.getAttribute('mesid')));
     }
-    for (const item of mounted.values()) item.dock.setVisible(enabled());
+    for (const item of mounted.values()) item.dock.setVisible(true);
   }
   return { refresh };
 }

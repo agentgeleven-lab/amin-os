@@ -3,12 +3,15 @@ import { normalizeSettings, chatStamp, collectContext, generateOptions, inputEle
 const KEY='reply_options_mvp';
 const context=()=>globalThis.SillyTavern?.getContext?.();
 const node=(tag,text,cls)=>{const n=document.createElement(tag); if(text)n.textContent=text;if(cls)n.className=cls;return n;};
-export function mount({ target } = {}) {
-    if(document.getElementById('reply-options-panel'))return;
+export function mount({target,instanceId='reply-options-panel',contextProvider,headingText} = {}) {
+    const context=()=>{const ctx=globalThis.SillyTavern?.getContext?.();return contextProvider&&ctx?contextProvider(ctx):ctx;};
+    const settingsId=instanceId==='reply-options-panel'?'reply-options-settings':instanceId+'-settings';
+    const removers=[];
+    if(document.getElementById(instanceId))return;
     const ctx=context(), form=document.querySelector('#send_form');if(!ctx||!form)return;
     let settings=normalizeSettings(ctx.extensionSettings?.[KEY]), revision=0, controller=null;
     const draft=new DraftSelection();
-    const panel=node('details');panel.id='reply-options-panel';panel.open=target ? true : settings.expanded;
+    const panel=node('details');panel.id=instanceId;panel.className='ro-panel';panel.open=target ? true : settings.expanded;
     panel.append(node('summary','回复选项'));
     const controls=node('div',null,'ro-controls'), cards=node('div',null,'ro-options'), status=node('div','点击生成，选择后填入，由你发送。','ro-status');
     status.setAttribute('role','status');status.setAttribute('aria-live','polite');
@@ -17,7 +20,7 @@ export function mount({ target } = {}) {
     const cancel=button('停止等待',()=>controller?.abort());cancel.hidden=true;
     const undo=button('撤销填入',()=>{try{draft.undo(inputElement());status.textContent='已还原原草稿。';updateSelection();}catch(e){status.textContent=e.message;}});
     button('保留编辑',()=>{draft.reset();updateSelection();status.textContent='已保留输入框现有内容；下次选择将以它为原草稿。';});
-    const settingsBox=node('div');settingsBox.id='reply-options-settings';settingsBox.className='ro-settings';settingsBox.hidden=true;
+    const settingsBox=node('div');settingsBox.id=settingsId;settingsBox.className='ro-settings';settingsBox.hidden=true;
     function save(){const c=context();if(c?.extensionSettings){c.extensionSettings[KEY]={...settings};c.saveSettingsDebounced?.();}}
     function invalidate(message='上下文已更新，请重新生成。',reset=false){revision++;controller?.abort();cards.replaceChildren();if(reset)draft.reset();updateSelection();status.textContent=message;}
     function field(key,label,type,options){
@@ -40,9 +43,9 @@ export function mount({ target } = {}) {
     field('directions','选项方向（每行一个，按数量随机抽取）','textarea');field('prompt','自定义生成要求','textarea');
     settingsBox.append(node('p','第三人称名字留空时参考上文，无法识别时使用当前用户名称；自定义名字优先。对白中的人称按语义保留。方向少于选项数量时允许重复抽取；方向足够时不重复抽取。重复方向仍生成不同回复。草稿扩写会用候选替换原草稿，可撤销。角色设定包含绑定世界书；全体世界书包含当前全局启用及角色、聊天、人设绑定的书。读取全部未禁用的非空条目，不要求关键词触发。'));
     const settingsButton=button('设置',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
-    settingsButton.setAttribute('aria-controls','reply-options-settings');
+    settingsButton.setAttribute('aria-controls',settingsId);
     settingsButton.setAttribute('aria-expanded','false');
-    if(target){const heading=node('header',null,'amin-reply-heading');heading.append(node('h2','下一句，由你决定'),node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
+    if(target){const heading=node('header',null,'amin-reply-heading');heading.append(node('h2',headingText||'下一句，由你决定'),node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
     panel.append(controls,settingsBox,status,cards);if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});
     function updateSelection(){undo.disabled=draft.base===null;for(const b of cards.children)b.setAttribute('aria-pressed','false');}
@@ -51,7 +54,7 @@ export function mount({ target } = {}) {
     async function run(fromDraft){
         if(controller)return;
         let initial, stamp, config, ticket, original;
-        try{initial=context();stamp=chatStamp(initial);config={...settings};original=inputElement().value;if(fromDraft&&!original.trim())throw new Error('先在输入框写下草稿或回复意图。');}catch(e){status.textContent=e.message;return;}
+        try{initial=context();settings=normalizeSettings(initial?.extensionSettings?.[KEY]);stamp=chatStamp(initial);config={...settings};original=inputElement().value;if(fromDraft&&!original.trim())throw new Error('先在输入框写下草稿或回复意图。');}catch(e){status.textContent=e.message;return;}
         if(fromDraft)draft.reset();updateSelection();cards.replaceChildren();ticket=++revision;const current=new AbortController();controller=current;setBusy(true);
         let sources='正在读取世界书…';
         status.textContent=sources;
@@ -67,8 +70,9 @@ export function mount({ target } = {}) {
         finally{if(controller===current){controller=null;setBusy(false);}}
     }
     const events=ctx.eventTypes||ctx.event_types||{};
-    const on=(name,fn)=>{if(events[name])ctx.eventSource?.on(events[name],fn);};
+    const on=(name,fn)=>{if(events[name]){ctx.eventSource?.on(events[name],fn);removers.push(()=>{const source=ctx.eventSource;if(source?.removeListener)source.removeListener(events[name],fn);else source?.off?.(events[name],fn);});}};
     for(const event of ['CHAT_CHANGED','MESSAGE_SENT','MESSAGE_RECEIVED','MESSAGE_EDITED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPED','PERSONA_CHANGED','CHARACTER_EDITED','WORLDINFO_UPDATED','WORLDINFO_SETTINGS_UPDATED'])on(event,()=>{
         invalidate(undefined,['CHAT_CHANGED','MESSAGE_SENT'].includes(event));
     });
+    return {dispose(){revision++;controller?.abort();for(const remove of removers)remove();panel.remove();}};
 }

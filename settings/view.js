@@ -26,12 +26,13 @@ export function mount(target){
     const editor=el('div');content.append(editor);const render=()=>{editor.replaceChildren();if(draft.apps[id])fields(editor,draft.apps[id]);else editor.append(el('p','全局外观变化会自动应用到这里。'));};render();
    }
   }else{
-   body.append(el('p','地图与状态窗口默认共用下列尺寸。可以分别覆盖，按钮始终紧邻排列。'));
+   body.append(el('p','各应用楼层窗口默认共用下列尺寸，按钮紧邻排列。先打开的窗口排在上面；关闭后再打开会排到末尾。'));
+   for(const [id,name]of [['map','地图'],['status','状态'],['reply','回复选项']]){const row=el('label'),check=el('input');check.type='checkbox';check.checked=draft.floor.buttons[id];check.onchange=()=>draft.floor.buttons[id]=check.checked;row.append(check,document.createTextNode('显示'+name+'楼层按钮'));body.append(row);}
    select(body,'按钮与窗口对齐',[['left','靠左'],['center','居中'],['right','靠右']],draft.floor.alignment,v=>draft.floor.alignment=v);
    select(body,'窗口高度',[['fixed','统一高度'],['auto','随内容变化（不超过上限）']],draft.floor.sizeMode,v=>draft.floor.sizeMode=v);
    const dimensions=(parent,value)=>{numeric(parent,'桌面最大宽度',value.width,320,1400,v=>value.width=v);numeric(parent,'桌面高度（占屏幕 %）',value.desktopHeight,30,90,v=>value.desktopHeight=v);numeric(parent,'手机高度（占屏幕 %）',value.mobileHeight,30,85,v=>value.mobileHeight=v);};
    dimensions(body,draft.floor);
-   for(const [id,name]of [['map','地图窗口'],['status','状态窗口']]){const card=el('details');card.append(el('summary',name));body.append(card);const editor=el('div');select(card,'尺寸来源',[['inherit','跟随统一尺寸'],['own','单独设置']],draft.floor.overrides[id]?'own':'inherit',v=>{if(v==='own')draft.floor.overrides[id]={width:draft.floor.width,desktopHeight:draft.floor.desktopHeight,mobileHeight:draft.floor.mobileHeight};else delete draft.floor.overrides[id];render();});card.append(editor);const render=()=>{editor.replaceChildren();if(draft.floor.overrides[id])dimensions(editor,draft.floor.overrides[id]);};render();}
+   for(const [id,name]of [['map','地图窗口'],['status','状态窗口'],['reply','回复选项窗口']]){const card=el('details');card.append(el('summary',name));body.append(card);const editor=el('div');select(card,'尺寸来源',[['inherit','跟随统一尺寸'],['own','单独设置']],draft.floor.overrides[id]?'own':'inherit',v=>{if(v==='own')draft.floor.overrides[id]={width:draft.floor.width,desktopHeight:draft.floor.desktopHeight,mobileHeight:draft.floor.mobileHeight};else delete draft.floor.overrides[id];render();});card.append(editor);const render=()=>{editor.replaceChildren();if(draft.floor.overrides[id])dimensions(editor,draft.floor.overrides[id]);};render();}
    body.append(el('p','窗口不会超过消息宽度。地图圆角跟随全局或地图的独立外观，状态内容保持原布局。'));
 
   }
