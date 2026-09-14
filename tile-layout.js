@@ -1,3 +1,4 @@
+import {mediaURL} from './desktop-effects-model.js';
 export const TILE_KEY='amin-os.tiles.v2';
 export const LEGACY_TILE_KEY='amin-os.tiles.v1';
 export const defaultTiles=()=>[
@@ -7,7 +8,7 @@ export const defaultTiles=()=>[
 export function normalizeTiles(value){
  if(!Array.isArray(value))return defaultTiles();
  const known=new Set(defaultTiles().map(t=>t.target)),seen=new Set();
- return value.flatMap(t=>{if(typeof t?.id!=='string'||!t.id||seen.has(t.id)||!known.has(t.target))return [];seen.add(t.id);return [{id:t.id,target:t.target,label:typeof t.label==='string'?t.label.slice(0,60):'',size:['small','medium','wide','tall'].includes(t.size)?t.size:'medium'}];});
+ return value.flatMap(t=>{if(typeof t?.id!=='string'||!t.id||seen.has(t.id)||!known.has(t.target))return [];seen.add(t.id);let image='';try{image=mediaURL(t.image);}catch{}return [{...(image?{image}:{}),id:t.id,target:t.target,label:typeof t.label==='string'?t.label.slice(0,60):'',size:['small','medium','wide','tall'].includes(t.size)?t.size:'medium'}];});
 }
 export function migrateTiles(value){
  const defaults=defaultTiles(),seen=new Set(),result=[];
