@@ -34,7 +34,7 @@ test('floor dimensions migrate, share defaults, and allow independent overrides'
 });
 
 test('floor button visibility migrates and reply sizes persist independently',()=>{
- const old=validate({floor:{width:800}});assert.deepEqual(old.floor.buttons,{map:true,status:true,reply:true});
+ const old=validate({floor:{width:800}});assert.deepEqual(old.floor.buttons,{map:true,status:true,reply:true,effects:true,information:true});
  old.floor.buttons.status=false;old.floor.overrides.reply={width:500,desktopHeight:40,mobileHeight:45};
  const ctx={extensionSettings:{},saveSettingsDebounced(){}};createAppearance(()=>ctx).save(old);
  const restored=createAppearance(()=>ctx).snapshot();assert.equal(restored.floor.buttons.status,false);

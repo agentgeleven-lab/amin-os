@@ -112,8 +112,8 @@
 #amin-os[data-amin-surface] .amin-launcher .amin-mark{width:22px;height:24px;flex-basis:22px}
 /* Reply floor window participates in the same size and palette system. */
 .amin-floor-toolbar>[data-floor-app=reply]{order:2}
-.amin-floor>.amin-reply-floor>.amin-reply-floor-window{display:flex;flex-direction:column;width:100%;max-width:100%;height:auto;max-height:var(--amin-floor-height);margin:8px 0 0;box-sizing:border-box;overflow:hidden;background:var(--amin-bg);color:var(--amin-text);border:1px solid var(--amin-line);border-radius:var(--amin-radius);font:var(--amin-font)/1.5 'Segoe UI','Microsoft YaHei',sans-serif;text-align:left}
-.amin-floor[data-size-mode=fixed]>.amin-reply-floor>.amin-reply-floor-window{height:var(--amin-floor-height)}
+.amin-floor>:is(.amin-reply-floor,.amin-extra-floor)>.amin-reply-floor-window{display:flex;flex-direction:column;width:100%;max-width:100%;height:auto;max-height:var(--amin-floor-height);margin:8px 0 0;box-sizing:border-box;overflow:hidden;background:var(--amin-bg);color:var(--amin-text);border:1px solid var(--amin-line);border-radius:var(--amin-radius);font:var(--amin-font)/1.5 'Segoe UI','Microsoft YaHei',sans-serif;text-align:left}
+.amin-floor[data-size-mode=fixed]>:is(.amin-reply-floor,.amin-extra-floor)>.amin-reply-floor-window{height:var(--amin-floor-height)}
 .amin-reply-floor-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;flex-shrink:0;border-bottom:1px solid var(--amin-line)}
 .amin-reply-floor-body{padding:14px;overflow:auto;min-height:0;flex:1}
 .amin-reply-floor-window :is(button,input,select,textarea){font:inherit!important;background:var(--amin-control)!important;color:var(--amin-text)!important;border:1px solid var(--amin-line)!important;border-radius:var(--amin-radius)!important;box-sizing:border-box;box-shadow:none!important;text-shadow:none!important;max-width:100%;padding:7px 10px}
@@ -137,3 +137,6 @@
 .amin-reply-floor-window input[type=number]{width:80px}
 .amin-reply-floor-window .ro-settings p{font-size:calc(var(--amin-font) - 1px);color:var(--amin-muted)}
 .amin-reply-floor-window [hidden]{display:none!important}
+
+.amin-floor-toolbar>[data-floor-app=effects]{order:3}
+.amin-floor-toolbar>[data-floor-app=information]{order:4}

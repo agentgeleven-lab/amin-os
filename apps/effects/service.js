@@ -29,3 +29,6 @@ export function createEffects(getContext){
  if(supported)for(const [event,fn]of Object.entries(handlers))if(events[event])source.on(events[event],fn);
  return {capture,check,save,read:()=>readStore(getContext()),context:getContext,status:()=>supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
 }
+
+let sharedService;
+export const getSharedService=()=>sharedService??= createEffects(()=>globalThis.SillyTavern?.getContext?.());

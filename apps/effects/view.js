@@ -4,20 +4,21 @@ import {draftRule} from './draft.js';
 import {bookCatalog,readBook} from './books.js';
 import {hostWorldSettings} from '../reply/world-context.js';
 import {activeEffects,anchor,belongs,change,compile} from './model.js';
-import {createEffects} from './service.js';
+import {getSharedService} from './service.js';
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function mount(target){
- const api=createEffects(()=>globalThis.SillyTavern?.getContext?.());
+ const instanceId='amin-'+crypto.randomUUID();
+ const api=getSharedService();
  const page=node('div',null,'amin-page amin-effects'),context=node('div','选择目标，点击能力，设定本次指令。','amin-context');
  const tabs=node('div',null,'amin-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','持续效果页面');
  const status=node('div',null,'amin-notice');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
- const body=node('section');body.id='amin-effects-content';body.setAttribute('role','tabpanel');
+ const body=node('section');body.id=instanceId+'-body';body.setAttribute('role','tabpanel');
  page.append(context,tabs,status,body);target.append(page);const consoleState={target:'',holder:'',editing:false};let selected='能力面板',entries=[],books=[],chosenBook='',loadedBook='',loadEpoch=0,draftController=null;
  const stopDraft=()=>{draftController?.abort();draftController=null;};
  const say=text=>{status.textContent=text;};
  const button=(parent,label,fn,primary=false)=>{const b=node('button',label,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
  const tabButtons=['能力面板','能力管理','生效中','变更记录','提示预览'].map((name,i)=>{
-  const b=button(tabs,name,()=>{selected=name;render();});b.id='amin-effects-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;
+  const b=button(tabs,name,()=>{selected=name;render();});b.id=instanceId+'-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;
  });
  tabs.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();let i=tabButtons.findIndex(b=>b.textContent===selected);i=e.key==='Home'?0:e.key==='End'?4:(i+(e.key==='ArrowRight'?1:4))%5;selected=tabButtons[i].textContent;render();tabButtons[i].focus();};
  function field(parent,label,value='',multiline=false){const row=node('label',label),input=node(multiline?'textarea':'input');input.value=value;input.setAttribute('aria-label',label);if(multiline)input.rows=4;row.append(input);parent.append(row);return input;}
@@ -90,8 +91,8 @@ export function mount(target){
    }
   }catch(e){say(e.message);}
  }
- api.subscribe(()=>{status.textContent=api.status();});
+ const unsubscribe=api.subscribe(()=>{status.textContent=api.status();});
  const ctx=api.context(),events=ctx.eventTypes??ctx.event_types??{};
- if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{entries=[];books=[];chosenBook='';loadedBook='';consoleState.target='';consoleState.holder='';consoleState.editing=false;loadEpoch++;render();});
- render();return {open(){render();}};
+ const chatChanged=()=>{entries=[];books=[];chosenBook='';loadedBook='';consoleState.target='';consoleState.holder='';consoleState.editing=false;loadEpoch++;render();};if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,chatChanged);
+ render();return {open(){render();},dispose(){stopDraft();loadEpoch++;unsubscribe();if(events.CHAT_CHANGED)ctx.eventSource?.removeListener?.(events.CHAT_CHANGED,chatChanged);page.remove();}};
 }

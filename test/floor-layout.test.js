@@ -28,3 +28,13 @@ test('three windows keep opening order and reopening moves a window to the end',
  docks[0].dispose();assert.deepEqual(hosts.slice(1).map(h=>h.style.order),['1','2']);
  docks[1].dispose();docks[2].dispose();assert.equal(message.children.length,0);
 });
+
+test('five floor apps use fixed button order and click order for windows',()=>{
+ const document={createElement:()=>new Node()},message=new Node(),ids=['information','effects','reply','map','status'];
+ const hosts=ids.map(()=>new Node()),buttons=ids.map(()=>new Node()),docks=ids.map((id,i)=>mountFloorControl(message,id,hosts[i],buttons[i],document));
+ assert.deepEqual(message.children[0].children[0].children.map(b=>b.dataset.floorApp),['map','status','reply','effects','information']);
+ docks.forEach(d=>d.setOpen(true));assert.deepEqual(hosts.map(h=>h.style.order),['1','2','3','4','5']);
+ docks[0].setOpen(false);docks[0].setOpen(true);assert.equal(hosts[0].style.order,'5');
+ buttons[1].click=()=>docks[1].setOpen(false);docks[1].setVisible(false);assert.equal(buttons[1].hidden,true);assert.equal(hosts[0].style.order,'4');
+ docks.forEach(d=>d.dispose());assert.equal(message.children.length,0);
+});

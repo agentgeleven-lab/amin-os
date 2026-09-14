@@ -1,12 +1,12 @@
 /* Amin UI v1. Shared across app panes and the isolated status document.
    Important declarations intentionally bridge legacy plugin/host control rules. */
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) {
   --amin-ui-family: 'Segoe UI','Microsoft YaHei',sans-serif;
   font: var(--amin-font)/1.6 var(--amin-ui-family);
   color:var(--amin-text); scrollbar-width:thin;
   scrollbar-color:var(--amin-line) transparent;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea) {
   box-sizing:border-box; font:var(--amin-font)/1.5 var(--amin-ui-family)!important; letter-spacing:normal;
   min-height:36px; max-width:100%; padding:calc(var(--amin-gap) * .6) calc(var(--amin-gap) * .85);
   border:1px solid var(--amin-line)!important;
@@ -14,122 +14,122 @@
   background:var(--amin-control)!important; color:var(--amin-text)!important;
   box-shadow:none!important; text-shadow:none!important; color-scheme:inherit;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(input[type=checkbox],input[type=radio]) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(input[type=checkbox],input[type=radio]) {
   min-height:0; width:auto; accent-color:var(--amin-accent-text,var(--amin-accent));
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) button {cursor:pointer;line-height:1.5!important}
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) button:disabled {opacity:.5!important;cursor:default}
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) button:hover:not(:disabled) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button {cursor:pointer;line-height:1.5!important}
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button:disabled {opacity:.5!important;cursor:default}
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button:hover:not(:disabled) {
   border-color:var(--amin-accent)!important;
   background:color-mix(in srgb,var(--amin-control) 85%,var(--amin-accent))!important;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea):focus-visible {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea):focus-visible {
   outline:2px solid var(--amin-accent)!important;outline-offset:2px;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child) {
   background:var(--amin-accent)!important;color:var(--amin-ink)!important;border-color:var(--amin-accent)!important;font-weight:600!important;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child):hover:not(:disabled) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child):hover:not(:disabled) {
   background:var(--amin-accent)!important;color:var(--amin-ink)!important;filter:brightness(1.08);
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-page {padding:var(--amin-gap);min-width:0}
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-scroll {flex:1;min-height:0;overflow:auto}
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-savebar {display:flex;flex-wrap:wrap;gap:8px;padding:var(--amin-gap);border-top:1px solid var(--amin-line);background:var(--amin-card)}
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-toolbar,.ro-controls,.wsh-actions,.toolbar) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-page {padding:var(--amin-gap);min-width:0}
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-scroll {flex:1;min-height:0;overflow:auto}
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-savebar {display:flex;flex-wrap:wrap;gap:8px;padding:var(--amin-gap);border-top:1px solid var(--amin-line);background:var(--amin-card)}
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-toolbar,.ro-controls,.wsh-actions,.toolbar) {
   display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 var(--amin-gap);
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) {
   display:flex;flex-wrap:wrap;gap:6px;padding:var(--amin-gap) 0;
   border-bottom:1px solid var(--amin-line);margin:0 0 var(--amin-gap);
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) button {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) button {
   background:transparent!important;border-color:transparent!important;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button[aria-selected=true],button[aria-pressed=true]) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button[aria-selected=true],button[aria-pressed=true]) {
   background:var(--amin-card)!important;color:var(--amin-accent-text,var(--amin-accent))!important;border-color:var(--amin-accent)!important;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-notice,.ro-status,.dm-feedback,.wsh-report,#status):not(:empty) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-notice,.ro-status,.dm-feedback,.wsh-report,#status):not(:empty) {
   color:var(--amin-muted)!important;background:var(--amin-card)!important;
   font:inherit!important;padding:10px 12px!important;border:1px solid var(--amin-line);border-radius:var(--amin-radius);margin:var(--amin-gap) 0;
 }
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-card,.ro-card,.card) {
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-card,.ro-card,.card) {
   background:var(--amin-card)!important;color:var(--amin-text)!important;border:1px solid var(--amin-line)!important;border-radius:var(--amin-radius)!important;padding:var(--amin-gap);
 }
 /* Shell and legacy adapters. New apps use the semantic classes above. */
-#amin-os .amin-app-nav {display:flex;align-items:center;gap:12px}
-#amin-os .amin-app-nav[hidden] {display:none}
-#amin-os .amin-current-app {flex:1;min-width:0;white-space:nowrap;font-size:calc(var(--amin-font) + 5px);line-height:1.4}
-#amin-os .amin-home-tab {flex:0 0 36px}
-#amin-os .amin-ui :is(.amin-map-embedded,.amin-status-embedded,#reply-options-panel) {font-family:var(--amin-ui-family)!important;font-size:var(--amin-font)!important}
-#amin-os .amin-ui :is(.dm-header,.wsh-panel-heading,.amin-reply-heading,.amin-context) {
+:is(#amin-os,.amin-extra-floor-window) .amin-app-nav {display:flex;align-items:center;gap:12px}
+:is(#amin-os,.amin-extra-floor-window) .amin-app-nav[hidden] {display:none}
+:is(#amin-os,.amin-extra-floor-window) .amin-current-app {flex:1;min-width:0;white-space:nowrap;font-size:calc(var(--amin-font) + 5px);line-height:1.4}
+:is(#amin-os,.amin-extra-floor-window) .amin-home-tab {flex:0 0 36px}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui :is(.amin-map-embedded,.amin-status-embedded,#reply-options-panel) {font-family:var(--amin-ui-family)!important;font-size:var(--amin-font)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui :is(.dm-header,.wsh-panel-heading,.amin-reply-heading,.amin-context) {
   min-height:40px;padding:10px 0!important;margin:0!important;border-bottom:1px solid var(--amin-line);color:var(--amin-muted);background:transparent!important;
 }
-#amin-os .amin-ui :is(.dm-header,.wsh-panel-heading) :is(strong,span) {font:inherit}
-#amin-os .amin-ui .amin-reply-heading h2 {display:none}
-#amin-os .amin-ui .amin-reply-heading p {margin:0;color:var(--amin-muted);font:inherit}
-#amin-os .amin-ui #reply-options-panel .ro-controls {margin:var(--amin-gap) 0}
-#amin-os .amin-ui :is(.amin-status-embedded,#reply-options-panel) {padding:0 var(--amin-gap) var(--amin-gap)!important}
-#amin-os .amin-ui .dm-header {margin:0 var(--amin-gap)!important}
-#amin-os .amin-ui .dm-tabs {margin:0 var(--amin-gap) var(--amin-gap)}
-#amin-os .amin-ui .dm-page {padding:var(--amin-gap)!important}
-#amin-os .amin-ui .dm-savebar {background:var(--amin-card);padding:var(--amin-gap);border-top:1px solid var(--amin-line)}
-#amin-os .amin-ui .wsh-body {min-height:0}
-#amin-os .amin-ui .wsh-quick-status:empty {display:none}
-#amin-os .amin-ui .ro-card {text-align:left}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui :is(.dm-header,.wsh-panel-heading) :is(strong,span) {font:inherit}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-reply-heading h2 {display:none}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-reply-heading p {margin:0;color:var(--amin-muted);font:inherit}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui #reply-options-panel .ro-controls {margin:var(--amin-gap) 0}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui :is(.amin-status-embedded,#reply-options-panel) {padding:0 var(--amin-gap) var(--amin-gap)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .dm-header {margin:0 var(--amin-gap)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .dm-tabs {margin:0 var(--amin-gap) var(--amin-gap)}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .dm-page {padding:var(--amin-gap)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .dm-savebar {background:var(--amin-card);padding:var(--amin-gap);border-top:1px solid var(--amin-line)}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .wsh-body {min-height:0}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .wsh-quick-status:empty {display:none}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .ro-card {text-align:left}
 html[data-wsh-frame][data-amin-surface] :is(body,.hud) {font-family:var(--amin-ui-family)!important}
 html[data-wsh-frame][data-amin-surface] header {padding:0;border:0}
 html[data-wsh-frame][data-amin-surface] header :is(.eyebrow,h1,.sub) {display:none}
-:is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) button.project-toggle {background:transparent!important;border:0!important;text-align:left;padding:0;min-height:30px}
+:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button.project-toggle {background:transparent!important;border:0!important;text-align:left;padding:0;min-height:30px}
 html[data-wsh-frame][data-amin-surface] :is(body,.hud) {scrollbar-width:thin;scrollbar-color:var(--amin-line) transparent}
 html[data-wsh-frame][data-amin-surface] #scene {margin:var(--amin-gap) 0}
 html[data-wsh-frame][data-amin-surface] .row {border-color:var(--amin-line)}
 html[data-wsh-frame][data-amin-surface] #status.error {color:var(--amin-text)!important;border-inline-start:3px solid var(--amin-accent)}
-#amin-os .amin-effects {min-width:0}
-#amin-os .amin-ui .amin-notice {position:static;inset:auto;display:block;min-height:0;height:auto;width:auto;z-index:auto;text-align:start}
-#amin-os .amin-effects .amin-card {margin:var(--amin-gap) 0}
-#amin-os .amin-effects label {display:block;margin:var(--amin-gap) 0;color:var(--amin-muted)}
-#amin-os .amin-effects pre {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:360px;overflow:auto}
-#amin-os .amin-effects p {overflow-wrap:anywhere}
-#amin-os .amin-effects [role=tabpanel]>div>button {margin:4px}
-#amin-os .amin-ability-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-#amin-os .amin-ability-tile {grid-column:span 2;min-width:0;overflow:hidden;border-radius:var(--amin-radius);border:1px solid var(--amin-line)}
-#amin-os .amin-ability-tile[data-size=small] {grid-column:span 1}
-#amin-os .amin-ability-tile[data-size=wide] {grid-column:span 4}
-#amin-os .amin-ui .amin-ability-tile .amin-ability-launch {display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;width:100%;min-height:118px;gap:10px;padding:var(--amin-gap);border:0!important;border-radius:0!important;text-align:left;overflow-wrap:anywhere}
-#amin-os .amin-ui .amin-ability-tile[data-tone=accent] .amin-ability-launch {background:var(--amin-accent)!important;color:var(--amin-ink)!important}
-#amin-os .amin-ui .amin-ability-tile[data-tone=soft] .amin-ability-launch {background:color-mix(in srgb,var(--amin-accent) 18%,var(--amin-card))!important}
-#amin-os .amin-ui .amin-ability-tile[data-tone=plain] .amin-ability-launch {background:var(--amin-card)!important}
-#amin-os .amin-ability-icon {font-size:26px;line-height:1.2}
-#amin-os .amin-ability-target h3 {font-size:calc(var(--amin-font) + 8px)}
-#amin-os .amin-target-fields {display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:10px}
-#amin-os .amin-effects .amin-ability-target {padding:12px;margin:10px 0}
-#amin-os .amin-effects .amin-ability-target h3 {margin:3px 0 8px}
-#amin-os .amin-effects .amin-target-fields label {margin:0;font-size:calc(var(--amin-font) - 1px)}
-#amin-os .amin-ability-tile .amin-toolbar {margin:0;padding:4px;gap:4px}
-#amin-os .amin-ability-grid.is-editing .amin-ability-launch {touch-action:none;cursor:grab}
-#amin-os .amin-ability-tile.is-dragging {outline:2px solid var(--amin-accent);opacity:.65}
-#amin-os .amin-information .amin-card {margin:var(--amin-gap) 0;padding:var(--amin-gap)}
-#amin-os .amin-information label {display:block;margin:var(--amin-gap) 0;color:var(--amin-muted)}
-#amin-os .amin-information .amin-info-check {display:flex;align-items:center;gap:8px}
-#amin-os .amin-information pre,#amin-os .amin-information blockquote {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:340px;overflow:auto;margin:8px 0;padding:8px}
-#amin-os .amin-information blockquote {border-inline-start:2px solid var(--amin-accent);color:var(--amin-muted)}
-#amin-os .amin-info-field {border-top:1px solid var(--amin-line);padding:var(--amin-gap) 0;overflow-wrap:anywhere}
-#amin-os .amin-info-field>strong {font-size:calc(var(--amin-font) + 1px)}
-#amin-os .amin-info-badge {display:inline-block;margin-inline-start:8px;padding:2px 7px;background:var(--amin-control);color:var(--amin-muted);border-radius:var(--amin-radius)}
-#amin-os .amin-information p {white-space:pre-wrap;overflow-wrap:anywhere}
-#amin-os .amin-information a {color:var(--amin-accent-text,var(--amin-accent));text-decoration:underline}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects {min-width:0}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-notice {position:static;inset:auto;display:block;min-height:0;height:auto;width:auto;z-index:auto;text-align:start}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects .amin-card {margin:var(--amin-gap) 0}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects label {display:block;margin:var(--amin-gap) 0;color:var(--amin-muted)}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects pre {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:360px;overflow:auto}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects p {overflow-wrap:anywhere}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects [role=tabpanel]>div>button {margin:4px}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-tile {grid-column:span 2;min-width:0;overflow:hidden;border-radius:var(--amin-radius);border:1px solid var(--amin-line)}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-tile[data-size=small] {grid-column:span 1}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-tile[data-size=wide] {grid-column:span 4}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-ability-tile .amin-ability-launch {display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;width:100%;min-height:118px;gap:10px;padding:var(--amin-gap);border:0!important;border-radius:0!important;text-align:left;overflow-wrap:anywhere}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-ability-tile[data-tone=accent] .amin-ability-launch {background:var(--amin-accent)!important;color:var(--amin-ink)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-ability-tile[data-tone=soft] .amin-ability-launch {background:color-mix(in srgb,var(--amin-accent) 18%,var(--amin-card))!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui .amin-ability-tile[data-tone=plain] .amin-ability-launch {background:var(--amin-card)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-icon {font-size:26px;line-height:1.2}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-target h3 {font-size:calc(var(--amin-font) + 8px)}
+:is(#amin-os,.amin-extra-floor-window) .amin-target-fields {display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:10px}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects .amin-ability-target {padding:12px;margin:10px 0}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects .amin-ability-target h3 {margin:3px 0 8px}
+:is(#amin-os,.amin-extra-floor-window) .amin-effects .amin-target-fields label {margin:0;font-size:calc(var(--amin-font) - 1px)}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-tile .amin-toolbar {margin:0;padding:4px;gap:4px}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-grid.is-editing .amin-ability-launch {touch-action:none;cursor:grab}
+:is(#amin-os,.amin-extra-floor-window) .amin-ability-tile.is-dragging {outline:2px solid var(--amin-accent);opacity:.65}
+:is(#amin-os,.amin-extra-floor-window) .amin-information .amin-card {margin:var(--amin-gap) 0;padding:var(--amin-gap)}
+:is(#amin-os,.amin-extra-floor-window) .amin-information label {display:block;margin:var(--amin-gap) 0;color:var(--amin-muted)}
+:is(#amin-os,.amin-extra-floor-window) .amin-information .amin-info-check {display:flex;align-items:center;gap:8px}
+:is(#amin-os,.amin-extra-floor-window) .amin-information pre,:is(#amin-os,.amin-extra-floor-window) .amin-information blockquote {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:340px;overflow:auto;margin:8px 0;padding:8px}
+:is(#amin-os,.amin-extra-floor-window) .amin-information blockquote {border-inline-start:2px solid var(--amin-accent);color:var(--amin-muted)}
+:is(#amin-os,.amin-extra-floor-window) .amin-info-field {border-top:1px solid var(--amin-line);padding:var(--amin-gap) 0;overflow-wrap:anywhere}
+:is(#amin-os,.amin-extra-floor-window) .amin-info-field>strong {font-size:calc(var(--amin-font) + 1px)}
+:is(#amin-os,.amin-extra-floor-window) .amin-info-badge {display:inline-block;margin-inline-start:8px;padding:2px 7px;background:var(--amin-control);color:var(--amin-muted);border-radius:var(--amin-radius)}
+:is(#amin-os,.amin-extra-floor-window) .amin-information p {white-space:pre-wrap;overflow-wrap:anywhere}
+:is(#amin-os,.amin-extra-floor-window) .amin-information a {color:var(--amin-accent-text,var(--amin-accent));text-decoration:underline}
 
 /* Windows 10 window surfaces, including the embedded status document theme. */
-#amin-os[data-amin-theme^=win10] .amin-drawer{border-radius:0!important;border:1px solid #626262;box-shadow:0 10px 30px #0007}
-#amin-os[data-amin-theme^=win10] .amin-head{background:var(--amin-card);padding:10px 14px;border-bottom:1px solid var(--amin-line)}
-#amin-os[data-amin-theme^=win10] .amin-head .amin-icon-button{border-radius:0!important;width:38px;height:30px}
-#amin-os[data-amin-theme^=win10] .amin-app-nav{border-bottom:1px solid var(--amin-line);align-items:center}
-#amin-os[data-amin-theme^=win10] .amin-current-app{font:400 20px/1.3 'Segoe UI','Microsoft YaHei',sans-serif;white-space:nowrap}
-#amin-os[data-amin-theme^=win10] .amin-app-nav .amin-home-tab{border-radius:0!important}
-#amin-os [data-amin-theme^=win10],#amin-os[data-amin-theme^=win10] .amin-home{font-family:'Segoe UI','Microsoft YaHei',sans-serif}
-#amin-os .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea){font-family:'Segoe UI','Microsoft YaHei',sans-serif!important;border-radius:0!important}
-#amin-os .amin-ui[data-amin-theme^=win10] .amin-tabs{gap:4px}
-#amin-os .amin-ui[data-amin-theme^=win10] .amin-tabs button[aria-selected=true]{background:transparent!important;border-color:transparent!important;border-bottom:3px solid #0078d4!important;color:var(--amin-text)!important}
-#amin-os .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea):focus-visible{outline:2px solid #60b8ff;outline-offset:1px}
+:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-drawer{border-radius:0!important;border:1px solid #626262;box-shadow:0 10px 30px #0007}
+:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-head{background:var(--amin-card);padding:10px 14px;border-bottom:1px solid var(--amin-line)}
+:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-head .amin-icon-button{border-radius:0!important;width:38px;height:30px}
+:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-app-nav{border-bottom:1px solid var(--amin-line);align-items:center}
+:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-current-app{font:400 20px/1.3 'Segoe UI','Microsoft YaHei',sans-serif;white-space:nowrap}
+:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-app-nav .amin-home-tab{border-radius:0!important}
+:is(#amin-os,.amin-extra-floor-window) [data-amin-theme^=win10],:is(#amin-os,.amin-extra-floor-window)[data-amin-theme^=win10] .amin-home{font-family:'Segoe UI','Microsoft YaHei',sans-serif}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea){font-family:'Segoe UI','Microsoft YaHei',sans-serif!important;border-radius:0!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui[data-amin-theme^=win10] .amin-tabs{gap:4px}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui[data-amin-theme^=win10] .amin-tabs button[aria-selected=true]{background:transparent!important;border-color:transparent!important;border-bottom:3px solid #0078d4!important;color:var(--amin-text)!important}
+:is(#amin-os,.amin-extra-floor-window) .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea):focus-visible{outline:2px solid #60b8ff;outline-offset:1px}
 
 body .amin-floor[data-amin-surface][data-amin-theme^=win10]>.amin-floor-toolbar>button{color:var(--amin-text)!important}

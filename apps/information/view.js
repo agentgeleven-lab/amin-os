@@ -1,19 +1,20 @@
 import {getAI} from '../../ai/service.js';
-import {createInformation} from './service.js';
+import {getSharedService} from './service.js';
 import {current,apply,diff,compile,matches,path,fieldKey,groupRecords,resetRecord,archive} from './model.js';
 import {catalog,searchEndpoint} from './sources.js';
 import {generateRecord,simulate} from './generator.js';
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 const STATUS={known:'资料记载',inferred:'待确认推测',invented:'新增设定',unknown:'未知',edited:'手动改写'};
 export function mount(target){
- const api=createInformation(()=>globalThis.SillyTavern?.getContext?.());const page=node('div',null,'amin-page amin-information'),intro=node('div','查看资料，编辑设定，预览后应用。','amin-context'),tabs=node('nav',null,'amin-tabs'),notice=node('div',null,'amin-notice'),body=node('section');tabs.setAttribute('aria-label','信息面板页面');tabs.setAttribute('role','tablist');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');body.id='amin-information-body';body.setAttribute('role','tabpanel');page.append(intro,tabs,notice,body);target.append(page);
+ const instanceId='amin-'+crypto.randomUUID();
+ const api=getSharedService();const page=node('div',null,'amin-page amin-information'),intro=node('div','查看资料，编辑设定，预览后应用。','amin-context'),tabs=node('nav',null,'amin-tabs'),notice=node('div',null,'amin-notice'),body=node('section');tabs.setAttribute('aria-label','信息面板页面');tabs.setAttribute('role','tablist');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');body.id=instanceId+'-body';body.setAttribute('role','tabpanel');page.append(intro,tabs,notice,body);target.append(page);
  let tab='资料面板',draft=null,base=null,token=null,editing=false,review=false,simulation=null,search=null,controller=null,epoch=0,bookList=[],loaded=false,selectedId='',drafts=new Map();
  const options={name:'',kind:'person',requirement:'',allowInvent:false,scope:'local',books:[],includeCard:true,includeChat:true,keywords:'',sourceLimit:90000,webQuery:'',webKey:'',webEndpoint:'https://api.tavily.com/search'};
  const chatDrafts=new Map();
  let taskNotice='';const say=text=>{taskNotice=text;notice.textContent=text;};let chatScope;try{chatScope=api.capture();}catch{}
  function stop(){epoch++;controller?.abort();controller=null;}
  const button=(parent,text,fn,primary=false)=>{const b=node('button',text,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
- const labels=['资料面板','生成资料','历史版本','检索设置'];const tabButtons=labels.map((name,i)=>{const b=button(tabs,name,()=>{tab=name;render();});b.id='amin-information-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;});
+ const labels=['资料面板','生成资料','历史版本','检索设置'];const tabButtons=labels.map((name,i)=>{const b=button(tabs,name,()=>{tab=name;render();});b.id=instanceId+'-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;});
  tabs.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const i=labels.indexOf(tab),next=e.key==='Home'?0:e.key==='End'?3:(i+(e.key==='ArrowRight'?1:3))%4;tab=labels[next];render();tabButtons[next].focus();};
  function input(parent,label,value,update,{area=false,type='text',placeholder=''}={}){const row=node('label',label),e=node(area?'textarea':'input');if(!area)e.type=type;e.value=value??'';e.placeholder=placeholder;e.setAttribute('aria-label',label);if(area)e.rows=4;e.oninput=()=>update(e.value);row.append(e);parent.append(row);return e;}
  function select(parent,label,value,values,update){const row=node('label',label),e=node('select');e.setAttribute('aria-label',label);for(const [v,text]of values){const o=node('option',text);o.value=v;e.append(o);}e.value=value;e.onchange=()=>update(e.value);row.append(e);parent.append(row);return e;}
@@ -72,7 +73,7 @@ export function mount(target){
   const d=node('details');d.append(node('summary','查看当前剧情提醒'));try{d.append(node('pre',compile(s,api.context().chat)||'无提醒'));}catch(e){d.append(node('p',e.message));}r.append(d);
  }
  function render(){body.replaceChildren();for(const b of tabButtons){const on=b.textContent===tab;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;if(on)body.setAttribute('aria-labelledby',b.id);}notice.textContent=taskNotice||api.status();try{if(tab==='资料面板')board();else if(tab==='生成资料')generation();else if(tab==='历史版本')history();else settings();}catch(e){say(e.message);}}
- api.subscribe(()=>{if(!controller&&!taskNotice)notice.textContent=api.status();});const ctx=api.context(),events=ctx.eventTypes??ctx.event_types??{};
- if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{let now;try{now=api.capture();}catch{}if(now&&chatScope&&now.meta===chatScope.meta&&now.identity===chatScope.identity)return;if(chatScope){keepDraft();chatDrafts.set(chatScope.identity,{drafts:new Map(drafts),selectedId});}chatScope=now;taskNotice='已切换聊天，旧聊天的任务已取消';stop();draft=null;base=null;token=null;search=null;simulation=null;drafts.clear();selectedId='';bookList=[];loaded=false;options.books=[];options.name='';options.requirement='';options.webQuery='';const cached=chatDrafts.get(now?.identity);if(cached){drafts=new Map(cached.drafts);for(const entry of drafts.values()){const fresh=api.capture();if(entry.token?.path===fresh.path&&entry.token?.revision===fresh.revision)entry.token=fresh;}selectedId=cached.selectedId;}if(selectedId){choose(selectedId);}else render();});
- render();return {open(){render();}};
+ const unsubscribe=api.subscribe(()=>{if(!controller&&!taskNotice)notice.textContent=api.status();});const ctx=api.context(),events=ctx.eventTypes??ctx.event_types??{};
+ const chatChanged=()=>{let now;try{now=api.capture();}catch{}if(now&&chatScope&&now.meta===chatScope.meta&&now.identity===chatScope.identity)return;if(chatScope){keepDraft();chatDrafts.set(chatScope.identity,{drafts:new Map(drafts),selectedId});}chatScope=now;taskNotice='已切换聊天，旧聊天的任务已取消';stop();draft=null;base=null;token=null;search=null;simulation=null;drafts.clear();selectedId='';bookList=[];loaded=false;options.books=[];options.name='';options.requirement='';options.webQuery='';const cached=chatDrafts.get(now?.identity);if(cached){drafts=new Map(cached.drafts);for(const entry of drafts.values()){const fresh=api.capture();if(entry.token?.path===fresh.path&&entry.token?.revision===fresh.revision)entry.token=fresh;}selectedId=cached.selectedId;}if(selectedId){choose(selectedId);}else render();};if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,chatChanged);
+ render();return {open(){render();},dispose(){stop();unsubscribe();if(events.CHAT_CHANGED)ctx.eventSource?.removeListener?.(events.CHAT_CHANGED,chatChanged);page.remove();}};
 }

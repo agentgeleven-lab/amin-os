@@ -19,3 +19,6 @@ export function createInformation(context){
  if(supported)for(const [key,fn]of Object.entries(handlers))if(events[key])source.on(events[key],fn);
  return {context,capture,check,save,saveRecord,library:()=>library(context()),read:()=>read(context()),status:()=>supported?message:'当前前端缺少自动提示接口，可编辑面板并查看提示预览',subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();for(const [key,fn]of Object.entries(handlers))if(events[key])source?.removeListener?.(events[key],fn);}};
 }
+
+let sharedService;
+export const getSharedService=()=>sharedService??= createInformation(()=>globalThis.SillyTavern?.getContext?.());
