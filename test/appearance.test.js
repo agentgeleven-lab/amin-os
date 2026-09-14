@@ -47,3 +47,10 @@ test('desktop style migrates independently and persists without changing app the
  const ctx={extensionSettings:{},saveSettingsDebounced(){}};const service=createAppearance(()=>ctx);const next=service.snapshot();next.desktop.style='win10';service.save(next);
  const reloaded=createAppearance(()=>ctx);assert.equal(reloaded.snapshot().desktop.style,'win10');assert.deepEqual(reloaded.snapshot().global,defaults().global);assert.throws(()=>validate({...next,desktop:{style:'invalid'}}));
 });
+
+test('Windows 10 window pairing follows desktop choice and preserves independent app themes',()=>{
+ const ctx={extensionSettings:{},saveSettingsDebounced(){}};const a=createAppearance(()=>ctx);const d=a.snapshot();d.desktop.style='win10';a.save(d);
+ assert.equal(a.resolve('').theme,'win10');assert.equal(a.resolve('information').radius,0);
+ d.apps.map={...d.global,theme:'paper'};a.save(d);assert.equal(a.resolve('map').theme,'paper');assert.equal(a.resolve('information').theme,'win10');
+ d.desktop.windowTheme='current';a.save(d);assert.equal(a.resolve('information').theme,d.global.theme);
+});
