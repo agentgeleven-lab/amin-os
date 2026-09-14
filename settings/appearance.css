@@ -79,3 +79,14 @@
 .dynamic-map-panel[data-amin-surface] :is(input,select,textarea,button){border-radius:var(--amin-radius)!important}
 @container(max-width:520px){.amin-floor>[data-floor-app]{--amin-floor-height:var(--amin-floor-mobile)}}
 @media(max-width:600px){.amin-floor>[data-floor-app]{--amin-floor-height:var(--amin-floor-mobile)}}
+
+/* Brand uses currentColor: follows every global palette, without raster backgrounds. */
+#amin-os[data-amin-surface] .amin-brand{gap:12px;align-items:center;min-width:0}
+#amin-os[data-amin-surface] .amin-brand-icon{display:grid;place-items:center;width:42px;height:40px;flex:0 0 42px;padding:0;border:0;border-radius:0;background:transparent;color:var(--amin-accent);line-height:1}
+#amin-os .amin-orbit-mark{display:block;width:100%;height:100%;overflow:visible;pointer-events:none}
+#amin-os[data-amin-surface] .amin-mark{display:grid;place-items:center;width:29px;height:27px;flex:0 0 29px;font-size:inherit;line-height:1;color:var(--amin-accent)}
+#amin-os[data-amin-surface] .amin-launcher{justify-content:center;align-items:center;gap:8px;padding:9px 11px}
+#amin-os[data-amin-surface] .amin-launcher-name{font-size:clamp(11px,var(--amin-font),14px);line-height:1;letter-spacing:0;white-space:nowrap}
+#amin-os[data-amin-surface] .amin-brand>div{min-width:0;line-height:1.35}
+#amin-os[data-amin-surface] .amin-brand>div>div:first-child{font-size:calc(var(--amin-font) + 4px);font-weight:500}
+#amin-os[data-amin-surface] .amin-head-note{margin-top:3px;letter-spacing:1.2px;font-size:clamp(9px,calc(var(--amin-font) - 3px),11px)}
