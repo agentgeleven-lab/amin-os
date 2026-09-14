@@ -91,3 +91,20 @@ html[data-wsh-frame][data-amin-surface] #status.error {color:var(--amin-text)!im
 #amin-os .amin-effects pre {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:360px;overflow:auto}
 #amin-os .amin-effects p {overflow-wrap:anywhere}
 #amin-os .amin-effects [role=tabpanel]>div>button {margin:4px}
+#amin-os .amin-ability-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+#amin-os .amin-ability-tile {grid-column:span 2;min-width:0;overflow:hidden;border-radius:var(--amin-radius);border:1px solid var(--amin-line)}
+#amin-os .amin-ability-tile[data-size=small] {grid-column:span 1}
+#amin-os .amin-ability-tile[data-size=wide] {grid-column:span 4}
+#amin-os .amin-ui .amin-ability-tile .amin-ability-launch {display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;width:100%;min-height:118px;gap:10px;padding:var(--amin-gap);border:0!important;border-radius:0!important;text-align:left;overflow-wrap:anywhere}
+#amin-os .amin-ui .amin-ability-tile[data-tone=accent] .amin-ability-launch {background:var(--amin-accent)!important;color:var(--amin-ink)!important}
+#amin-os .amin-ui .amin-ability-tile[data-tone=soft] .amin-ability-launch {background:color-mix(in srgb,var(--amin-accent) 18%,var(--amin-card))!important}
+#amin-os .amin-ui .amin-ability-tile[data-tone=plain] .amin-ability-launch {background:var(--amin-card)!important}
+#amin-os .amin-ability-icon {font-size:26px;line-height:1.2}
+#amin-os .amin-ability-target h3 {font-size:calc(var(--amin-font) + 8px)}
+#amin-os .amin-target-fields {display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:10px}
+#amin-os .amin-effects .amin-ability-target {padding:12px;margin:10px 0}
+#amin-os .amin-effects .amin-ability-target h3 {margin:3px 0 8px}
+#amin-os .amin-effects .amin-target-fields label {margin:0;font-size:calc(var(--amin-font) - 1px)}
+#amin-os .amin-ability-tile .amin-toolbar {margin:0;padding:4px;gap:4px}
+#amin-os .amin-ability-grid.is-editing .amin-ability-launch {touch-action:none;cursor:grab}
+#amin-os .amin-ability-tile.is-dragging {outline:2px solid var(--amin-accent);opacity:.65}
