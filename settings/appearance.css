@@ -103,9 +103,10 @@
 #amin-os .amin-icon-button .amin-collapse-mark{display:block;width:18px;height:18px;flex:none;margin:0;padding:0;position:static;transform:none;pointer-events:none}
 #amin-os .amin-brand-icon .amin-orbit-mark,#amin-os .amin-mark .amin-orbit-mark{margin:0;padding:0;position:static;transform:none;align-self:center;justify-self:center;max-width:none;max-height:none}
 
-/* Approved calligraphy artwork; alpha mask inherits the global theme ink. */
-#amin-os[data-amin-surface] .amin-wordmark,#amin-os[data-amin-surface] .amin-launcher-name{display:block;background:var(--amin-text);-webkit-mask:url('../assets/brand/wordmark-mask.svg') center/contain no-repeat;mask:url('../assets/brand/wordmark-mask.svg') center/contain no-repeat;font-size:0!important;line-height:0!important;color:transparent!important;letter-spacing:0;flex-shrink:0}
-#amin-os[data-amin-surface] .amin-wordmark{width:120px;height:40px}
-#amin-os[data-amin-surface] .amin-launcher-name{width:76px;height:26px}
-#amin-os[data-amin-surface] .amin-launcher{gap:6px;padding:9px 8px}
+/* Real local font for readable branding at small sizes. */
+@font-face{font-family:'Amin Courgette';src:url('../assets/fonts/Courgette-Regular.ttf') format('truetype');font-weight:400;font-style:normal;font-display:swap}
+#amin-os[data-amin-surface] .amin-brand>div>.amin-wordmark:first-child,#amin-os[data-amin-surface] .amin-launcher-name{display:block;font-family:'Amin Courgette',Georgia,serif;font-weight:400;font-style:normal;font-synthesis:none;letter-spacing:0;white-space:nowrap;color:var(--amin-text);line-height:1.3}
+#amin-os[data-amin-surface] .amin-brand>div>.amin-wordmark:first-child{font-size:clamp(20px,calc(var(--amin-font) + 9px),26px)}
+#amin-os[data-amin-surface] .amin-launcher-name{font-size:clamp(13px,calc(var(--amin-font) + 1px),15px)}
+#amin-os[data-amin-surface] .amin-launcher{gap:8px;padding:9px 10px}
 #amin-os[data-amin-surface] .amin-launcher .amin-mark{width:22px;height:24px;flex-basis:22px}
