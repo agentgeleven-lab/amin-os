@@ -72,3 +72,14 @@
 #amin-os #reply-options-settings{padding:5px 0 12px;color:var(--amin-text);}
 #amin-os #reply-options-settings input,#amin-os #reply-options-settings select,#amin-os #reply-options-settings textarea{background:#253139;color:#e8ecea;max-width:100%;border-color:#ffffff25;}
 @media(max-width:480px){#amin-os .amin-home{padding:22px 18px;}#amin-os .amin-app-card{padding:16px 12px;}#amin-os .amin-app-nav{padding:9px 10px;}#amin-os .amin-app-nav button{padding:8px 10px;}#amin-os .amin-intro h2{font-size:23px;}}
+
+#amin-os .amin-ai{padding:18px;overflow:auto;color:var(--amin-text,#eee)}
+#amin-os .amin-ai section{margin:18px 0;padding:14px;border:1px solid #ffffff22;border-radius:14px}
+#amin-os .amin-ai label{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+#amin-os .amin-ai input,#amin-os .amin-ai select,#amin-os .amin-ai textarea{width:100%;box-sizing:border-box;background:#20292d;color:#eee;border:1px solid #ffffff33;border-radius:7px;padding:8px}
+#amin-os .amin-ai input[type=checkbox]{width:20px;height:20px}
+#amin-os .amin-ai button{background:#30423f;color:#dcfff5;border:1px solid #628f82;border-radius:8px;padding:8px;margin:4px;cursor:pointer}
+#amin-os .amin-ai pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-height:300px;overflow:auto}
+#amin-os .amin-ai p{font-size:13px;line-height:1.6;opacity:.85}
+#amin-os .amin-ai .dm-route{border-top:1px solid #ffffff22;padding-top:12px}
+#amin-os .amin-app-nav{flex-wrap:wrap}

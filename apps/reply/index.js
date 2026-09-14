@@ -1,3 +1,4 @@
+import {getAI} from '../../ai/service.js';
 import { normalizeSettings, chatStamp, collectContext, generateOptions, inputElement, DraftSelection, waitForResult } from './generator.js';
 const KEY='reply_options_mvp';
 const context=()=>globalThis.SillyTavern?.getContext?.();
@@ -28,7 +29,8 @@ export function mount({ target } = {}) {
         if(type==='textarea')el.maxLength=key==='prompt'?4000:600;
         el.addEventListener('change',()=>{settings=normalizeSettings({...settings,[key]:type==='checkbox'?el.checked:el.value});if(type!=='checkbox')el.value=settings[key];save();invalidate('设置已保存，请重新生成。');});row.append(el);settingsBox.append(row);
     }
-    field('count','选项数量','number');field('depth','最近聊天条数','number');field('timeout','等待上限（秒）','number');
+    if(getAI())button('AI 设置 · 全局 API 与预设',()=>globalThis.AminOS?.openApp('ai'),settingsBox);
+    field('count','选项数量','number');field('depth','最近聊天条数','number');
     field('length','回复长度','select',[['short','短：约 1 句'],['medium','中：1–3 句'],['long','长：3–6 句']]);
     field('style','回复形式','select',[['mixed','对白与动作'],['dialogue','仅对白'],['action','动作描写为主']]);
     field('perspective','叙述人称','select',[['auto','跟随上文'],['first','第一人称：我'],['second','第二人称：你'],['third','第三人称：名字']]);
@@ -53,7 +55,7 @@ export function mount({ target } = {}) {
         let sources='正在读取世界书…';
         status.textContent=sources;
         try{
-            const options=await waitForResult(generateOptions(initial,config,{draft:fromDraft?original:'',isCurrent:()=>!current.signal.aborted && ticket===revision && stamp===chatStamp(context()),onContext:(info,lore)=>{sources=`人设：${info.persona?'已读取':'未使用/为空'}；角色：${info.characters.length}；世界书：${lore.books.length} 本 / ${info.world.length} 条`;status.textContent=`生成中… ${sources}`;}}),config.timeout*1000,current.signal);
+            const options=await waitForResult(generateOptions(initial,config,{draft:fromDraft?original:'',signal:current.signal,isCurrent:()=>!current.signal.aborted && ticket===revision && stamp===chatStamp(context()),onContext:(info,lore)=>{sources=`人设：${info.persona?'已读取':'未使用/为空'}；角色：${info.characters.length}；世界书：${lore.books.length} 本 / ${info.world.length} 条`;status.textContent=`生成中… ${sources}`;}}),(getAI()?.capture().config.timeoutSeconds??config.timeout)*1000,current.signal);
             if(ticket!==revision||stamp!==chatStamp(context()))throw new Error('聊天已变化，本次结果已丢弃。');
             for(const option of options){const card=node('button',null,'ro-card');card.type='button';card.setAttribute('aria-pressed','false');card.append(node('strong',option.label),node('span',option.text));card.addEventListener('click',()=>{
                 if(ticket!==revision||stamp!==chatStamp(context()))return invalidate();

@@ -1,6 +1,9 @@
+import {getAI} from '../../ai/service.js';
 import { checkpointState } from './state-checkpoint.js';
 import { mergeUpdates, RELATION_UPDATE_RULES } from './state-tools.js';
 export async function generateStatus(CONFIG, signal) {
+const sharedAI=getAI(),snapshot=sharedAI?.capture();
+if(snapshot) CONFIG={...CONFIG,api:{...CONFIG.api,maxTokens:snapshot.config.maxTokens,timeoutMs:snapshot.config.timeoutSeconds*1000}};
 const LOCK = '__LWB_HUD_BUILDER_V1_RUNNING__';
 if (window[LOCK]) {
   window.toastr?.info('已有状态栏生成任务正在运行，请等待完成。');
@@ -156,7 +159,9 @@ try {
   window.toastr?.info('正在读取 ' + source.世界书.length + ' 本世界书并生成状态栏…');
 
   let text;
-  if (CONFIG.api.baseUrl.trim()) {
+  if (sharedAI) {
+    text = await sharedAI.generate('世界状态',ctx,{prompt,systemPrompt,trimNames:false},{signal:controller.signal,snapshot,data:{card:source.角色卡,books:source.世界书,chat:source.最近对话,request:{操作:JSON.parse(prompt).操作,用户补充要求:CONFIG.instructions,已有状态栏:replacing?null:initial,当前情况补充:source.当前情况补充}}});
+  } else if (CONFIG.api.baseUrl.trim()) {
     if (!CONFIG.api.model.trim()) throw Error('使用独立API时必须填写 model。');
     let endpoint;
     try { endpoint = new URL(CONFIG.api.baseUrl.trim()); }

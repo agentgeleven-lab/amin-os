@@ -1,6 +1,7 @@
 import { clampPosition, drawerPlacement } from './window-state.js';
 
 const APPS=[
+    {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
     {id:'map',name:'地图',sub:'记录地点，探索你的世界',icon:'⌘',color:'mint'},
     {id:'status',name:'世界状态',sub:'角色、关系与剧情的此刻',icon:'◈',color:'lavender'},
     {id:'reply',name:'回复选项',sub:'为下一句话，找一点灵感',icon:'≋',color:'peach'},

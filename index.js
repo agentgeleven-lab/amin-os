@@ -1,3 +1,4 @@
+import {initializeAI} from './ai/service.js';
 import { createShell } from './shell.js';
 
 let instance;
@@ -15,7 +16,11 @@ export function initialize() {
         shell.setBlocked(`检测到旧插件：${existing.join('、')}。请在扩展管理中停用这三个旧插件，然后刷新页面，再使用 Amin os。已有数据会保留。`);
         return shell;
     }
+    ctx.extensionSettings.dynamicMapNamespace ||= crypto.randomUUID();
+    ctx.saveSettingsDebounced?.();
+    initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const apps={
+        ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
         map:()=>import('./apps/map/index.js').then(m=>m.initialize({mount:shell.panes.map,onOpen:()=>shell.showApp('map')})),
         status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.home()})),
         reply:()=>import('./apps/reply/index.js').then(m=>{m.mount({target:shell.panes.reply});return {open(){if(!shell.panes.reply.querySelector('#reply-options-panel'))m.mount({target:shell.panes.reply});if(!shell.panes.reply.querySelector('#reply-options-panel'))throw Error('请等待聊天输入框加载完成后重试。');}};}),
@@ -33,7 +38,7 @@ export function initialize() {
     }
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.1.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.2.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

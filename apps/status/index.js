@@ -261,13 +261,10 @@ function mount() {
     fields[key] = input; wrap.append(input); generationForm.append(wrap); return input;
   }
   const settings = getSettings();
-  field('baseUrl', '独立 API 地址（留空使用酒馆当前连接）').placeholder = 'https://你的服务/v1';
-  field('apiKey', '独立 API 密钥（仅当前页面会话保存）', 'password').autocomplete = 'off';
-  field('model', '独立接口模型 ID');
+  const sharedSettings=document.createElement('button');sharedSettings.type='button';sharedSettings.textContent='AI 设置 · 全局 API 与预设';sharedSettings.onclick=()=>globalThis.AminOS?.openApp('ai');generationForm.append(sharedSettings);
   field('extraBooks', '额外世界书（每行一本）', 'textarea');
   field('updateNote', '当前情况补充（更新数值时使用，可留空）', 'textarea');
   field('instructions', '状态栏要求', 'textarea').placeholder = '例如：仅显示玩家、世界、队伍；不要数值化感情。';
-  field('maxTokens', '最大输出 tokens', 'number').min = '256';
   field('maxSourceChars', '设定字符上限（超过会停止，不会截断）', 'number').min = '1000';
   field('includeGlobalBooks', '包含已启用的全局世界书', 'checkbox');
   Object.entries(settings).forEach(([k,v]) => { if (fields[k]) fields[k].type === 'checkbox' ? fields[k].checked = v : fields[k].value = v; });
@@ -278,7 +275,7 @@ function mount() {
       if (k === 'apiKey') { sessionKey = input.value; continue; }
       s[k] = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value;
     }
-    if (!Number.isFinite(s.maxTokens) || s.maxTokens < 256 || !Number.isFinite(s.maxSourceChars) || s.maxSourceChars < 1000) throw Error('请检查输出长度和设定字符上限。');
+    if (!Number.isFinite(s.maxSourceChars) || s.maxSourceChars < 1000) throw Error('请检查设定字符上限。');
     context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], ...s }; context().saveSettingsDebounced(); return s;
   }
   const actions = node('div', undefined, 'wsh-actions');
@@ -286,7 +283,7 @@ function mount() {
     const b = node('button', label, 'menu_button'); b.type = 'button';
     b.onclick = async () => { try { await fn(); } catch (e) { report.textContent = e.message; notify(e.message, true); } }; actions.append(b); return b;
   }
-  const saveButton = action('保存配置', () => { save(); report.textContent = '配置已保存；密钥刷新页面后需重填。'; });
+  const saveButton = action('保存配置', () => { save(); report.textContent = '状态栏配置已保存；模型与预设在 AI 设置中管理。'; });
   async function generate(mode) {
     if (running) throw Error('生成任务已经运行。');
     if (mode === 'replace' && !confirm('重新生成将替换当前状态栏全部项目，操作前会备份。继续？')) return;
