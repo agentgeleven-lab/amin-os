@@ -84,3 +84,10 @@ html[data-wsh-frame][data-amin-surface] :is(body,.hud) {scrollbar-width:thin;scr
 html[data-wsh-frame][data-amin-surface] #scene {margin:var(--amin-gap) 0}
 html[data-wsh-frame][data-amin-surface] .row {border-color:var(--amin-line)}
 html[data-wsh-frame][data-amin-surface] #status.error {color:var(--amin-text)!important;border-inline-start:3px solid var(--amin-accent)}
+#amin-os .amin-effects {min-width:0}
+#amin-os .amin-ui .amin-notice {position:static;inset:auto;display:block;min-height:0;height:auto;width:auto;z-index:auto;text-align:start}
+#amin-os .amin-effects .amin-card {margin:var(--amin-gap) 0}
+#amin-os .amin-effects label {display:block;margin:var(--amin-gap) 0;color:var(--amin-muted)}
+#amin-os .amin-effects pre {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:360px;overflow:auto}
+#amin-os .amin-effects p {overflow-wrap:anywhere}
+#amin-os .amin-effects [role=tabpanel]>div>button {margin:4px}

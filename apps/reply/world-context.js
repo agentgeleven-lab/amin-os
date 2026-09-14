@@ -45,7 +45,7 @@ export async function hostWorldSettings(ctx) {
     if (ctx.worldInfoSettings) return ctx.worldInfoSettings;
     // The public context exposes loadWorldInfo, but not global/extra-book selection.
     try {
-        const module = await import('../../../world-info.js');
+        const module = await import('/scripts/world-info.js');
         return module.getWorldInfoSettings();
     } catch {
         throw new Error('无法读取当前启用的世界书及角色附加绑定。请使用兼容的酒馆版本，或暂时关闭角色设定与全体世界书。');

@@ -1,3 +1,4 @@
+import {currentPrompt} from '../apps/effects/model.js';
 import { createApiSettings, createApiProfiles, generateMapText } from '../apps/map/src/adapters/generation.js';
 import { createPresetLibrary, compilePreset } from '../apps/map/src/core/generation-presets.js';
 
@@ -27,6 +28,7 @@ export function createAI(storage, namespace) {
         previews: () => [...previews].map(([app, text]) => ({app, text})),
         cancel(id) { tasks.find(t => t.id === id)?.controller.abort(new Error('已从 AI 设置取消任务')); },
         async generate(app, ctx, request, { signal, snapshot, data } = {}) {
+            const effectPrompt=currentPrompt(ctx);
             const captured = snapshot ?? this.capture();
             if(!captured.preset.blocks.some(b=>b.type==='request'&&b.enabled))throw Error('共享预设必须启用“本次要求”块，请在 AI 设置中恢复。');
             const controller = new AbortController();
@@ -35,6 +37,7 @@ export function createAI(storage, namespace) {
             signal?.addEventListener('abort', abort, {once:true});
             const task = {id:crypto.randomUUID(), app, state:'等待模型 / 排队中', controller};
             const messages = [{role:'system',content:request.systemPrompt}, ...compilePreset(captured.preset, data ?? {request:request.prompt})];
+            if(effectPrompt)messages.push({role:'system',content:effectPrompt});
             // Keep each application's output protocol outside editable preset blocks.
             messages.push({role:'system',content:request.systemPrompt});
             previews.set(app, messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n'));

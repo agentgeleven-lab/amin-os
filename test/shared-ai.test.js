@@ -2,9 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createAI,initializeAI} from '../ai/service.js';
 import {generateOptions} from '../apps/reply/generator.js';
+import {KEY,empty,change} from '../apps/effects/model.js';
 const storage=()=>{const m=new Map();return {getItem:k=>m.get(k)??null,setItem:(k,v)=>m.set(k,v),removeItem:k=>m.delete(k),dump:()=>JSON.stringify([...m])};};
 const tick=()=>new Promise(r=>setImmediate(r));
 const request={systemPrompt:'JSON contract',prompt:'complete context'};
+test('shared API includes active effects but never effects from a later floor',async()=>{
+ const ai=createAI(storage(),'effects-route'),chat=[{mes:'one'},{mes:'two'}];
+ const seed={...empty(),skills:[{id:'s',name:'技能',book:'b',entryId:'1',reminder:'EFFECT-RULE'}]};
+ const state=change(seed,chat,'create',{skillId:'s',holder:'a',target:'b',scope:'vision',condition:'manual'}),seen=[];
+ const ctx={chat,chatMetadata:{[KEY]:state},generateRaw:async r=>{seen.push(r.prompt);return 'ok';}};
+ await ai.generate('reply',ctx,request);await ai.generate('reply',{...ctx,chat:chat.slice(0,1)},request);
+ assert.match(seen[0],/EFFECT-RULE/);assert.doesNotMatch(seen[1],/EFFECT-RULE/);
+});
 test('all applications share limits, ordered preset, and captured settings',async()=>{
  const ai=createAI(storage(),'snap'),seen=[];
  ai.settings.save({...ai.settings.snapshot(),maxTokens:1234});
