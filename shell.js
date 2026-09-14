@@ -36,8 +36,6 @@ export function createShell(){
     const panes={},tabs={},handlers={};let tileDesktop;let active='home',opened=false,epoch=0,blocked='',drag=null,suppressClick=false;
     for(const app of APPS){
         const tab=el('button','amin-app-tab',app.name);tab.type='button';tab.dataset.app=app.id;tab.addEventListener('click',()=>showApp(app.id));tabs[app.id]=tab;nav.append(tab);
-        const card=el('button',`amin-app-card amin-${app.color}`);card.type='button';card.dataset.tile=app.id;card.setAttribute('aria-label',`打开${app.name}`);
-        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name));card.title=app.sub;const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));cards.append(card);
         const pane=el('section','amin-app-pane amin-ui');pane.dataset.app=app.id;pane.hidden=true;pane.setAttribute('aria-label',app.name);panes[app.id]=pane;
     }
     const notice=el('div','amin-notice');notice.hidden=true;notice.setAttribute('role','status');
@@ -83,6 +81,6 @@ export function createShell(){
     for(const name of ['pointerup','pointercancel','lostpointercapture'])launcher.addEventListener(name,stop);
     getAppearance()?.subscribe(place);
     window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);place();select('home');
-    tileDesktop=createTileDesktop({home,cards,apps:APPS,openApp:showApp,onLayout:place});
+    tileDesktop=createTileDesktop({home,cards,apps:APPS,createIcon:icon,openApp:showApp,onLayout:place});
     return {panes,open:resume,close,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};
 }

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultTiles,normalizeTiles,moveTile} from '../tile-layout.js';
+import {defaultTiles,normalizeTiles,moveTile,migrateTiles,loadTiles,saveTiles,TILE_KEY,LEGACY_TILE_KEY} from '../tile-layout.js';
 test('corrupt or old layouts retain every application exactly once',()=>{
  assert.deepEqual(normalizeTiles(null),defaultTiles());
- const normalized=normalizeTiles([{id:'reply',size:'wide'},{id:'reply',size:'small'},{id:'map',size:'huge'},{id:'unknown',size:'wide'},null]);
+ const normalized=migrateTiles([{id:'reply',size:'wide'},{id:'reply',size:'small'},{id:'map',size:'huge'},{id:'unknown',size:'wide'},null]);
  assert.deepEqual(normalized.map(t=>t.id),['reply','map','status','information','effects','ai','settings']);
  assert.equal(normalized[0].size,'wide');assert.equal(normalized[1].size,'wide');
 });
@@ -17,4 +17,18 @@ test('drag moves before or after target, keeping sizes and source immutable',()=
 test('saved layout round trips including all three tile sizes',()=>{
  const custom=moveTile(defaultTiles(),'ai','map');custom[0].size='wide';
  assert.deepEqual(normalizeTiles(JSON.parse(JSON.stringify(custom))),custom);
+});
+
+test('custom tile identities allow repeated targets without forcing missing apps back',()=>{
+ const tiles=[{id:'one',target:'map',label:'旅行地图',size:'wide'},{id:'two',target:'map',label:'地点',size:'small'}];
+ assert.deepEqual(normalizeTiles(tiles),tiles);assert.deepEqual(normalizeTiles([]),[]);
+ const moved=moveTile(tiles,'two','one');assert.deepEqual(moved.map(t=>t.id),['two','one']);assert.equal(moved[0].target,'map');assert.equal(tiles[0].id,'one');
+ const corrupted=normalizeTiles([...tiles,{...tiles[0],target:'reply'},{id:'bad',target:'missing'},null]);assert.deepEqual(corrupted,tiles);
+});
+test('storage migration preserves legacy order and customized layouts survive reload and empty state',()=>{
+ const data=new Map([[LEGACY_TILE_KEY,JSON.stringify([{id:'reply',size:'wide'},{id:'map',size:'small'}])]]),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
+ const legacy=loadTiles(storage);assert.equal(legacy[0].target,'reply');assert.equal(legacy[1].size,'small');
+ const custom=[{...legacy[0],id:'custom',target:'information',label:'人物档案'}];saveTiles(storage,custom);assert.deepEqual(loadTiles(storage),custom);
+ saveTiles(storage,[]);assert.deepEqual(loadTiles(storage),[]);assert.ok(data.has(LEGACY_TILE_KEY));
+ data.set(TILE_KEY,'broken');assert.deepEqual(loadTiles(storage),defaultTiles());
 });
