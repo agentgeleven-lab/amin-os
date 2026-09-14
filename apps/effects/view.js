@@ -1,3 +1,5 @@
+import {getAI} from '../../ai/service.js';
+import {draftRule} from './draft.js';
 import {bookCatalog,readBook} from './books.js';
 import {hostWorldSettings} from '../reply/world-context.js';
 import {activeEffects,anchor,belongs,change,compile} from './model.js';
@@ -9,7 +11,8 @@ export function mount(target){
  const tabs=node('div',null,'amin-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','持续效果页面');
  const status=node('div',null,'amin-notice');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
  const body=node('section');body.id='amin-effects-content';body.setAttribute('role','tabpanel');
- page.append(context,tabs,status,body);target.append(page);let selected='技能库',entries=[],books=[],chosenBook='',loadedBook='',loadEpoch=0;
+ page.append(context,tabs,status,body);target.append(page);let selected='技能库',entries=[],books=[],chosenBook='',loadedBook='',loadEpoch=0,draftController=null;
+ const stopDraft=()=>{draftController?.abort();draftController=null;};
  const say=text=>{status.textContent=text;};
  const button=(parent,label,fn,primary=false)=>{const b=node('button',label,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
  const tabButtons=['技能库','生效中','变更记录','提示预览'].map((name,i)=>{
@@ -22,8 +25,21 @@ export function mount(target){
  function finish(text){render();say(text);}
  async function load(){const token=api.capture(),epoch=++loadEpoch;const c=api.check(token);say('读取当前启用的世界书列表…');const config=await hostWorldSettings(c);api.check(token);if(epoch!==loadEpoch)return;books=bookCatalog(c,config);chosenBook='';loadedBook='';entries=[];render();say(books.length?'请选择一本世界书，再读取条目。':'当前没有全局启用或绑定的世界书，请先在酒馆中启用。');}
  async function loadSelected(){if(!chosenBook)throw Error('请先选择世界书');const token=api.capture(),epoch=++loadEpoch;const c=api.check(token),name=chosenBook;const config=await hostWorldSettings(c);api.check(token);if(epoch!==loadEpoch)return;const book=bookCatalog(c,config).find(b=>b.name===name);if(!book)throw Error('这本世界书已停用或解绑，请刷新列表');say('读取「'+name+'」…');const result=await readBook(c,book);api.check(token);if(epoch!==loadEpoch)return;entries=result;loadedBook=name;render();say(`已读取「${name}」：${entries.length} 条有效条目`);}
- function importForm(entry,existing){const token=api.capture();body.replaceChildren();const c=card('关联技能');const name=field(c,'技能名称',existing?.name||entry.title||'未命名技能');const original=node('details');original.append(node('summary','查看世界书原文'),node('pre',entry.content));c.append(original);
+ function importForm(entry,existing){stopDraft();const token=api.capture();body.replaceChildren();const c=card('关联技能');const name=field(c,'技能名称',existing?.name||entry.title||'未命名技能');const original=node('details');original.append(node('summary','查看世界书原文'),node('pre',entry.content));c.append(original);
   const reminder=field(c,'持续提醒规则（可精简，不修改世界书）',existing?.reminder??entry.content,true);c.append(node('p','生效时保存规则快照；世界书以后修改，不会悄悄改变已发动的效果。'));
+  const instruction=field(c,'给 AI 的补充要求（可选）','',true);instruction.placeholder='例如：精简为关键规则，完整保留解除条件。';
+  const actions=node('div',null,'amin-toolbar');c.append(actions);
+  const draftBox=node('section',null,'amin-card');draftBox.hidden=true;const candidate=field(draftBox,'AI 草稿（可修改后采用）','',true);c.append(draftBox);
+  button(draftBox,'采用草稿到规则框',()=>{reminder.value=candidate.value;say('已放入规则框，点击“保存关联”才会保存。');});
+  button(actions,'AI 编写提醒',async()=>{
+   const controller=new AbortController();draftController=controller;cancel.hidden=false;draftBox.hidden=true;say('AI 正在读取所选技能并起草规则…');
+   const check=()=>{api.check(token);if(!c.isConnected)throw Error('规则编辑页已关闭');};
+   try{const result=await draftRule({ai:getAI(),ctx:api.check(token),entry,name:name.value,current:reminder.value,instruction:instruction.value,signal:controller.signal,check});candidate.value=result;draftBox.hidden=false;say('草稿已生成，请检查后采用；原规则尚未修改。');}
+   catch(e){if(c.isConnected)say(controller.signal.aborted?'已取消，原规则未修改':e.message);}
+   finally{cancel.hidden=true;if(draftController===controller)draftController=null;}
+  },true);
+  const cancel=button(actions,'取消生成',()=>{draftController?.abort();});cancel.hidden=true;
+  c.append(node('p','使用 Amin os 的共享 API 和预设。AI 草稿不会自动保存，也不会改动已生效的规则快照。'));
   button(c,'保存关联',async()=>{if(!name.value.trim()||!reminder.value.trim())throw Error('技能名称和提醒规则不能为空');await api.save(token,s=>{if(!existing&&s.skills.some(x=>x.book===entry.book&&x.entryId===entry.id))throw Error('此条目已经关联');if(existing){const skill=s.skills.find(x=>x.id===existing.id);if(!skill)throw Error('技能已不存在');skill.name=name.value.trim();skill.reminder=reminder.value.trim();return s;}s.skills.push({id:crypto.randomUUID(),book:entry.book,entryId:entry.id,name:name.value.trim(),original:entry.content,reminder:reminder.value.trim()});return s;});finish('已关联技能，原世界书未修改');},true);button(c,'返回',render);
  }
  function effectForm(effect){const token=api.capture(),store=api.read();body.replaceChildren();const c=card(effect?'调整指令 / 转让':'建立生效记录');let skill;
@@ -37,6 +53,7 @@ export function mount(target){
   const parts=field(c,'分割与分配','',true);button(c,'确认分割',async()=>{const rows=parts.value.split('\n').filter(x=>x.trim()).map(x=>x.split('|').map(v=>v.trim()));if(rows.length<2||rows.some(x=>x.length!==2||!x[0]||!x[1]))throw Error('至少填写两行，格式为：右手 | 持有者');await api.save(token,s=>{let next=change(s,api.context().chat,'end',{id:effect.id,reason:'分割为：'+rows.map(x=>x[0]).join('、')});for(const [scope,holder]of rows){next=change(next,api.context().chat,'create',{skillId:effect.skill.id,target:effect.target,holder,scope,command:effect.command,condition:effect.condition});next.events.at(-1).effect.parentId=effect.id;next.events.at(-1).effect.skill=structuredClone(effect.skill);}return next;});finish('已分割，子记录保留原规则快照');},true);button(c,'取消',render);
  }
  function render(){
+  stopDraft();
   for(const b of tabButtons){const on=b.textContent===selected;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;if(on)body.setAttribute('aria-labelledby',b.id);}
   body.replaceChildren();status.textContent=api.status();
   try{const store=api.read(),chat=api.context()?.chat??[];

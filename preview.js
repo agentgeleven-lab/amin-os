@@ -7,6 +7,7 @@ const ctx={characterId:0,characters:[{avatar:'amin-preview.png',name:'向导',da
 eventSource:{on(e,f){if(!listeners.has(e))listeners.set(e,new Set());listeners.get(e).add(f);},removeListener(e,f){listeners.get(e)?.delete(f);},async emit(e,...args){for(const f of listeners.get(e)??[])await f(...args);}},
 async saveMetadata(){},saveMetadataDebounced(){},saveSettingsDebounced(){},async saveChat(){},setExtensionPrompt(key,text){if(key!=='amin-os-persistent-effects')return;document.getElementById('preview-effects-prompt')?.replaceChildren(document.createTextNode(text));},async loadWorldInfo(){return {entries:{0:{uid:0,comment:'所有权（演示）',content:'所有权：持有者可声明目标特定层面的所有权。关系持续至主动解除或转让；当前指令变化不自动解除关系。死亡与继承按规则确认。'}}};},
 async generateRaw(request){await new Promise(r=>setTimeout(r,350));
+  if(request.systemPrompt?.includes('持续效果规则编辑助手'))return '适用范围：仅对已确认目标和指定层面生效。\n持续：直到主动解除或转让。\n指令变更不解除所有权关系。\n死亡及继承：依原规则人工确认。';
   if(request.systemPrompt?.includes('回复拟稿助手'))return JSON.stringify(['“那就出发吧。”我跟上她，沿着旧路向山脊走去。','“你来过这里多少次？”我望向观测站，放慢了脚步。','我把地图展开，仔细核对通往山顶的另一条路线。']);
   if(request.systemPrompt?.includes('状态')||request.prompt?.includes('状态栏'))return state('旅人');
   const {createDemoDocument}=await import('./apps/map/src/core/demo.js');return JSON.stringify(createDemoDocument());

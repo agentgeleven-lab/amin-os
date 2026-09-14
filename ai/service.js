@@ -27,8 +27,8 @@ export function createAI(storage, namespace) {
         tasks: () => tasks.map(({controller, ...rest}) => ({...rest})),
         previews: () => [...previews].map(([app, text]) => ({app, text})),
         cancel(id) { tasks.find(t => t.id === id)?.controller.abort(new Error('已从 AI 设置取消任务')); },
-        async generate(app, ctx, request, { signal, snapshot, data } = {}) {
-            const effectPrompt=currentPrompt(ctx);
+        async generate(app, ctx, request, { signal, snapshot, data, includeEffects = true } = {}) {
+            const effectPrompt=includeEffects?currentPrompt(ctx):'';
             const captured = snapshot ?? this.capture();
             if(!captured.preset.blocks.some(b=>b.type==='request'&&b.enabled))throw Error('共享预设必须启用“本次要求”块，请在 AI 设置中恢复。');
             const controller = new AbortController();
