@@ -1,3 +1,4 @@
+import {createTileDesktop} from './tile-desktop.js';
 import {createBrandMark,createCollapseMark} from './brand.js';
 import {getAppearance} from './settings/appearance.js';
 import { clampPosition, drawerPlacement } from './window-state.js';
@@ -27,14 +28,14 @@ export function createShell(){
     const head=el('header','amin-head'),brand=el('div','amin-brand');const brandCopy=el('div');brandCopy.append(el('div','amin-wordmark','Amin os'));const brandMark=el('span','amin-brand-icon');brandMark.append(createBrandMark());brand.append(brandMark,brandCopy);
     const collapse=el('button','amin-icon-button');collapse.append(createCollapseMark());collapse.type='button';collapse.title='收起';collapse.setAttribute('aria-label','收起 Amin os');head.append(brand,collapse);
     const nav=el('nav','amin-app-nav');nav.setAttribute('aria-label','应用导航');
-    const homeButton=el('button','amin-home-tab','⌂');homeButton.type='button';homeButton.title='首页';homeButton.setAttribute('aria-label','Amin os 首页');nav.append(homeButton);
+    const homeButton=el('button','amin-home-tab','←');homeButton.type='button';homeButton.title='返回开始屏';homeButton.setAttribute('aria-label','Amin os 首页');nav.append(homeButton);const appHeading=el('span','amin-current-app');nav.append(appHeading);
     const area=el('div','amin-area'),home=el('div','amin-home');
     const cards=el('div','amin-home-apps');home.append(cards);
-    const panes={},tabs={},handlers={};let active='home',opened=false,epoch=0,blocked='',drag=null,suppressClick=false;
+    const panes={},tabs={},handlers={};let tileDesktop;let active='home',opened=false,epoch=0,blocked='',drag=null,suppressClick=false;
     for(const app of APPS){
         const tab=el('button','amin-app-tab',app.name);tab.type='button';tab.dataset.app=app.id;tab.addEventListener('click',()=>showApp(app.id));tabs[app.id]=tab;nav.append(tab);
-        const card=el('button',`amin-app-card amin-${app.color}`);card.type='button';card.setAttribute('aria-label',`打开${app.name}`);
-        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name));card.title=app.sub;const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));card.addEventListener('click',()=>showApp(app.id));cards.append(card);
+        const card=el('button',`amin-app-card amin-${app.color}`);card.type='button';card.dataset.tile=app.id;card.setAttribute('aria-label',`打开${app.name}`);
+        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name));card.title=app.sub;const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));cards.append(card);
         const pane=el('section','amin-app-pane');pane.dataset.app=app.id;pane.hidden=true;pane.setAttribute('aria-label',app.name);panes[app.id]=pane;
     }
     const notice=el('div','amin-notice');notice.hidden=true;notice.setAttribute('role','status');
@@ -59,13 +60,13 @@ export function createShell(){
     }
     function save(){try{localStorage.setItem(STORE,JSON.stringify(position));}catch{}}
     function open(){opened=true;drawer.hidden=false;launcher.setAttribute('aria-expanded','true');launcher.setAttribute('aria-label','收起 Amin os');place();}
-    function close(){opened=false;drawer.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
-    function select(id){active=id;home.hidden=id!=='home';for(const [key,pane]of Object.entries(panes)){pane.hidden=key!==id;tabs[key].setAttribute('aria-current',key===id?'page':'false');}homeButton.setAttribute('aria-current',id==='home'?'page':'false');notice.hidden=true;}
+    function close(){tileDesktop?.leave();opened=false;drawer.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
+    function select(id){active=id;nav.hidden=id==='home';appHeading.textContent=APPS.find(a=>a.id===id)?.name??'';home.hidden=id!=='home';for(const [key,pane]of Object.entries(panes)){pane.hidden=key!==id;tabs[key].setAttribute('aria-current',key===id?'page':'false');}homeButton.setAttribute('aria-current',id==='home'?'page':'false');notice.hidden=true;}
     function showHome(){epoch++;select('home');open();if(blocked){message.textContent=blocked;retry.hidden=true;notice.hidden=false;}}
     async function showApp(id){
         if(!panes[id])return;
         if(blocked){showHome();return;}
-        select(id);open();const ticket=++epoch;message.textContent='正在打开…';retry.hidden=true;notice.hidden=false;
+        tileDesktop?.leave();select(id);open();const ticket=++epoch;message.textContent='正在打开…';retry.hidden=true;notice.hidden=false;
         try{if(!handlers[id])throw Error('应用仍在加载，请稍后重试。');await handlers[id]();if(ticket===epoch)notice.hidden=true;}
         catch(error){if(ticket===epoch){message.textContent=error.message||'打开失败，请重试。';retry.hidden=false;notice.hidden=false;}}
     }
@@ -80,5 +81,6 @@ export function createShell(){
     for(const name of ['pointerup','pointercancel','lostpointercapture'])launcher.addEventListener(name,stop);
     getAppearance()?.subscribe(place);
     window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);place();select('home');
+    tileDesktop=createTileDesktop({home,cards,apps:APPS,openApp:showApp,onLayout:place});
     return {panes,open:resume,close,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};
 }

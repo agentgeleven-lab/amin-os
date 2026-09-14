@@ -1,3 +1,4 @@
+import {resetTileLayout} from '../tile-layout.js';
 import {getAppearance,PALETTES,APP_NAMES,defaults} from './appearance.js';
 const el=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
 export function mount(target){
@@ -16,7 +17,7 @@ export function mount(target){
    numeric(parent,'背景不透明度 %',value.opacity,70,100,v=>value.opacity=v);numeric(parent,'背景模糊',value.blur,0,24,v=>value.blur=v);
   }
   if(page==='global'){
-   fields(body,draft.global);body.append(el('h3','侧栏尺寸'),el('p','屏幕空间不足时自动缩小；位置保持在可见范围内。'));
+   button(body,'恢复磁贴默认布局',()=>{resetTileLayout();notice.textContent='磁贴已恢复默认顺序和尺寸。';});fields(body,draft.global);body.append(el('h3','侧栏尺寸'),el('p','屏幕空间不足时自动缩小；位置保持在可见范围内。'));
    numeric(body,'桌面侧栏宽度',draft.window.width,340,800,v=>draft.window.width=v);numeric(body,'侧栏最大高度',draft.window.height,400,1000,v=>draft.window.height=v);
   }else if(page==='apps'){
    for(const [id,name]of Object.entries(APP_NAMES)){
