@@ -20,4 +20,10 @@ document.getElementById('preview-switch').onclick=()=>{active=1-active;ctx.chatM
 document.getElementById('preview-group').onclick=()=>{ctx.groupId=ctx.groupId?undefined:'preview-group';ctx.groups=[{id:'preview-group',members:['amin-preview.png']}];ctx.eventSource.emit(events.CHAT_CHANGED);};
 document.getElementById('preview-empty').onclick=()=>{delete ctx.chatMetadata.variables.状态栏;ctx.eventSource.emit(events.CHAT_CHANGED);};
 const testButton=document.createElement('button');testButton.textContent='预览本轮持续提醒';testButton.onclick=()=>ctx.eventSource.emit(events.GENERATION_AFTER_COMMANDS,'normal',{},false);const prompt=document.createElement('pre');prompt.id='preview-effects-prompt';document.body.append(testButton,prompt);
+// Preview-only in-memory transport. Never installed into the actual host entry point.
+const {initializeAI}=await import('./ai/service.js');
+initializeAI(localStorage,settings.dynamicMapNamespace,{
+ resolveConnection:async c=>({...c,enabled:true,baseUrl:'https://preview.invalid/v1',model:'demo'}),
+ fetchImpl:async(_url,options)=>{const body=JSON.parse(options.body);if(options.signal.aborted)throw Error('预览已取消');const content=await ctx.generateRaw({systemPrompt:body.messages[0].content,prompt:body.messages.map(m=>m.content).join('\n')});return {ok:true,json:async()=>({choices:[{message:{content},finish_reason:'stop'}]})};}
+});
 await import('./index.js');

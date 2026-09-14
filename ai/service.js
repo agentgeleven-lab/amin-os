@@ -1,13 +1,16 @@
+import {resolveHostConnection} from './host-connection.js';
+import {waitForSignal} from '../apps/map/src/core/generation-job.js';
 import {currentPrompt} from '../apps/effects/model.js';
 import { createApiSettings, createApiProfiles, generateMapText } from '../apps/map/src/adapters/generation.js';
 import { createPresetLibrary, compilePreset } from '../apps/map/src/core/generation-presets.js';
 
 let shared;
 export const getAI = () => shared;
-export function initializeAI(storage, namespace) {
-    return shared ??= createAI(storage, namespace);
+export function initializeAI(storage, namespace, options) {
+    return shared ??= createAI(storage, namespace, options);
 }
-export function createAI(storage, namespace) {
+export function createAI(storage, namespace, {resolveConnection=resolveHostConnection, fetchImpl} = {}) {
+    const connections=new WeakMap();
     const scope = `amin-os:${namespace}`;
     const settings = createApiSettings(storage, scope);
     const profiles = createApiProfiles(storage, scope);
@@ -43,7 +46,11 @@ export function createAI(storage, namespace) {
             previews.set(app, messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n'));
             tasks.push(task); while(tasks.length > 40 && ['完成','已取消','失败'].includes(tasks[0].state)) tasks.shift(); notify();
             try {
-                const text = await generateMapText(ctx, captured.config, {...request, messages, responseLength:captured.config.maxTokens}, {signal:controller.signal, targetKey:scope});
+                if(!connections.has(captured))connections.set(captured,Promise.resolve().then(()=>resolveConnection(captured.config,ctx)));
+                const timer=setTimeout(()=>controller.abort(new Error('读取 API 配置超时，未应用生成结果')),captured.config.timeoutSeconds*1000);
+                let connection;
+                try {connection=await waitForSignal(()=>connections.get(captured),controller.signal);}finally{clearTimeout(timer);}
+                const text = await generateMapText(ctx, connection, {...request, messages, responseLength:captured.config.maxTokens}, {signal:controller.signal, targetKey:scope, fetchImpl});
                 task.state = '完成'; return text;
             } catch(error) { task.state = controller.signal.aborted ? '已取消' : '失败'; throw error; }
             finally { signal?.removeEventListener('abort', abort); notify(); }

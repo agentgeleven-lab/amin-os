@@ -52,7 +52,7 @@ export async function generateMapText(ctx,config,request,options={}){
  const c=validateApiSettings(config),controller=new AbortController();
  const abort=()=>controller.abort(options.signal.reason);
  if(options.signal?.aborted)abort();options.signal?.addEventListener('abort',abort,{once:true});
- const timer=setTimeout(()=>controller.abort(new Error('模型等待超时，已停止等待；地图未修改')),c.timeoutSeconds*1000);
+ const timer=setTimeout(()=>controller.abort(new Error('模型等待超时，已停止等待；未应用生成结果')),c.timeoutSeconds*1000);
  try{const run=()=>{if(controller.signal.aborted)throw controller.signal.reason;return generateMapTextInternal(ctx,c,request,{...options,signal:controller.signal});};let task;if(options.targetKey&&c.queueMode==='serial'){const previous=targetQueues.get(options.targetKey)??Promise.resolve();task=previous.catch(()=>{}).then(run);const tracked=task.then(()=>{},()=>{}).finally(()=>{if(targetQueues.get(options.targetKey)===tracked)targetQueues.delete(options.targetKey);});targetQueues.set(options.targetKey,tracked);}else task=Promise.resolve().then(run);task.catch(()=>{});return await waitForSignal(()=>task,controller.signal);}
  finally{clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
 }
