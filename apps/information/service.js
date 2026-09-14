@@ -6,8 +6,8 @@ export function createInformation(context){
  function capture(){const c=context();if(!c?.chatMetadata||c.getCurrentChatId?.()==null)throw Error('请先打开一个聊天');return {meta:c.chatMetadata,identity:identity(c),path:JSON.stringify(path(c.chat)),revision:c.chatMetadata[KEY]};}
  function check(t){const c=context();if(t.meta!==c?.chatMetadata||t.identity!==identity(c)||t.path!==JSON.stringify(path(c.chat))||t.revision!==c.chatMetadata[KEY])throw Error('聊天、楼层或面板记录已变化，请重新打开面板后操作');return c;}
  function clear(){context()?.setExtensionPrompt?.(PROMPT_KEY,'',1,0,false);}
- async function save(token,update){if(busy)throw Error('正在保存，请稍候');const c=check(token);if(!c.saveMetadata)throw Error('当前前端缺少聊天保存接口');const old=c.chatMetadata[KEY],next=update(read(c));busy=true;c.chatMetadata[KEY]=next;
-  try{await c.saveMetadata();clear();message='已保存，后续剧情采用已确认的设定';}catch(e){c.chatMetadata[KEY]=old;message='保存失败：'+e.message;throw e;}finally{busy=false;notify();}
+ async function save(token,update,updateLibrary){if(busy)throw Error('正在保存，请稍候');const c=check(token);if(!c.saveMetadata)throw Error('当前前端缺少聊天保存接口');const old=c.chatMetadata[KEY],oldLibrary=c.chatMetadata[LIBRARY_KEY],next=update(read(c)),nextLibrary=updateLibrary?updateLibrary(library(c),next):oldLibrary;busy=true;c.chatMetadata[KEY]=next;if(updateLibrary)c.chatMetadata[LIBRARY_KEY]=nextLibrary;
+  try{await c.saveMetadata();clear();message='已保存，后续剧情采用已确认的设定';}catch(e){c.chatMetadata[KEY]=old;if(updateLibrary)c.chatMetadata[LIBRARY_KEY]=oldLibrary;message='保存失败：'+e.message;throw e;}finally{busy=false;notify();}
  }
  async function saveRecord(token,record,search){
   if(busy)throw Error('正在保存，请稍候');const c=check(token);if(!c.saveMetadata)throw Error('当前前端缺少聊天保存接口');const old=c.chatMetadata[LIBRARY_KEY];busy=true;c.chatMetadata[LIBRARY_KEY]=archive(library(c),record,search);
