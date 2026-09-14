@@ -1,8 +1,12 @@
-# Amin os 0.3.6
+# Amin os 0.3.7
 
 将动态地图、世界状态栏和回复选项整合为一个 SillyTavern / TauriTavern 前端扩展。
 
 默认在右下角显示可拖动的 Amin os 小入口。点击向上展开侧栏，首页有五个应用，顶部可直接切换。收起和切换应用保留当前页面；刷新时默认收起。拖动入口后记住位置，支持方向键移动、Escape 收起；靠近屏幕顶部时向下避让，保证应用内容和入口可见。
+
+## 0.3.7 书法品牌字
+
+顶部与悬浮入口的 Amin os 使用随插件附带的 Allura 英文书法字体，其余文字保持原样。颜色仍随主题变化。字体来自 Google Fonts / Allura Project，采用 SIL Open Font License 1.1，许可证位于 assets/fonts/Allura-OFL.txt。
 
 ## 0.3.6 精细品牌标志
 
