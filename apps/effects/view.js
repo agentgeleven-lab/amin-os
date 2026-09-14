@@ -1,4 +1,5 @@
-import {readWorldContext,hostWorldSettings} from '../reply/world-context.js';
+import {bookCatalog,readBook} from './books.js';
+import {hostWorldSettings} from '../reply/world-context.js';
 import {activeEffects,anchor,belongs,change,compile} from './model.js';
 import {createEffects} from './service.js';
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
@@ -8,7 +9,7 @@ export function mount(target){
  const tabs=node('div',null,'amin-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','持续效果页面');
  const status=node('div',null,'amin-notice');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
  const body=node('section');body.id='amin-effects-content';body.setAttribute('role','tabpanel');
- page.append(context,tabs,status,body);target.append(page);let selected='技能库',entries=[],loadEpoch=0;
+ page.append(context,tabs,status,body);target.append(page);let selected='技能库',entries=[],books=[],chosenBook='',loadedBook='',loadEpoch=0;
  const say=text=>{status.textContent=text;};
  const button=(parent,label,fn,primary=false)=>{const b=node('button',label,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
  const tabButtons=['技能库','生效中','变更记录','提示预览'].map((name,i)=>{
@@ -19,7 +20,8 @@ export function mount(target){
  function select(parent,label,options){const row=node('label',label),input=node('select');input.setAttribute('aria-label',label);for(const [value,text]of options){const o=node('option',text);o.value=value;input.append(o);}row.append(input);parent.append(row);return input;}
  function card(title){const c=node('section',null,'amin-card');c.append(node('h3',title));body.append(c);return c;}
  function finish(text){render();say(text);}
- async function load(){const token=api.capture(),epoch=++loadEpoch;const c=api.check(token);say('读取当前绑定和启用的世界书…');const result=await readWorldContext(c,{character:true,world:true},()=>hostWorldSettings(c));api.check(token);if(epoch!==loadEpoch)return;entries=result.entries;render();say(`已读取 ${result.books.length} 本世界书、${entries.length} 条有效条目`);}
+ async function load(){const token=api.capture(),epoch=++loadEpoch;const c=api.check(token);say('读取当前启用的世界书列表…');const config=await hostWorldSettings(c);api.check(token);if(epoch!==loadEpoch)return;books=bookCatalog(c,config);chosenBook='';loadedBook='';entries=[];render();say(books.length?'请选择一本世界书，再读取条目。':'当前没有全局启用或绑定的世界书，请先在酒馆中启用。');}
+ async function loadSelected(){if(!chosenBook)throw Error('请先选择世界书');const token=api.capture(),epoch=++loadEpoch;const c=api.check(token),name=chosenBook;const config=await hostWorldSettings(c);api.check(token);if(epoch!==loadEpoch)return;const book=bookCatalog(c,config).find(b=>b.name===name);if(!book)throw Error('这本世界书已停用或解绑，请刷新列表');say('读取「'+name+'」…');const result=await readBook(c,book);api.check(token);if(epoch!==loadEpoch)return;entries=result;loadedBook=name;render();say(`已读取「${name}」：${entries.length} 条有效条目`);}
  function importForm(entry,existing){const token=api.capture();body.replaceChildren();const c=card('关联技能');const name=field(c,'技能名称',existing?.name||entry.title||'未命名技能');const original=node('details');original.append(node('summary','查看世界书原文'),node('pre',entry.content));c.append(original);
   const reminder=field(c,'持续提醒规则（可精简，不修改世界书）',existing?.reminder??entry.content,true);c.append(node('p','生效时保存规则快照；世界书以后修改，不会悄悄改变已发动的效果。'));
   button(c,'保存关联',async()=>{if(!name.value.trim()||!reminder.value.trim())throw Error('技能名称和提醒规则不能为空');await api.save(token,s=>{if(!existing&&s.skills.some(x=>x.book===entry.book&&x.entryId===entry.id))throw Error('此条目已经关联');if(existing){const skill=s.skills.find(x=>x.id===existing.id);if(!skill)throw Error('技能已不存在');skill.name=name.value.trim();skill.reminder=reminder.value.trim();return s;}s.skills.push({id:crypto.randomUUID(),book:entry.book,entryId:entry.id,name:name.value.trim(),original:entry.content,reminder:reminder.value.trim()});return s;});finish('已关联技能，原世界书未修改');},true);button(c,'返回',render);
@@ -39,9 +41,11 @@ export function mount(target){
   body.replaceChildren();status.textContent=api.status();
   try{const store=api.read(),chat=api.context()?.chat??[];
    if(selected==='技能库'){
-    button(body,'读取当前世界书',load,true);
+    button(body,'刷新世界书列表',load,true);
+    if(books.length){const picker=select(body,'选择世界书',[['','请选择一本世界书'],...books.map(b=>[b.name,b.name+' · '+b.sources.join(' / ')])]);picker.value=chosenBook;picker.onchange=()=>{chosenBook=picker.value;entries=[];loadedBook='';loadEpoch++;render();};button(body,'读取所选世界书',loadSelected,true).disabled=!chosenBook;}
+    if(loadedBook)body.append(node('p','当前查看：'+loadedBook+(entries.length?'':' · 没有启用的非空条目')));
     for(const s of store.skills){const c=card(s.name);c.append(node('p',s.book+' · 条目 '+s.entryId));const d=node('details');d.append(node('summary','查看保存的原文与提醒规则'),node('pre',s.original),node('pre',s.reminder));c.append(d);button(c,'编辑提醒',()=>importForm({book:s.book,id:s.entryId,title:s.name,content:s.original},s));}
-    if(!store.skills.length)body.append(node('p','先读取当前聊天关联的世界书，选中一条技能保存。只读取启用的非空条目。'));
+    if(!store.skills.length)body.append(node('p','先刷新列表，选择一本全局启用或当前绑定的世界书，再选择技能条目保存。'));
     if(entries.length){const filter=field(body,'筛选世界书条目'),list=node('div');body.append(list);const draw=()=>{list.replaceChildren();for(const e of entries.filter(e=>(e.book+e.title+e.content).includes(filter.value))){button(list,(e.title||'条目 '+e.id)+' · '+e.book,()=>importForm(e));}};filter.oninput=draw;draw();}
    }else if(selected==='生效中'){
     button(body,'建立生效记录',()=>effectForm(),true).disabled=!store.skills.length;
@@ -60,6 +64,6 @@ export function mount(target){
  }
  api.subscribe(()=>{status.textContent=api.status();});
  const ctx=api.context(),events=ctx.eventTypes??ctx.event_types??{};
- if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{entries=[];loadEpoch++;render();});
+ if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{entries=[];books=[];chosenBook='';loadedBook='';loadEpoch++;render();});
  render();return {open(){render();}};
 }
