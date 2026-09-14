@@ -54,3 +54,8 @@ test('Windows 10 window pairing follows desktop choice and preserves independent
  d.apps.map={...d.global,theme:'paper'};a.save(d);assert.equal(a.resolve('map').theme,'paper');assert.equal(a.resolve('information').theme,'win10');
  d.desktop.windowTheme='current';a.save(d);assert.equal(a.resolve('information').theme,d.global.theme);
 });
+
+test('explicit Windows light overrides automatic dark and accent text remains readable',()=>{
+ const ctx={extensionSettings:{},saveSettingsDebounced(){}};const a=createAppearance(()=>ctx),d=a.snapshot();d.desktop.style='win10';d.desktop.windowTheme='win10light';a.save(d);assert.equal(a.resolve('').theme,'win10light');assert.equal(themeVariables(a.resolve(''))['--amin-accent-text'],'#202020');
+ d.desktop.windowTheme='win10';a.save(d);assert.equal(themeVariables(a.resolve(''))['--amin-accent-text'],'#ffffff');assert.equal(themeVariables(a.resolve(''))['--amin-accent'],'#0078d4');
+});

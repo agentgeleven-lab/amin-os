@@ -15,7 +15,7 @@
   box-shadow:none!important; text-shadow:none!important; color-scheme:inherit;
 }
 :is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(input[type=checkbox],input[type=radio]) {
-  min-height:0; width:auto; accent-color:var(--amin-accent);
+  min-height:0; width:auto; accent-color:var(--amin-accent-text,var(--amin-accent));
 }
 :is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) button {cursor:pointer;line-height:1.5!important}
 :is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) button:disabled {opacity:.5!important;cursor:default}
@@ -46,7 +46,7 @@
   background:transparent!important;border-color:transparent!important;
 }
 :is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button[aria-selected=true],button[aria-pressed=true]) {
-  background:var(--amin-card)!important;color:var(--amin-accent)!important;border-color:var(--amin-accent)!important;
+  background:var(--amin-card)!important;color:var(--amin-accent-text,var(--amin-accent))!important;border-color:var(--amin-accent)!important;
 }
 :is(#amin-os .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-notice,.ro-status,.dm-feedback,.wsh-report,#status):not(:empty) {
   color:var(--amin-muted)!important;background:var(--amin-card)!important;
@@ -117,17 +117,19 @@ html[data-wsh-frame][data-amin-surface] #status.error {color:var(--amin-text)!im
 #amin-os .amin-info-field>strong {font-size:calc(var(--amin-font) + 1px)}
 #amin-os .amin-info-badge {display:inline-block;margin-inline-start:8px;padding:2px 7px;background:var(--amin-control);color:var(--amin-muted);border-radius:var(--amin-radius)}
 #amin-os .amin-information p {white-space:pre-wrap;overflow-wrap:anywhere}
-#amin-os .amin-information a {color:var(--amin-accent);text-decoration:underline}
+#amin-os .amin-information a {color:var(--amin-accent-text,var(--amin-accent));text-decoration:underline}
 
 /* Windows 10 window surfaces, including the embedded status document theme. */
-#amin-os[data-amin-theme=win10] .amin-drawer{border-radius:0!important;border:1px solid #626262;box-shadow:0 10px 30px #0007}
-#amin-os[data-amin-theme=win10] .amin-head{background:#191919;padding:10px 14px;border-bottom:1px solid #454545}
-#amin-os[data-amin-theme=win10] .amin-head .amin-icon-button{border-radius:0!important;width:38px;height:30px}
-#amin-os[data-amin-theme=win10] .amin-app-nav{border-bottom:1px solid #454545;align-items:center}
-#amin-os[data-amin-theme=win10] .amin-current-app{font:400 20px/1.3 'Segoe UI','Microsoft YaHei',sans-serif;white-space:nowrap}
-#amin-os[data-amin-theme=win10] .amin-app-nav .amin-home-tab{border-radius:0!important}
-#amin-os [data-amin-theme=win10],#amin-os[data-amin-theme=win10] .amin-home{font-family:'Segoe UI','Microsoft YaHei',sans-serif}
-#amin-os .amin-ui[data-amin-theme=win10] :is(button,input,select,textarea){font-family:'Segoe UI','Microsoft YaHei',sans-serif!important;border-radius:0!important}
-#amin-os .amin-ui[data-amin-theme=win10] .amin-tabs{gap:4px}
-#amin-os .amin-ui[data-amin-theme=win10] .amin-tabs button[aria-selected=true]{background:transparent!important;border-color:transparent!important;border-bottom:3px solid #0078d4!important;color:#fff!important}
-#amin-os .amin-ui[data-amin-theme=win10] :is(button,input,select,textarea):focus-visible{outline:2px solid #60b8ff;outline-offset:1px}
+#amin-os[data-amin-theme^=win10] .amin-drawer{border-radius:0!important;border:1px solid #626262;box-shadow:0 10px 30px #0007}
+#amin-os[data-amin-theme^=win10] .amin-head{background:var(--amin-card);padding:10px 14px;border-bottom:1px solid var(--amin-line)}
+#amin-os[data-amin-theme^=win10] .amin-head .amin-icon-button{border-radius:0!important;width:38px;height:30px}
+#amin-os[data-amin-theme^=win10] .amin-app-nav{border-bottom:1px solid var(--amin-line);align-items:center}
+#amin-os[data-amin-theme^=win10] .amin-current-app{font:400 20px/1.3 'Segoe UI','Microsoft YaHei',sans-serif;white-space:nowrap}
+#amin-os[data-amin-theme^=win10] .amin-app-nav .amin-home-tab{border-radius:0!important}
+#amin-os [data-amin-theme^=win10],#amin-os[data-amin-theme^=win10] .amin-home{font-family:'Segoe UI','Microsoft YaHei',sans-serif}
+#amin-os .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea){font-family:'Segoe UI','Microsoft YaHei',sans-serif!important;border-radius:0!important}
+#amin-os .amin-ui[data-amin-theme^=win10] .amin-tabs{gap:4px}
+#amin-os .amin-ui[data-amin-theme^=win10] .amin-tabs button[aria-selected=true]{background:transparent!important;border-color:transparent!important;border-bottom:3px solid #0078d4!important;color:var(--amin-text)!important}
+#amin-os .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea):focus-visible{outline:2px solid #60b8ff;outline-offset:1px}
+
+body .amin-floor[data-amin-surface][data-amin-theme^=win10]>.amin-floor-toolbar>button{color:var(--amin-text)!important}

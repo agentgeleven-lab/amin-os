@@ -30,3 +30,7 @@
 
 #amin-os .amin-drawer:has(.amin-home[data-backdrop=paper]:not([hidden])){--amin-text:#382619;--amin-muted:#533d28;--amin-card:#f5e7c9;--amin-control:#ead7b4;--amin-line:#76563380;--amin-accent:#634025;--amin-ink:#fff3d8;background:#ddc69e!important;color:#382619;color-scheme:light}
 #amin-os .amin-drawer:has(.amin-home[data-backdrop=aurora]:not([hidden])){--amin-text:#f1f7ff;--amin-muted:#bacbdf;background:#071525!important;color:#f1f7ff}
+
+#amin-os[data-amin-theme=win10light] .amin-drawer:has(.amin-home[data-backdrop=none]:not([hidden])){--amin-bg:#f3f3f3;--amin-card:#fff;--amin-control:#e8e8e8;--amin-text:#202020;--amin-muted:#595959;--amin-line:#b6b6b6;background:#f3f3f3!important;color:#202020;color-scheme:light}
+#amin-os[data-amin-theme^=win10] :is(.amin-brand-icon,.amin-mark){color:var(--amin-text)!important}
+#amin-os[data-amin-theme=win10light] .amin-drawer{border-color:#b6b6b6}

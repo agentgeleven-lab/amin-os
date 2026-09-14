@@ -17,7 +17,7 @@ export function mount(target){
    numeric(parent,'背景不透明度 %',value.opacity,70,100,v=>value.opacity=v);numeric(parent,'背景模糊',value.blur,0,24,v=>value.blur=v);
   }
   if(page==='global'){
-   select(body,'主页磁贴风格',[['classic','风格 1 · 跟随主题'],['win10','风格 2 · Windows 10']],draft.desktop.style,v=>draft.desktop.style=v);select(body,'窗口主题',[['auto','自动搭配磁贴风格'],['current','保留原有主题']],draft.desktop.windowTheme,v=>draft.desktop.windowTheme=v);body.append(el('p','自动模式为 Windows 10 磁贴搭配深色直角窗口；单独设置过外观的应用保留自己的主题。'));
+   select(body,'主页磁贴风格',[['classic','风格 1 · 跟随主题'],['win10','风格 2 · Windows 10']],draft.desktop.style,v=>draft.desktop.style=v);select(body,'窗口主题',[['auto','自动搭配磁贴风格'],['current','保留原有主题'],['win10','Windows 10 深色'],['win10light','Windows 10 浅色']],draft.desktop.windowTheme,v=>draft.desktop.windowTheme=v);body.append(el('p','自动模式为 Windows 10 磁贴搭配深色直角窗口；单独设置过外观的应用保留自己的主题。'));
    button(body,'恢复磁贴默认布局',()=>{resetTileLayout();notice.textContent='磁贴已恢复默认顺序和尺寸。';});fields(body,draft.global);body.append(el('h3','侧栏尺寸'),el('p','屏幕空间不足时自动缩小；位置保持在可见范围内。'));
    numeric(body,'桌面侧栏宽度',draft.window.width,340,800,v=>draft.window.width=v);numeric(body,'侧栏最大高度',draft.window.height,400,1000,v=>draft.window.height=v);
   }else if(page==='apps'){
