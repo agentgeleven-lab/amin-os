@@ -90,3 +90,10 @@
 #amin-os[data-amin-surface] .amin-brand>div{min-width:0;line-height:1.35}
 #amin-os[data-amin-surface] .amin-brand>div>div:first-child{font-size:calc(var(--amin-font) + 4px);font-weight:500}
 #amin-os[data-amin-surface] .amin-head-note{margin-top:3px;letter-spacing:1.2px;font-size:clamp(9px,calc(var(--amin-font) - 3px),11px)}
+
+/* Compact application launcher; descriptions remain available as tooltips. */
+#amin-os[data-amin-surface] .amin-home{height:auto;min-height:0;padding:var(--amin-gap);flex:0 1 auto}
+#amin-os[data-amin-surface] .amin-home-apps{margin-top:0;flex-shrink:0}
+#amin-os[data-amin-surface] .amin-app-card{min-height:112px;padding:16px;gap:12px}
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card:last-child{min-height:68px;padding-right:44px}
+#amin-os[data-amin-surface] .amin-card-copy{gap:0}

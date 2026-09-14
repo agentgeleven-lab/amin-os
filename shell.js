@@ -24,19 +24,17 @@ export function createShell(){
     const launcher=el('button','amin-launcher');launcher.type='button';launcher.title='点击打开 Amin os · 拖动移动';launcher.setAttribute('aria-label','打开 Amin os');launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-controls','amin-drawer');
     const launcherMark=el('span','amin-mark');launcherMark.append(createBrandMark());launcher.append(launcherMark,el('span','amin-launcher-name','Amin os'));
     const drawer=el('section','amin-drawer');drawer.id='amin-drawer';drawer.setAttribute('aria-label','Amin os 应用侧栏');drawer.hidden=true;
-    const head=el('header','amin-head'),brand=el('div','amin-brand');const brandCopy=el('div');brandCopy.append(el('div',null,'Amin os'),el('div','amin-head-note','STORY COMPANION'));const brandMark=el('span','amin-brand-icon');brandMark.append(createBrandMark());brand.append(brandMark,brandCopy);
+    const head=el('header','amin-head'),brand=el('div','amin-brand');const brandCopy=el('div');brandCopy.append(el('div',null,'Amin os'));const brandMark=el('span','amin-brand-icon');brandMark.append(createBrandMark());brand.append(brandMark,brandCopy);
     const collapse=el('button','amin-icon-button','⌄');collapse.type='button';collapse.title='收起';collapse.setAttribute('aria-label','收起 Amin os');head.append(brand,collapse);
     const nav=el('nav','amin-app-nav');nav.setAttribute('aria-label','应用导航');
     const homeButton=el('button','amin-home-tab','⌂');homeButton.type='button';homeButton.title='首页';homeButton.setAttribute('aria-label','Amin os 首页');nav.append(homeButton);
     const area=el('div','amin-area'),home=el('div','amin-home');
-    const intro=el('div','amin-intro');intro.append(el('span','amin-eyebrow','YOUR LITTLE WORLD'),el('h2',null,'你的故事工作台。'),el('p',null,'探索世界，记录此刻。把下一句故事，留给灵感。'));home.append(intro);
     const cards=el('div','amin-home-apps');home.append(cards);
-    const foot=el('div','amin-home-note');foot.append(el('span',null,'✧'),el('span',null,'随时收起，回到你的故事。'));home.append(foot);
     const panes={},tabs={},handlers={};let active='home',opened=false,epoch=0,blocked='',drag=null,suppressClick=false;
     for(const app of APPS){
         const tab=el('button','amin-app-tab',app.name);tab.type='button';tab.dataset.app=app.id;tab.addEventListener('click',()=>showApp(app.id));tabs[app.id]=tab;nav.append(tab);
         const card=el('button',`amin-app-card amin-${app.color}`);card.type='button';card.setAttribute('aria-label',`打开${app.name}`);
-        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name),el('span',null,app.sub));const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));card.addEventListener('click',()=>showApp(app.id));cards.append(card);
+        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name));card.title=app.sub;const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));card.addEventListener('click',()=>showApp(app.id));cards.append(card);
         const pane=el('section','amin-app-pane');pane.dataset.app=app.id;pane.hidden=true;pane.setAttribute('aria-label',app.name);panes[app.id]=pane;
     }
     const notice=el('div','amin-notice');notice.hidden=true;notice.setAttribute('role','status');
@@ -50,8 +48,14 @@ export function createShell(){
     function place(){
         const {width,height}=viewport();
         position=clampPosition(position,width,height);launcher.style.left=position.x+'px';launcher.style.top=position.y+'px';
-        const rect=drawerPlacement(position,width,height,getAppearance()?.snapshot().window);
+        const options=getAppearance()?.snapshot().window;
+        let rect=drawerPlacement(position,width,height,options);
         Object.assign(drawer.style,{left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:rect.height+'px'});
+        if(opened&&active==='home'){
+            const contentHeight=Math.ceil(head.getBoundingClientRect().height+nav.getBoundingClientRect().height+home.scrollHeight+4);
+            rect=drawerPlacement(position,width,height,{...options,height:Math.min(rect.height,contentHeight)});
+            Object.assign(drawer.style,{top:rect.y+'px',height:rect.height+'px'});
+        }
     }
     function save(){try{localStorage.setItem(STORE,JSON.stringify(position));}catch{}}
     function open(){opened=true;drawer.hidden=false;launcher.setAttribute('aria-expanded','true');launcher.setAttribute('aria-label','收起 Amin os');place();}
