@@ -1,0 +1,12 @@
+{
+  "display_name": "Amin os",
+  "loading_order": 110,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "agentgeleven-lab",
+  "version": "0.1.0",
+  "homePage": "https://github.com/agentgeleven-lab/amin-os",
+  "auto_update": false
+}

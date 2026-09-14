@@ -1,0 +1,20 @@
+#reply-options-panel { flex:0 0 auto; box-sizing:border-box; width:100%; padding:6px 10px; color:var(--SmartThemeBodyColor,#eee); background:var(--SmartThemeBlurTintColor,#25252a); border:1px solid var(--SmartThemeBorderColor,#555); border-radius:10px; }
+#reply-options-panel summary,#reply-options-settings summary { cursor:pointer; font-weight:600; }
+#reply-options-panel .ro-controls { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+#reply-options-panel .ro-status { font-size:12px; opacity:.85; margin:7px 0; overflow-wrap:anywhere; }
+#reply-options-panel .ro-options { display:grid; gap:6px; max-height:min(38vh,320px); overflow:auto; }
+#reply-options-panel .ro-card { width:100%; text-align:left; font:inherit; font-size:14px; line-height:1.5; color:inherit; background:transparent; border:1px solid var(--SmartThemeBorderColor,#666); border-radius:8px; padding:9px 12px; cursor:pointer; white-space:pre-wrap; overflow-wrap:anywhere; }
+#reply-options-panel .ro-card strong { display:block; font-size:12px; color:var(--SmartThemeQuoteColor,#8cc8af); margin-bottom:4px; }
+#reply-options-panel .ro-card span { display:block; }
+#reply-options-panel .ro-card:hover,#reply-options-panel .ro-card[aria-pressed=true] { background:rgba(128,128,128,.18); border-color:var(--SmartThemeQuoteColor,#8cc8af); }
+#reply-options-panel button:focus-visible { outline:2px solid var(--SmartThemeQuoteColor,#8cc8af); }
+#reply-options-panel button:disabled { opacity:.5; cursor:wait; }
+#reply-options-panel [hidden] { display:none!important; }
+#reply-options-settings { color:var(--SmartThemeBodyColor,#eee); padding:10px; }
+#reply-options-settings label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0; }
+#reply-options-settings input,#reply-options-settings select,#reply-options-settings textarea { color:inherit; background:var(--SmartThemeBlurTintColor,#25252a); border:1px solid var(--SmartThemeBorderColor,#666); border-radius:5px; padding:5px; }
+#reply-options-settings textarea { width:100%; min-height:90px; resize:vertical; }
+#reply-options-settings input[type=number] { width:75px; }
+#reply-options-settings p { font-size:12px; opacity:.8; }
+
+#reply-options-panel #reply-options-settings:not([hidden]) { max-height:40vh; overflow-y:auto; margin-top:6px; border-top:1px solid var(--SmartThemeBorderColor,#555); }
