@@ -1,0 +1,63 @@
+#amin-os[data-amin-surface]{font-size:var(--amin-font)}
+#amin-os .amin-app-nav{grid-template-columns:28px repeat(5,minmax(0,1fr));gap:2px}
+#amin-os .amin-home-apps .amin-app-card:last-child{grid-column:1/-1;min-height:90px;flex-direction:row;align-items:center}
+#amin-os[data-amin-surface] :is(.amin-drawer,.amin-launcher){background:color-mix(in srgb,var(--amin-bg) var(--amin-opacity),transparent);backdrop-filter:blur(var(--amin-blur));color:var(--amin-text);border-color:var(--amin-line);border-radius:var(--amin-radius)}
+#amin-os[data-amin-surface] :is(.amin-app-card,.amin-brand-icon,.amin-app-icon){background:var(--amin-card);border-color:var(--amin-line);color:var(--amin-text);border-radius:var(--amin-radius)}
+#amin-os[data-amin-surface] :is(.amin-launcher-name,.amin-intro h2,.amin-card-copy strong){color:var(--amin-text)}
+#amin-os[data-amin-surface] :is(.amin-card-copy>span,.amin-head-note,.amin-home-note,.amin-intro p,.amin-card-arrow){color:var(--amin-muted)}
+#amin-os[data-amin-surface] :is(.amin-mark,.amin-brand-icon,.amin-app-icon){color:var(--amin-accent)}
+#amin-os[data-amin-surface] .amin-launcher-dot{background:var(--amin-accent)}
+#amin-os[data-amin-surface] :is(.amin-app-nav,.amin-head){background:transparent;border-color:var(--amin-line)}
+#amin-os[data-amin-surface] .amin-app-nav button{color:var(--amin-muted);font-size:clamp(10px,calc(var(--amin-font) - 1px),13px)}
+#amin-os[data-amin-surface] .amin-app-nav button[aria-current=page]{background:var(--amin-card);color:var(--amin-accent);border-color:var(--amin-line)}
+#amin-os [data-amin-surface]{font-size:var(--amin-font);color:var(--amin-text);color-scheme:inherit}
+#amin-os .amin-app-pane[data-amin-surface]{background:color-mix(in srgb,var(--amin-bg) var(--amin-opacity),transparent);backdrop-filter:blur(var(--amin-blur))}
+#amin-os [data-amin-surface] :is(.amin-status-embedded,.amin-map-embedded,#reply-options-panel){font-size:var(--amin-font);background:transparent!important;color:var(--amin-text)}
+#amin-os [data-amin-surface] :is(button,.menu_button,input,select,textarea){font-size:var(--amin-font);border-radius:var(--amin-radius);color-scheme:inherit}
+#amin-os [data-amin-surface] :is(input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]),select,textarea){background:var(--amin-control)!important;color:var(--amin-text)!important;border-color:var(--amin-line)!important;padding:var(--amin-gap);font-size:var(--amin-font);color-scheme:inherit}
+#amin-os [data-amin-surface] :is(button,.menu_button){background:var(--amin-control);color:var(--amin-text);border-color:var(--amin-line);padding:calc(var(--amin-gap) * .6) calc(var(--amin-gap) * .8)}
+#amin-os [data-amin-surface] button:hover:not(:disabled){background:var(--amin-card);border-color:var(--amin-accent)}
+#amin-os [data-amin-surface] :is(.amin-primary,.dm-primary),#amin-os [data-amin-surface] #reply-options-panel .ro-controls button:first-child{background:var(--amin-accent)!important;color:var(--amin-ink)!important;border-color:var(--amin-accent)!important}
+#amin-os [data-amin-surface] :is([role=tablist],.dm-settings-categories) button,#amin-os [data-amin-surface] nav button{background:transparent;color:var(--amin-muted);border-color:transparent}
+#amin-os [data-amin-surface] :is([aria-selected=true],[aria-pressed=true]){background:var(--amin-card)!important;color:var(--amin-accent)!important;border-color:var(--amin-accent)!important}
+#amin-os [data-amin-surface] :is(h2,h3){color:var(--amin-text)}
+#amin-os [data-amin-surface] h2{font-size:calc(var(--amin-font) + 7px)}
+#amin-os [data-amin-surface] h3{font-size:calc(var(--amin-font) + 2px)}
+#amin-os [data-amin-surface] :is(label,.dm-help,.wsh-note,.ro-status,.wsh-report,.amin-reply-heading p){font-size:var(--amin-font);color:var(--amin-muted)}
+#amin-os [data-amin-surface] :is(.dm-page,.wsh-generation-page,#reply-options-panel){padding:var(--amin-gap)}
+#amin-os .amin-ai[data-amin-surface]{padding:var(--amin-gap)}
+#amin-os [data-amin-surface] :is(.ro-card,.wsh-rule-card,.wsh-history-card,.dm-route,.amin-appearance-card){background:var(--amin-card)!important;color:var(--amin-text);border-color:var(--amin-line);border-radius:var(--amin-radius);padding:var(--amin-gap);font-size:var(--amin-font)}
+#amin-os [data-amin-surface] :is(.dm-savebar,.ro-status,.wsh-report,.dm-feedback){background:var(--amin-card);color:var(--amin-muted);border-color:var(--amin-line);border-radius:var(--amin-radius)}
+#amin-os [data-amin-surface] #reply-options-panel .ro-card{font-size:calc(var(--amin-font) + 1px);line-height:1.8}
+#amin-os .amin-settings details summary{color:var(--amin-accent);cursor:pointer;font-size:var(--amin-font)}
+#amin-os .amin-settings nav button{font-size:calc(var(--amin-font) - 1px)}
+
+/* Floor windows size against their message container, not a fixed desktop panel. */
+.wsh-floor-host[data-amin-surface]{container-type:inline-size;display:block;width:100%;min-width:0;max-width:100%;color:var(--amin-text);font:var(--amin-font)/1.7 'Segoe UI','Microsoft YaHei',sans-serif;box-sizing:border-box}
+.wsh-floor-host[data-amin-surface] *{box-sizing:border-box;min-width:0}
+.wsh-floor-host[data-amin-surface] .wsh-floor-button{color:var(--amin-accent);background:var(--amin-card);border:1px solid var(--amin-line);border-radius:var(--amin-radius);padding:5px 10px;opacity:1;font:inherit;font-size:calc(var(--amin-font) - 1px)}
+.wsh-floor-host[data-amin-surface] .wsh-history{width:min(100%,var(--amin-floor-width));max-width:100%;height:auto;max-height:var(--amin-floor-desktop);overflow:auto;overscroll-behavior:contain;margin:10px 0;padding:var(--amin-gap);border:1px solid var(--amin-line);border-radius:var(--amin-radius);background:color-mix(in srgb,var(--amin-bg) var(--amin-opacity),transparent);backdrop-filter:blur(var(--amin-blur));color:var(--amin-text);scrollbar-width:thin;scrollbar-color:var(--amin-muted) transparent}
+.wsh-floor-host[data-amin-surface] .wsh-history-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:var(--amin-gap);align-items:start}
+.wsh-floor-host[data-amin-surface] .wsh-history-card{margin:0;padding:var(--amin-gap);background:var(--amin-card);border:1px solid var(--amin-line);border-radius:var(--amin-radius)}
+.wsh-floor-host[data-amin-surface] .wsh-history-card>strong{display:block;margin-bottom:8px;color:var(--amin-accent)}
+.wsh-floor-host[data-amin-surface] .wsh-history-nav{position:sticky;top:0;z-index:1;background:var(--amin-bg);padding:7px 0;gap:6px}
+.wsh-floor-host[data-amin-surface] .wsh-history-nav button{min-height:34px;padding:6px 10px;background:var(--amin-control);color:var(--amin-text);border:1px solid var(--amin-line);border-radius:var(--amin-radius);font:inherit}
+.wsh-floor-host[data-amin-surface] .wsh-history-field{font-size:var(--amin-font);gap:12px;align-items:start;flex-wrap:wrap;border-color:var(--amin-line);padding:8px 0;overflow-wrap:anywhere}
+.wsh-floor-host[data-amin-surface] .wsh-history-field>span:last-child{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
+.wsh-floor-host[data-amin-surface] .wsh-history-long{flex-direction:column;gap:4px}
+.wsh-floor-host[data-amin-surface] .wsh-history-long>span:last-child{text-align:left}
+.wsh-floor-host[data-amin-surface] .wsh-note{color:var(--amin-muted);font-size:calc(var(--amin-font) - 1px)}
+@container(max-width:520px){.wsh-floor-host[data-amin-surface] .wsh-history{max-height:var(--amin-floor-mobile)}.wsh-floor-host[data-amin-surface] .wsh-history-grid{grid-template-columns:1fr}.wsh-floor-host[data-amin-surface] .wsh-history-nav span{flex-basis:calc(100% - 80px)}}
+@media(max-width:600px){.wsh-floor-host[data-amin-surface] .wsh-history{max-height:var(--amin-floor-mobile)}#amin-os .amin-app-nav button{font-size:10px;padding:7px 1px}}
+
+#amin-os[data-amin-surface] .amin-icon-button{color:var(--amin-text);border-color:var(--amin-line)}
+#amin-os[data-amin-surface] .amin-card-copy strong{font-size:calc(var(--amin-font) + 2px)}
+#amin-os[data-amin-surface] :is(.amin-card-copy>span,.amin-intro p){font-size:calc(var(--amin-font) - 1px)}
+#amin-os[data-amin-surface] .amin-intro h2{font-size:calc(var(--amin-font) + 13px)}
+.dynamic-map-panel[data-amin-surface]:not(.amin-map-embedded){font-size:var(--amin-font);border-radius:var(--amin-radius)}
+.dynamic-map-panel[data-amin-surface]:not(.amin-map-embedded) :is(button,input,textarea,select){font-size:var(--amin-font);border-radius:var(--amin-radius)}
+.dynamic-map-panel[data-amin-surface]:not(.amin-map-embedded) .dm-page{padding:var(--amin-gap)}
+
+#amin-os [data-amin-density=compact] label{margin:8px 0}
+#amin-os [data-amin-density=compact] :is(.dm-page p,.wsh-generation-page p){margin:6px 0}
+#amin-os[data-amin-surface] .amin-home-apps{gap:var(--amin-gap)}

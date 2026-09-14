@@ -1,0 +1,47 @@
+export const PALETTES = {
+ mint:{name:'薄荷夜色',bg:'#12191d',card:'#1b252b',control:'#202d33',text:'#edf3ef',muted:'#a2b2b7',line:'#adc7be38',accent:'#b9dfce',ink:'#19382d',scheme:'dark'},
+ midnight:{name:'深海蓝',bg:'#141928',card:'#202a40',control:'#28344b',text:'#e5ebff',muted:'#a8b7da',line:'#56689580',accent:'#b4c6ff',ink:'#202c48',scheme:'dark'},
+ paper:{name:'旅人纸页',bg:'#f1e5ce',card:'#fbf3e2',control:'#e8d8ba',text:'#493824',muted:'#766046',line:'#baa37b90',accent:'#775029',ink:'#fff8e9',scheme:'light'},
+ rose:{name:'樱花物语',bg:'#fff6f8',card:'#fffcfd',control:'#f7e6ed',text:'#4e3042',muted:'#805a70',line:'#dcb6c7aa',accent:'#a63967',ink:'#ffffff',scheme:'light'},
+ violet:{name:'夜色紫晶',bg:'#171529',card:'#242039',control:'#322b4d',text:'#efeafb',muted:'#b6acd0',line:'#51466eaa',accent:'#c5a9ff',ink:'#251737',scheme:'dark'},
+ mono:{name:'极简墨白',bg:'#f4f5f6',card:'#ffffff',control:'#e9ecef',text:'#202b37',muted:'#586674',line:'#c7cdd4',accent:'#304d66',ink:'#ffffff',scheme:'light'},
+};
+export const APP_NAMES={map:'地图',status:'世界状态',reply:'回复选项',ai:'AI 设置'};
+export const defaults=()=>({global:{theme:'mint',fontSize:13,radius:14,density:'comfortable',opacity:100,blur:12},window:{width:448,height:720},apps:{},floor:{width:900,desktopHeight:65,mobileHeight:55}});
+const clone=x=>structuredClone(x);
+function number(value,min,max){if(!Number.isFinite(value)||value<min||value>max)throw Error(`数值需在 ${min}–${max} 之间`);return value;}
+function appearance(value){if(!PALETTES[value.theme])throw Error('主题无效');if(!['comfortable','compact'].includes(value.density))throw Error('间距无效');return {theme:value.theme,fontSize:number(value.fontSize,11,20),radius:number(value.radius,0,24),density:value.density,opacity:number(value.opacity,70,100),blur:number(value.blur,0,24)};}
+export function validate(value){const d=defaults();const result={global:appearance({...d.global,...value.global}),window:{width:number(value.window?.width??448,340,800),height:number(value.window?.height??720,400,1000)},floor:{width:number(value.floor?.width??900,320,1400),desktopHeight:number(value.floor?.desktopHeight??65,30,90),mobileHeight:number(value.floor?.mobileHeight??55,30,85)},apps:{}};for(const id of Object.keys(APP_NAMES))if(value.apps?.[id])result.apps[id]=appearance({...result.global,...value.apps[id]});return result;}
+export function createAppearance(getContext){
+ const key='amin_os_appearance_v1';let value;try{value=validate(getContext()?.extensionSettings?.[key]??defaults());}catch{value=defaults();}
+ const listeners=new Set();
+ return {snapshot:()=>clone(value),resolve:id=>clone(value.apps[id]??value.global),save(next){const checked=validate(next),ctx=getContext();if(!ctx?.extensionSettings)throw Error('酒馆设置尚未就绪');ctx.extensionSettings[key]=clone(checked);ctx.saveSettingsDebounced?.();value=checked;for(const f of listeners)f();},subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);}};
+}
+let shared;
+export const getAppearance=()=>shared;
+export function initializeAppearance(getContext){return shared??=createAppearance(getContext);}
+export function themeVariables(config){const p=PALETTES[config.theme];return {
+ '--amin-bg':p.bg,'--amin-card':p.card,'--amin-control':p.control,'--amin-text':p.text,'--amin-muted':p.muted,'--amin-line':p.line,'--amin-accent':p.accent,'--amin-ink':p.ink,
+ '--amin-font':config.fontSize+'px','--amin-radius':config.radius+'px','--amin-gap':config.density==='compact'?'8px':'14px','--amin-opacity':config.opacity+'%','--amin-blur':config.blur+'px',
+ '--dm-bg':p.bg,'--dm-surface':p.control,'--dm-header':p.bg,'--dm-text':p.text,'--dm-muted':p.muted,'--dm-border':p.line,'--dm-accent':p.accent,'--dm-map':p.card,'--dm-map-center':p.control,
+ '--wsh-bg':p.bg,'--wsh-card':p.card,'--wsh-control':p.control,'--wsh-text':p.text,'--wsh-muted':p.muted,'--wsh-line':p.line,'--wsh-accent':p.accent,'--wsh-ink':p.ink,'--wsh-glow':'transparent','--wsh-radius':config.radius+'px','--wsh-scheme':p.scheme,
+ };
+}
+export function installAppearance(document){
+ const ai=getAppearance(),frames=new WeakSet();
+ function style(element,id){if(!element)return;const config=ai.resolve(id);element.dataset.aminSurface=id||'os';element.dataset.aminDensity=config.density;element.style.colorScheme=PALETTES[config.theme].scheme;for(const [name,value]of Object.entries(themeVariables(config)))element.style.setProperty(name,value);}
+ function apply(){
+  style(document.getElementById('amin-os'));
+  for(const e of document.querySelectorAll('#amin-os .amin-app-pane'))style(e,e.dataset.app==='settings'?'':e.dataset.app);
+  for(const e of document.querySelectorAll('.dynamic-map-panel'))style(e,'map');
+  for(const e of document.querySelectorAll('.amin-status-embedded,.wsh-floor-host')){style(e,'status');const f=ai.snapshot().floor;e.style.setProperty('--amin-floor-width',f.width+'px');e.style.setProperty('--amin-floor-desktop',f.desktopHeight+'dvh');e.style.setProperty('--amin-floor-mobile',f.mobileHeight+'dvh');}
+  for(const frame of document.querySelectorAll('#amin-os .wsh-dialog iframe')){
+   const paint=()=>{try{const root=frame.contentDocument?.documentElement;if(root){root.removeAttribute('data-wsh-style');root.setAttribute('data-wsh-glass','off');style(root,'status');}}catch{}};
+   if(!frames.has(frame)){frames.add(frame);frame.addEventListener('load',paint);}paint();
+  }
+ }
+ const selector='.dynamic-map-panel,.amin-app-pane,.wsh-floor-host,.wsh-dialog,iframe';
+ let queued=false;const schedule=()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;apply();});}};
+ const observer=new MutationObserver(records=>{if(records.some(r=>[...r.addedNodes].some(n=>n.nodeType===1&&(n.matches(selector)||n.querySelector(selector)))))schedule();});
+ observer.observe(document.body,{childList:true,subtree:true});ai.subscribe(apply);apply();return {apply};
+}

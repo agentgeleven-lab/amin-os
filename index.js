@@ -1,3 +1,4 @@
+import {initializeAppearance,installAppearance} from './settings/appearance.js';
 import {initializeAI} from './ai/service.js';
 import { createShell } from './shell.js';
 
@@ -10,7 +11,9 @@ export function initialize() {
     if(globalThis.SillyTavernDynamicMap || document.querySelector('.dynamic-map-panel'))existing.push('动态地图');
     if(document.getElementById('wsh-launcher'))existing.push('世界状态栏');
     if(document.getElementById('reply-options-panel'))existing.push('回复选项');
+    initializeAppearance(()=>globalThis.SillyTavern?.getContext?.());
     const shell=createShell();
+    installAppearance(document);
     instance=shell;
     if(existing.length){
         shell.setBlocked(`检测到旧插件：${existing.join('、')}。请在扩展管理中停用这三个旧插件，然后刷新页面，再使用 Amin os。已有数据会保留。`);
@@ -20,6 +23,7 @@ export function initialize() {
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const apps={
+        settings:()=>import('./settings/view.js').then(m=>m.mount(shell.panes.settings)),
         ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
         map:()=>import('./apps/map/index.js').then(m=>m.initialize({mount:shell.panes.map,onOpen:()=>shell.showApp('map')})),
         status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.home()})),
@@ -38,7 +42,7 @@ export function initialize() {
     }
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.2.1',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.3.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

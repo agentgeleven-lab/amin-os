@@ -1,0 +1,13 @@
+html[data-amin-surface]{font-size:var(--amin-font);color-scheme:var(--wsh-scheme)}
+html[data-amin-surface] :is(body,.hud){background:color-mix(in srgb,var(--amin-bg) var(--amin-opacity),transparent)!important;color:var(--amin-text);font-family:'Segoe UI','Microsoft YaHei',sans-serif;font-size:var(--amin-font)}
+html[data-amin-surface] :is(.card,#editor,#scene){background:var(--amin-card);border:1px solid var(--amin-line);border-radius:var(--amin-radius)!important;padding:var(--amin-gap)}
+html[data-amin-surface] :is(button,input,select,textarea,.chip){border-radius:var(--amin-radius)!important;background:var(--amin-control);color:var(--amin-text);border-color:var(--amin-line);font-size:var(--amin-font)}
+html[data-amin-surface] :is(button,input,select,textarea){padding:calc(var(--amin-gap) * .65);color-scheme:var(--wsh-scheme)}
+html[data-amin-surface] button.primary{background:var(--amin-accent);color:var(--amin-ink)}
+html[data-amin-surface] :is(.label,.sub,.meta,#status,footer){color:var(--amin-muted);font-size:calc(var(--amin-font) - 1px)}
+html[data-amin-surface] :is(.value,.project-toggle){font-size:var(--amin-font)}
+html[data-amin-surface] h1{font-size:calc(var(--amin-font) + 7px)}
+html[data-amin-surface] .row{padding:var(--amin-gap) 0}
+html[data-amin-surface] .number{font-size:calc(var(--amin-font) + 8px)}
+html[data-amin-surface] #cards{gap:var(--amin-gap)}
+html[data-amin-surface] #status.error,html[data-amin-surface] .danger{color:#d26c6c}

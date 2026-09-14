@@ -1,3 +1,4 @@
+import {getAppearance} from './settings/appearance.js';
 import { clampPosition, drawerPlacement } from './window-state.js';
 
 const APPS=[
@@ -5,6 +6,7 @@ const APPS=[
     {id:'status',name:'世界状态',sub:'角色、关系与剧情的此刻',icon:'◈',color:'lavender'},
     {id:'reply',name:'回复选项',sub:'拟写下一句，由你决定',icon:'≋',color:'peach'},
     {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
+    {id:'settings',name:'设置',sub:'全局外观与应用个性化',icon:'⚙',color:'lavender'},
 ];
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 
@@ -12,6 +14,7 @@ function icon(id){
     const paths={map:'M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5z M9 3v16 M15 5v16',status:'M4 5h16v14H4z M8 9h3 M8 13h8 M15 9h1',reply:'M4 4h16v12H9l-5 4V4z M8 8h8 M8 12h5',ai:'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
     for(const [key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
+    if(id==='settings')paths.settings='M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6';
     const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',paths[id]);svg.append(path);return svg;
 }
 const STORE='amin-os.window.v1';
@@ -46,7 +49,7 @@ export function createShell(){
     function place(){
         const {width,height}=viewport();
         position=clampPosition(position,width,height);launcher.style.left=position.x+'px';launcher.style.top=position.y+'px';
-        const rect=drawerPlacement(position,width,height);
+        const rect=drawerPlacement(position,width,height,getAppearance()?.snapshot().window);
         Object.assign(drawer.style,{left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:rect.height+'px'});
     }
     function save(){try{localStorage.setItem(STORE,JSON.stringify(position));}catch{}}
@@ -70,6 +73,7 @@ export function createShell(){
     launcher.addEventListener('pointermove',e=>{if(drag?.id!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.hypot(dx,dy)>5)drag.moved=true;if(drag.moved){position={x:drag.start.x+dx,y:drag.start.y+dy};place();}});
     const stop=e=>{if(drag?.id!==e.pointerId)return;suppressClick=drag.moved;drag=null;save();};
     for(const name of ['pointerup','pointercancel','lostpointercapture'])launcher.addEventListener(name,stop);
+    getAppearance()?.subscribe(place);
     window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);place();select('home');
     return {panes,open:resume,close,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};
 }

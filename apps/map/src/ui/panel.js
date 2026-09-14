@@ -16,7 +16,6 @@ import { createDraftSession } from '../core/draft.js';
 import { createMap, createNode, createEdge, validateDocument } from '../core/protocol.js';
 import { DIRECTIONS, prepareDocument, layoutMap, validateRules, applyPlacement, connectionDetails, roadName, roadDistance, splitRoad } from '../core/spatial.js';
 import { readMapSources } from '../adapters/sources.js';
-import { THEMES } from './preferences.js';
 import { renderMap, fitCamera } from './graph.js';
 import { attachFloatingWindow, readWindowPreferences } from './floating.js';
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
@@ -202,7 +201,7 @@ export function createPanel(store,persistence,preferences,options={}){
         for(const [id,label] of categories){const item=button(label,()=>activate(id));item.setAttribute('aria-pressed',String(id===settingsCategory));nav.append(item);buttons.set(id,item);const section=el('section',undefined,'dm-form dm-settings-section');section.setAttribute('aria-label',label);section.hidden=id!==settingsCategory;sections.set(id,section);page.append(section);}
         let form=sections.get('appearance');form.append(el('h3','界面外观'));const settings=preferences.snapshot();
         const enabled=field(form,'在消息末尾显示小型地图按钮',input('','checkbox'));enabled.checked=settings.messageButtons;enabled.onchange=()=>run(()=>preferences.update({messageButtons:enabled.checked}));
-        const theme=field(form,'界面主题',select(THEMES,settings.theme));theme.onchange=()=>run(()=>preferences.update({theme:theme.value}));
+        form.append(button('打开设置 · 统一外观',()=>globalThis.AminOS?.openApp('settings')));
         form.append(el('p','消息末尾的“🗺 地图”按钮在该消息下方展开完整地图窗口。界面设置立即生效，不修改地图和变量。','dm-help'));
         if(options.integration){
             form=sections.get('integration');const bridge=options.integration,state=bridge.status();form.append(el('h3','小白X与状态栏联动'));

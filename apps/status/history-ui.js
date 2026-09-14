@@ -3,7 +3,7 @@ export function historyView({ history, node, floor = null }) {
   const nav = node('div', undefined, 'wsh-history-nav');
   const left = node('button', '‹'), right = node('button', '›'), latest = node('button', '最新记录');
   left.title = '上一楼'; right.title = '下一楼';
-  const label = node('span'); const body = node('div');
+  const label = node('span'); const body = node('div',undefined,'wsh-history-grid');
   for (const button of [left, right, latest]) button.type = 'button';
   nav.append(left, label, right, latest);
   root.append(nav, node('p', '只读记录 · 翻页不会恢复变量，复制和模型更新仍使用当前剧情状态。', 'wsh-note'), body);
