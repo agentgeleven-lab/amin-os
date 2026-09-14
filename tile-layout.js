@@ -7,11 +7,11 @@ export const defaultTiles=()=>[
 export function normalizeTiles(value){
  if(!Array.isArray(value))return defaultTiles();
  const known=new Set(defaultTiles().map(t=>t.target)),seen=new Set();
- return value.flatMap(t=>{if(typeof t?.id!=='string'||!t.id||seen.has(t.id)||!known.has(t.target))return [];seen.add(t.id);return [{id:t.id,target:t.target,label:typeof t.label==='string'?t.label.slice(0,60):'',size:['small','medium','wide'].includes(t.size)?t.size:'medium'}];});
+ return value.flatMap(t=>{if(typeof t?.id!=='string'||!t.id||seen.has(t.id)||!known.has(t.target))return [];seen.add(t.id);return [{id:t.id,target:t.target,label:typeof t.label==='string'?t.label.slice(0,60):'',size:['small','medium','wide','tall'].includes(t.size)?t.size:'medium'}];});
 }
 export function migrateTiles(value){
  const defaults=defaultTiles(),seen=new Set(),result=[];
- for(const t of Array.isArray(value)?value:[]){const d=defaults.find(d=>d.id===t?.id);if(!d||seen.has(t.id))continue;seen.add(t.id);result.push({...d,size:['small','medium','wide'].includes(t.size)?t.size:d.size});}
+ for(const t of Array.isArray(value)?value:[]){const d=defaults.find(d=>d.id===t?.id);if(!d||seen.has(t.id))continue;seen.add(t.id);result.push({...d,size:['small','medium','wide','tall'].includes(t.size)?t.size:d.size});}
  return result.concat(defaults.filter(t=>!seen.has(t.id)));
 }
 export function loadTiles(storage){

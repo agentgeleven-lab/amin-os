@@ -10,7 +10,7 @@ export function createTileDesktop({home,cards,apps,createIcon,openApp,onLayout})
  const editor=make('div','amin-tile-editor');editor.hidden=true;
  const choice=make('select','');choice.setAttribute('aria-label','选择磁贴');
  const sizes=make('select','');sizes.setAttribute('aria-label','磁贴尺寸');
- for(const [value,name]of [['small','小'],['medium','中'],['wide','宽']]){const o=make('option','',name);o.value=value;sizes.append(o);}
+ for(const [value,name]of [['small','小'],['medium','中'],['wide','宽'],['tall','长']]){const o=make('option','',name);o.value=value;sizes.append(o);}
  const target=make('select','');target.setAttribute('aria-label','磁贴打开的应用');
  const name=make('input','');name.type='text';name.maxLength=60;name.placeholder='留空使用应用名称';name.setAttribute('aria-label','磁贴名称');
  const before=make('button','','前移'),after=make('button','','后移'),add=make('button','','新增磁贴'),copy=make('button','','复制磁贴'),remove=make('button','','删除磁贴'),restore=make('button','','撤销删除');

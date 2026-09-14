@@ -42,3 +42,35 @@
 #amin-os .amin-tile-catalog{margin-top:12px;color:var(--amin-text)}
 #amin-os .amin-tile-catalog summary{cursor:pointer;padding:8px 0}
 #amin-os .amin-tile-catalog .amin-tile-editor{margin-top:8px}
+
+/* Portrait tile is the rotated footprint of a wide tile. */
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=tall]{grid-column:span 2;grid-row:span 4}
+/* Optional Windows 10 start screen. App panes keep their own appearance. */
+#amin-os[data-desktop-style=win10] .amin-drawer:has(.amin-home:not([hidden])){
+ --amin-bg:#202020;--amin-card:#303030;--amin-control:#383838;--amin-text:#ffffff;--amin-muted:#c6c6c6;--amin-line:#ffffff40;--amin-accent:#0078d4;--amin-ink:#ffffff;
+ background:#202020!important;color:#fff;color-scheme:dark; border-radius:0!important;
+}
+#amin-os[data-desktop-style=win10] .amin-home{font-family:'Segoe UI','Microsoft YaHei',sans-serif}
+#amin-os[data-desktop-style=win10] .amin-start-heading h2{font-size:24px;font-weight:300;letter-spacing:0}
+#amin-os[data-desktop-style=win10] .amin-home-apps{gap:6px}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card{
+ background:#0078d4;color:#fff;border:2px solid transparent;padding:10px;box-shadow:none;transition:border-color .15s,filter .15s;
+}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=map]{background:#007a78}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=status]{background:#8b42ae;color:#fff}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=reply]{background:#c04416;color:#fff}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=information]{background:#006bc1}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=effects]{background:#b51d58}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=ai]{background:#355d99;color:#fff;border:2px solid transparent}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-target=settings]{background:#515151}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card .amin-app-icon{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);width:40px;height:40px}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card .amin-card-copy{margin-top:auto;text-align:left;z-index:1}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card .amin-card-copy strong{font-family:inherit;font-size:14px;font-weight:400}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small]{padding:5px}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small] .amin-app-icon{width:22px;height:22px;top:35%}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small] .amin-card-copy{width:100%;text-align:center;max-height:24px;overflow:hidden}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small] .amin-card-copy strong{font-size:10px;line-height:1.1}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card:hover{opacity:1;border-color:#ffffff80;filter:brightness(1.08)}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card:focus-visible{outline:2px solid #fff;outline-offset:-4px}
+
+#amin-os[data-desktop-style=win10] .amin-drawer:has(.amin-home:not([hidden])) .amin-brand-icon{color:#f3f3f3}

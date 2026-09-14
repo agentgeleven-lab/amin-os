@@ -41,3 +41,9 @@ test('floor button visibility migrates and reply sizes persist independently',()
  assert.equal(restored.floor.buttons.reply,true);assert.equal(resolveFloor(restored,'reply').width,500);
  assert.equal(resolveFloor(restored,'map').width,800);
 });
+
+test('desktop style migrates independently and persists without changing app themes',()=>{
+ const legacy=defaults();delete legacy.desktop;assert.equal(validate(legacy).desktop.style,'classic');
+ const ctx={extensionSettings:{},saveSettingsDebounced(){}};const service=createAppearance(()=>ctx);const next=service.snapshot();next.desktop.style='win10';service.save(next);
+ const reloaded=createAppearance(()=>ctx);assert.equal(reloaded.snapshot().desktop.style,'win10');assert.deepEqual(reloaded.snapshot().global,defaults().global);assert.throws(()=>validate({...next,desktop:{style:'invalid'}}));
+});

@@ -32,3 +32,9 @@ test('storage migration preserves legacy order and customized layouts survive re
  saveTiles(storage,[]);assert.deepEqual(loadTiles(storage),[]);assert.ok(data.has(LEGACY_TILE_KEY));
  data.set(TILE_KEY,'broken');assert.deepEqual(loadTiles(storage),defaultTiles());
 });
+
+test('portrait tiles retain footprint through persistence, copies and reordering',()=>{
+ const layout=[{id:'long',target:'map',label:'竖向地图',size:'tall'},...defaultTiles()];
+ assert.equal(normalizeTiles(layout)[0].size,'tall');assert.equal(moveTile(layout,'long','settings',true).at(-1).size,'tall');
+ const data=new Map(),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};saveTiles(storage,layout);assert.deepEqual(loadTiles(storage),layout);
+});
