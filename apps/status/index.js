@@ -173,6 +173,7 @@ async function showHud(page = selectedPage) {
   const glass = glassSettings(getSettings());
   html = html.replace('<html lang="zh-CN">' , '<html lang="zh-CN" data-wsh-frame data-wsh-glass="' + (glass.enabled ? 'on' : 'off') + '" style="--wsh-glass-opacity:' + (100-glass.transparency) + '%" data-wsh-style="' + normalizeStyle(getSettings().panelStyle) + '" data-wsh-theme="' + normalizeTheme(getSettings().theme) + '">');
   html = html.replace('</head>', '<link rel="stylesheet" href="' + new URL('./themes.css', import.meta.url).href + '"></head>');
+  if(embeddedMount)html=html.replace('</head>','<link rel="stylesheet" href="'+new URL('../../ui-status.css',import.meta.url).href+'"></head>');
   html = html.replace('<head>', '<head>' + bridge);
   const listener = event => {
     if (event.source !== frame.contentWindow || event.data?.wsh !== token) return;
@@ -196,7 +197,7 @@ async function showHud(page = selectedPage) {
   if(embeddedMount)close.hidden=true;
   const quickActions = node('div', undefined, 'wsh-actions');
   const quickStatus = node('p', '', 'wsh-quick-status'); quickStatus.setAttribute('role', 'status');
-  const update = node('button', '按当前剧情更新值', 'menu_button'); update.type = 'button';
+  const update = node('button', '按当前剧情更新值', 'menu_button amin-primary'); update.type = 'button';
   update.onclick = async () => {
     try { checkIdentity(id); update.disabled = true; quickStatus.textContent = '正在读取近期对话并更新…';
       const result = await requestUpdate(); checkIdentity(id);
@@ -280,7 +281,7 @@ function mount() {
   }
   const actions = node('div', undefined, 'wsh-actions');
   function action(label, fn) {
-    const b = node('button', label, 'menu_button'); b.type = 'button';
+    const b = node('button', label, 'menu_button'); b.type = 'button';if(['保存配置','生成／补充'].includes(label))b.classList.add('amin-primary');
     b.onclick = async () => { try { await fn(); } catch (e) { report.textContent = e.message; notify(e.message, true); } }; actions.append(b); return b;
   }
   const saveButton = action('保存配置', () => { save(); report.textContent = '状态栏配置已保存；模型与预设在 AI 设置中管理。'; });

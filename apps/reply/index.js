@@ -42,6 +42,7 @@ export function mount({ target } = {}) {
     const settingsButton=button('设置',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
     settingsButton.setAttribute('aria-controls','reply-options-settings');
     settingsButton.setAttribute('aria-expanded','false');
+    if(target){const heading=node('header',null,'amin-reply-heading');heading.append(node('h2','下一句，由你决定'),node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
     panel.append(controls,settingsBox,status,cards);if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});
     function updateSelection(){undo.disabled=draft.base===null;for(const b of cards.children)b.setAttribute('aria-pressed','false');}

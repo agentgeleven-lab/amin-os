@@ -4,7 +4,7 @@ const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textCont
 const input=(value='',type='text')=>{const e=el('input');e.type=type;e.value=value;return e;};
 const field=(parent,label,control)=>{const wrap=el('label');wrap.append(el('span',label),control);parent.append(wrap);return control;};
 const select=(items,value)=>{const e=el('select');for(const p of items){const o=el('option',p.name);o.value=p.id;e.append(o);}e.value=value;return e;};
-const button=(text,fn)=>{const e=el('button',text);e.type='button';e.onclick=fn;return e;};
+const button=(text,fn)=>{const e=el('button',text);e.type='button';if(['保存并应用到全部应用','保存预设'].includes(text))e.classList.add('amin-primary');e.onclick=fn;return e;};
 export function mount(target){
  const ai=getAI();target.classList.add('amin-ai');let active='api';
  function draw(){

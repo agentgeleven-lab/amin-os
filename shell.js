@@ -1,31 +1,38 @@
 import { clampPosition, drawerPlacement } from './window-state.js';
 
 const APPS=[
-    {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
     {id:'map',name:'地图',sub:'记录地点，探索你的世界',icon:'⌘',color:'mint'},
     {id:'status',name:'世界状态',sub:'角色、关系与剧情的此刻',icon:'◈',color:'lavender'},
-    {id:'reply',name:'回复选项',sub:'为下一句话，找一点灵感',icon:'≋',color:'peach'},
+    {id:'reply',name:'回复选项',sub:'拟写下一句，由你决定',icon:'≋',color:'peach'},
+    {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
 ];
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
+
+function icon(id){
+    const paths={map:'M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5z M9 3v16 M15 5v16',status:'M4 5h16v14H4z M8 9h3 M8 13h8 M15 9h1',reply:'M4 4h16v12H9l-5 4V4z M8 8h8 M8 12h5',ai:'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    for(const [key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',paths[id]);svg.append(path);return svg;
+}
 const STORE='amin-os.window.v1';
 export function createShell(){
     const root=el('div');root.id='amin-os';
     const launcher=el('button','amin-launcher');launcher.type='button';launcher.title='点击打开 Amin os · 拖动移动';launcher.setAttribute('aria-label','打开 Amin os');launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-controls','amin-drawer');
     launcher.append(el('span','amin-mark','a'),el('span','amin-launcher-name','Amin os'),el('span','amin-launcher-dot'));
     const drawer=el('section','amin-drawer');drawer.id='amin-drawer';drawer.setAttribute('aria-label','Amin os 应用侧栏');drawer.hidden=true;
-    const head=el('header','amin-head'),brand=el('div','amin-brand');brand.append(el('span','amin-brand-icon','a'),el('div',null,'Amin os'));
+    const head=el('header','amin-head'),brand=el('div','amin-brand');const brandCopy=el('div');brandCopy.append(el('div',null,'Amin os'),el('div','amin-head-note','STORY COMPANION'));brand.append(el('span','amin-brand-icon','a'),brandCopy);
     const collapse=el('button','amin-icon-button','⌄');collapse.type='button';collapse.title='收起';collapse.setAttribute('aria-label','收起 Amin os');head.append(brand,collapse);
     const nav=el('nav','amin-app-nav');nav.setAttribute('aria-label','应用导航');
     const homeButton=el('button','amin-home-tab','⌂');homeButton.type='button';homeButton.title='首页';homeButton.setAttribute('aria-label','Amin os 首页');nav.append(homeButton);
     const area=el('div','amin-area'),home=el('div','amin-home');
-    const intro=el('div','amin-intro');intro.append(el('span','amin-eyebrow','YOUR LITTLE WORLD'),el('h2',null,'故事，随手展开。'),el('p',null,'一张地图，一眼此刻，一句新的可能。'));home.append(intro);
+    const intro=el('div','amin-intro');intro.append(el('span','amin-eyebrow','YOUR LITTLE WORLD'),el('h2',null,'你的故事工作台。'),el('p',null,'探索世界，记录此刻。把下一句故事，留给灵感。'));home.append(intro);
     const cards=el('div','amin-home-apps');home.append(cards);
-    const foot=el('div','amin-home-note');foot.append(el('span',null,'✧'),el('span',null,'留在故事里，其他的交给这里。'));home.append(foot);
+    const foot=el('div','amin-home-note');foot.append(el('span',null,'✧'),el('span',null,'随时收起，回到你的故事。'));home.append(foot);
     const panes={},tabs={},handlers={};let active='home',opened=false,epoch=0,blocked='',drag=null,suppressClick=false;
     for(const app of APPS){
         const tab=el('button','amin-app-tab',app.name);tab.type='button';tab.dataset.app=app.id;tab.addEventListener('click',()=>showApp(app.id));tabs[app.id]=tab;nav.append(tab);
         const card=el('button',`amin-app-card amin-${app.color}`);card.type='button';card.setAttribute('aria-label',`打开${app.name}`);
-        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name),el('span',null,app.sub));card.append(el('span','amin-app-icon',app.icon),copy,el('span','amin-card-arrow','↗'));card.addEventListener('click',()=>showApp(app.id));cards.append(card);
+        const copy=el('span','amin-card-copy');copy.append(el('strong',null,app.name),el('span',null,app.sub));const appIcon=el('span','amin-app-icon');appIcon.append(icon(app.id));card.append(appIcon,copy,el('span','amin-card-arrow','↗'));card.addEventListener('click',()=>showApp(app.id));cards.append(card);
         const pane=el('section','amin-app-pane');pane.dataset.app=app.id;pane.hidden=true;pane.setAttribute('aria-label',app.name);panes[app.id]=pane;
     }
     const notice=el('div','amin-notice');notice.hidden=true;notice.setAttribute('role','status');
