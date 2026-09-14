@@ -74,3 +74,10 @@
 #amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card:focus-visible{outline:2px solid #fff;outline-offset:-4px}
 
 #amin-os[data-desktop-style=win10] .amin-drawer:has(.amin-home:not([hidden])) .amin-brand-icon{color:#f3f3f3}
+
+#amin-os .amin-height-grip{position:absolute;left:calc(50% - 36px);width:72px;height:14px;z-index:20;cursor:ns-resize;touch-action:none;display:grid;place-items:center;outline:none}
+#amin-os .amin-height-grip[data-edge=top]{top:0}
+#amin-os .amin-height-grip[data-edge=bottom]{bottom:0}
+#amin-os .amin-height-grip::after{content:'';width:36px;height:3px;border-radius:3px;background:var(--amin-muted);opacity:.65}
+#amin-os .amin-height-grip:hover::after,#amin-os .amin-height-grip:focus-visible::after{background:var(--amin-accent);opacity:1;height:4px}
+#amin-os.amin-resizing-height,#amin-os.amin-resizing-height *{cursor:ns-resize!important;user-select:none!important}

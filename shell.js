@@ -1,7 +1,7 @@
 import {createTileDesktop} from './tile-desktop.js';
 import {createBrandMark,createCollapseMark} from './brand.js';
 import {getAppearance} from './settings/appearance.js';
-import { clampPosition, drawerPlacement } from './window-state.js';
+import { clampPosition, drawerPlacement, resizedHeight } from './window-state.js';
 
 const APPS=[
     {id:'information',name:'信息面板',sub:'检索资料与编辑人物、事物和世界',icon:'▤',color:'mint'},
@@ -41,26 +41,37 @@ export function createShell(){
     const notice=el('div','amin-notice');notice.hidden=true;notice.setAttribute('role','status');
     const message=el('p'),retry=el('button','amin-retry','重试');retry.type='button';retry.addEventListener('click',()=>showApp(active));notice.append(message,retry);
     area.append(home,...Object.values(panes),notice);drawer.append(head,nav,area);
+    const resizeGrip=el('div','amin-height-grip');resizeGrip.tabIndex=0;resizeGrip.setAttribute('role','slider');resizeGrip.setAttribute('aria-label','调整窗口高度');resizeGrip.setAttribute('aria-orientation','vertical');resizeGrip.title='上下拖动调整高度 · 双击恢复自动高度';drawer.append(resizeGrip);
     root.append(drawer,launcher);document.body.append(root);
     let saved;try{saved=JSON.parse(localStorage.getItem(STORE));}catch{}
     const viewport=()=>({width:document.documentElement.clientWidth||innerWidth,height:window.visualViewport?.height||innerHeight});
-    const initial=viewport();
+    const initial=viewport();let manualHeight=Number.isFinite(saved?.height)&&saved.height>0?saved.height:null,resizing=null;let configuredHeight=getAppearance()?.snapshot().window.height;
     let position=clampPosition(saved??{x:initial.width-142,y:initial.height-78},initial.width,initial.height);
     function place(){
         const {width,height}=viewport();
         position=clampPosition(position,width,height);launcher.style.left=position.x+'px';launcher.style.top=position.y+'px';
         const options=getAppearance()?.snapshot().window;
-        let rect=drawerPlacement(position,width,height,options);
+        let rect=drawerPlacement(position,width,height,{...options,...(manualHeight===null?{}:{height:manualHeight})});
         Object.assign(drawer.style,{left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:rect.height+'px'});
-        if(opened&&active==='home'){
+        if(opened&&active==='home'&&manualHeight===null){
             const contentHeight=Math.ceil(head.getBoundingClientRect().height+nav.getBoundingClientRect().height+home.scrollHeight+4);
             rect=drawerPlacement(position,width,height,{...options,height:Math.min(rect.height,contentHeight)});
             Object.assign(drawer.style,{top:rect.y+'px',height:rect.height+'px'});
         }
+        syncGrip();
     }
-    function save(){try{localStorage.setItem(STORE,JSON.stringify(position));}catch{}}
+    function save(){try{localStorage.setItem(STORE,JSON.stringify({...position,height:manualHeight}));}catch{}}
+    function resizeLimits(){const v=viewport(),r=drawerPlacement(position,v.width,v.height,{height:Number.MAX_SAFE_INTEGER});return {edge:r.y<position.y?'top':'bottom',available:r.height};}
+    function syncGrip(){const limits=resizeLimits();resizeGrip.dataset.edge=limits.edge;resizeGrip.setAttribute('aria-valuemin',String(Math.round(Math.min(220,limits.available))));resizeGrip.setAttribute('aria-valuemax',String(Math.round(limits.available)));resizeGrip.setAttribute('aria-valuenow',String(Math.round(parseFloat(drawer.style.height)||0)));resizeGrip.setAttribute('aria-valuetext',`${Math.round(parseFloat(drawer.style.height)||0)} 像素`);}
+    function endResize(cancel=false){if(!resizing)return;const previous=resizing;resizing=null;if(cancel)manualHeight=previous.original;root.classList.remove('amin-resizing-height');if(resizeGrip.hasPointerCapture(previous.id))resizeGrip.releasePointerCapture(previous.id);place();save();}
+    resizeGrip.addEventListener('pointerdown',e=>{if(!e.isPrimary||e.button!==0)return;e.preventDefault();e.stopPropagation();const limits=resizeLimits();resizing={id:e.pointerId,y:e.clientY,start:drawer.getBoundingClientRect().height,original:manualHeight,...limits};resizeGrip.setPointerCapture(e.pointerId);root.classList.add('amin-resizing-height');});
+    resizeGrip.addEventListener('pointermove',e=>{if(resizing?.id!==e.pointerId)return;e.preventDefault();manualHeight=resizedHeight(resizing.start,e.clientY-resizing.y,resizing.edge,resizing.available);place();});
+    resizeGrip.addEventListener('pointerup',()=>endResize());resizeGrip.addEventListener('pointercancel',()=>endResize(true));resizeGrip.addEventListener('lostpointercapture',()=>endResize(true));
+    resizeGrip.addEventListener('dblclick',()=>{endResize(true);manualHeight=null;place();save();});
+    resizeGrip.addEventListener('keydown',e=>{if(e.key==='Escape'&&resizing){e.preventDefault();e.stopPropagation();endResize(true);return;}if(!['ArrowUp','ArrowDown','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const {edge,available}=resizeLimits();manualHeight=e.key==='Home'?Math.min(220,available):e.key==='End'?available:resizedHeight(drawer.getBoundingClientRect().height,(e.key==='ArrowUp'?-1:1)*(e.shiftKey?40:10),edge,available);place();save();});
+    window.addEventListener('blur',()=>endResize(true));
     function open(){opened=true;drawer.hidden=false;launcher.setAttribute('aria-expanded','true');launcher.setAttribute('aria-label','收起 Amin os');place();}
-    function close(){tileDesktop?.leave();opened=false;drawer.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
+    function close(){endResize(true);tileDesktop?.leave();opened=false;drawer.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
     function select(id){active=id;nav.hidden=id==='home';appHeading.textContent=APPS.find(a=>a.id===id)?.name??'';home.hidden=id!=='home';for(const [key,pane]of Object.entries(panes)){pane.hidden=key!==id;tabs[key].setAttribute('aria-current',key===id?'page':'false');}homeButton.setAttribute('aria-current',id==='home'?'page':'false');notice.hidden=true;}
     function showHome(){epoch++;select('home');open();if(blocked){message.textContent=blocked;retry.hidden=true;notice.hidden=false;}}
     async function showApp(id){
@@ -79,7 +90,7 @@ export function createShell(){
     launcher.addEventListener('pointermove',e=>{if(drag?.id!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.hypot(dx,dy)>5)drag.moved=true;if(drag.moved){position={x:drag.start.x+dx,y:drag.start.y+dy};place();}});
     const stop=e=>{if(drag?.id!==e.pointerId)return;suppressClick=drag.moved;drag=null;save();};
     for(const name of ['pointerup','pointercancel','lostpointercapture'])launcher.addEventListener(name,stop);
-    getAppearance()?.subscribe(place);
+    getAppearance()?.subscribe(()=>{const next=getAppearance().snapshot().window.height;if(next!==configuredHeight){configuredHeight=next;manualHeight=null;save();}place();});
     window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);place();select('home');
     tileDesktop=createTileDesktop({home,cards,apps:APPS,createIcon:icon,openApp:showApp,onLayout:place});
     return {panes,open:resume,close,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};

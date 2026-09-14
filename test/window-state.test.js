@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {clampPosition,drawerPlacement} from '../window-state.js';
+import {clampPosition,drawerPlacement,resizedHeight} from '../window-state.js';
 test('launcher and drawer stay visible after moving from a large screen to mobile',()=>{
   for(const [w,h]of [[1440,900],[390,844],[320,568],[844,390]]){
     const p=clampPosition({x:1400,y:880},w,h),r=drawerPlacement(p,w,h);
@@ -17,4 +17,10 @@ test('moving the launcher near the top or bottom never covers application contro
     assert.ok(r.y+r.height<=p.y-12||r.y>=p.y+64);
     assert.ok(r.height>0&&r.y>=8&&r.y+r.height<=836);
   }
+});
+
+test('vertical resizing follows the free edge and stays within usable screen height',()=>{
+ assert.equal(resizedHeight(500,100,'top',700),400);assert.equal(resizedHeight(500,100,'bottom',700),600);
+ assert.equal(resizedHeight(500,-1000,'top',700),700);assert.equal(resizedHeight(500,1000,'top',700),220);
+ assert.equal(resizedHeight(500,0,'bottom',150),150);assert.equal(resizedHeight(NaN,NaN,'top',700),220);
 });

@@ -9,3 +9,9 @@ export function drawerPlacement(p,width,height,options={}){
     const h=Math.min(options.height??720,upwards?above:below);
     return {width:w,height:h,x:Math.max(8,Math.min(p.x+126-w,width-w-8)),y:upwards?p.y-h-12:p.y+64};
 }
+
+export function resizedHeight(start,delta,edge,available){
+ const max=Math.max(0,Number.isFinite(available)?available:0),min=Math.min(220,max);
+ const value=(Number.isFinite(start)?start:min)+(Number.isFinite(delta)?delta:0)*(edge==='top'?-1:1);
+ return Math.max(min,Math.min(max,value));
+}
