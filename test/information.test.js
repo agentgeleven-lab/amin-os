@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {empty,apply,current,compile,KEY} from '../apps/information/model.js';
 import {createInformation,PROMPT_KEY} from '../apps/information/service.js';
 import {parseFields,generateRecord,simulate} from '../apps/information/generator.js';
-import {retrieve,webSearch,searchEndpoint} from '../apps/information/sources.js';
+import {retrieve,webSearch,searchEndpoint,localSources} from '../apps/information/sources.js';
 const chat=[{name:'a',mes:'hello',is_user:true}];
 const record=()=>({id:'r',name:'甲',kind:'person',mode:'retcon',fields:[{id:'f',category:'身份',label:'职业',value:'守卫',status:'known',sources:[]}]});
 test('drafts do not mutate committed state, application diffs delete old facts, rollback is a new version',()=>{
@@ -55,4 +55,15 @@ test('regeneration cannot restore deliberately deleted fields from old sources',
  const ai={capture:()=>({}),generate:async()=>++calls===1?'{"queries":["甲"]}':JSON.stringify({fields:[{category:'身份',label:'职业',value:'守卫',status:'known',sources:[{id:'x:0',quote:'甲是守卫'}]}]})};
  const result=await generateRecord({ai,ctx:{},existing,options:{name:'甲',kind:'person',scope:'local',sourceLimit:90000},loadLocal:async()=>[{id:'x',title:'甲',text:'甲是守卫'}]});
  assert.deepEqual(result.record.fields,[]);assert.deepEqual(result.record.removed,existing.removed);
+});
+
+test('reading a character includes bound and extra books but not unselected globals, with deduplication',async()=>{
+ const reads=[];const ctx={characterId:0,characters:[{name:'甲',avatar:'a.png',data:{description:'甲',extensions:{world:'主书'}}}],worldInfoSettings:{world_info:{globalSelect:['全局'],charLore:[{name:'a',extraBooks:['附书']}]}},loadWorldInfo:async name=>{reads.push(name);return {entries:{0:{content:name},1:{content:'停用',disable:true}}};}};
+ const docs=await localSources(ctx,{books:['主书'],includeChat:false});assert.deepEqual(reads,['主书','附书']);assert.equal(docs.length,3);assert.ok(docs.some(d=>d.text==='附书'));assert.ok(!docs.some(d=>d.text==='停用'));
+ reads.length=0;await localSources(ctx,{includeCard:false,includeChat:false});assert.deepEqual(reads,[]);
+ await localSources(ctx,{books:['全局'],includeCard:false,includeChat:false});assert.deepEqual(reads,['全局']);
+});
+test('group cards include each member book and embedded fallback without reading unrelated cards',async()=>{
+ const reads=[];const ctx={groupId:'g',groups:[{id:'g',members:['a.png','b.png']}],characters:[{name:'甲',avatar:'a.png',data:{extensions:{world:'主书'}}},{name:'乙',avatar:'b.png',data:{character_book:{entries:[{content:'乙的内嵌设定',enabled:true},{content:'不可读取',enabled:false}]}}},{name:'丙',avatar:'c.png',data:{extensions:{world:'无关'}}}],worldInfoSettings:{},loadWorldInfo:async name=>{reads.push(name);return {entries:{0:{content:'甲的设定'}}};}};
+ const docs=await localSources(ctx,{includeChat:false});assert.deepEqual(reads,['主书']);assert.equal(docs.length,4);assert.ok(docs.some(d=>d.text==='乙的内嵌设定'));assert.ok(!docs.some(d=>d.text==='不可读取'));
 });

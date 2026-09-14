@@ -3,7 +3,13 @@ import {hostWorldSettings} from '../reply/world-context.js';
 export const catalog=async ctx=>bookCatalog(ctx,await hostWorldSettings(ctx));
 export async function localSources(ctx,{books=[],includeCard=true,includeChat=true,check=()=>{}}={}){
  const docs=[];check();
- if(books.length){const available=await catalog(ctx);check();for(const name of books){const book=available.find(b=>b.name===name);if(!book)throw Error(`世界书「${name}」已停用或解绑，请刷新来源`);const entries=await readBook(ctx,book);check();for(const e of entries)docs.push({id:'book:'+JSON.stringify([name,e.id]),title:name+' / '+(e.title||'条目 '+e.id),text:e.content});}}
+ if(books.length||includeCard){
+  const available=await catalog(ctx);check();const selected=new Map();
+  for(const name of books){const book=available.find(b=>b.name===name);if(!book)throw Error(`世界书「${name}」已停用或解绑，请刷新来源`);selected.set(book.name,book);}
+  if(includeCard)for(const book of available)if(book.sources.some(s=>['角色绑定','角色附加','角色内嵌'].includes(s)))selected.set(book.name,book);
+  for(const book of selected.values()){const entries=await readBook(ctx,book);check();for(const e of entries)docs.push({id:'book:'+JSON.stringify([book.name,e.id]),title:book.name+' / '+(e.title||'条目 '+e.id),text:e.content});}
+ }
+
  if(includeCard){const group=(ctx.groups??[]).find(g=>String(g.id)===String(ctx.groupId));const chars=group?(ctx.characters??[]).filter(c=>group.members?.includes(c.avatar)):[ctx.characters?.[ctx.characterId]].filter(Boolean);
   for(const c of chars){const d=c.data??c;docs.push({id:'card:'+c.avatar,title:'角色卡 · '+c.name,text:JSON.stringify({name:c.name,description:d.description??c.description,personality:d.personality??c.personality,scenario:d.scenario??c.scenario,mes_example:d.mes_example??c.mes_example})});}
  }

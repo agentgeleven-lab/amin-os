@@ -25,7 +25,6 @@ export function mount(target){
  async function books(){const t=api.capture(),run=++epoch;const found=await catalog(api.check(t));api.check(t);if(run!==epoch)return;bookList=found;options.books=loaded?options.books.filter(n=>found.some(b=>b.name===n)):found.map(b=>b.name);loaded=true;render();say(`已载入 ${found.length} 本可选世界书`);}
  async function generate(){
   if(!options.name.trim())throw Error('请填写人物、事物或世界名称');if(!Number.isInteger(options.sourceLimit)||options.sourceLimit<5000||options.sourceLimit>400000)throw Error('资料字符预算需为 5000–400000');
-  if(options.scope!=='web'&&!loaded)throw Error('请先刷新世界书列表并选择检索范围；没有世界书时仍可选角色卡和聊天');
   if(options.scope!=='local'){searchEndpoint(options.webEndpoint,location.origin);if(!options.webKey.trim())throw Error('请在检索设置填写搜索 API Key');}
   stop();const run=epoch,c=new AbortController();controller=c;const t=api.capture(),settings=structuredClone(options);const old=selectedId?current(api.read(),api.context().chat).find(r=>r.id===selectedId&&r.name===settings.name&&r.kind===settings.kind):null;const inputOld=draft&&draft.name===settings.name&&draft.kind===settings.kind?structuredClone(draft):old;
   const guard=()=>{api.check(t);if(run!==epoch||c.signal.aborted)throw Error('已取消或切换页面');};render();say('开始检索资料…');
@@ -59,7 +58,7 @@ export function mount(target){
   input(c,'对象或世界名称',options.name,v=>changed('name',v));select(c,'对象类型',options.kind,[['person','人物'],['thing','物品 / 地点 / 组织等事物'],['world','世界']],v=>changed('kind',v));
   input(c,'整理要求 / 新增设定要求',options.requirement,v=>changed('requirement',v),{area:true,placeholder:'例如：整理身份、经历和技能；额外设计一个资料里没有的天赋。'});check(c,'允许按要求创造资料里没有的信息',options.allowInvent,v=>changed('allowInvent',v));
   select(c,'检索范围',options.scope,[['local','酒馆资料'],['web','互联网'],['both','酒馆资料＋互联网']],v=>{changed('scope',v);render();});
-  if(options.scope!=='web'){button(c,'刷新世界书列表',books);for(const b of bookList)check(c,b.name+' · '+b.sources.join(' / '),options.books.includes(b.name),v=>{stop();options.books=v?[...options.books,b.name]:options.books.filter(n=>n!==b.name);});check(c,'读取当前角色卡',options.includeCard,v=>changed('includeCard',v));check(c,'检索当前聊天记录',options.includeChat,v=>changed('includeChat',v));if(!loaded)c.append(node('p','请先刷新列表；系统只检索勾选的来源。'));}
+  if(options.scope!=='web'){button(c,'刷新世界书列表',books);for(const b of bookList)check(c,b.name+' · '+b.sources.join(' / '),options.books.includes(b.name),v=>{stop();options.books=v?[...options.books,b.name]:options.books.filter(n=>n!==b.name);});check(c,'读取当前角色卡及其绑定世界书',options.includeCard,v=>changed('includeCard',v));check(c,'检索当前聊天记录',options.includeChat,v=>changed('includeChat',v));if(!loaded)c.append(node('p','角色卡选项会自动读取角色绑定、附加及可用的内嵌世界书；如需额外世界书，请刷新列表勾选。'));}
   if(options.scope!=='local'){input(c,'联网搜索词（空白使用对象名称）',options.webQuery,v=>changed('webQuery',v));c.append(node('p','联网使用检索设置中的 Tavily 或兼容代理。仅将联网搜索词发给搜索服务；结果与所选资料会交给共享 AI 整理。'));}
   const more=node('details');more.append(node('summary','检索细节'));c.append(more);input(more,'补充检索关键词（逗号分隔）',options.keywords,v=>changed('keywords',v));input(more,'送入模型的资料字符预算',options.sourceLimit,v=>changed('sourceLimit',Number(v)),{type:'number'});
   const go=button(c,'AI 搜索并生成草稿',generate,true);go.disabled=!!controller;go.dataset.running='true';button(c,'取消生成',()=>{stop();render();say('已取消，原面板和草稿保持不变');});
