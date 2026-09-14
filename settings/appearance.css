@@ -97,3 +97,8 @@
 #amin-os[data-amin-surface] .amin-app-card{min-height:112px;padding:16px;gap:12px}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card:last-child{min-height:68px;padding-right:44px}
 #amin-os[data-amin-surface] .amin-card-copy{gap:0}
+
+/* Isolate SVG alignment from host button line-height, padding and transforms. */
+#amin-os .amin-icon-button{display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0}
+#amin-os .amin-icon-button .amin-collapse-mark{display:block;width:18px;height:18px;flex:none;margin:0;padding:0;position:static;transform:none;pointer-events:none}
+#amin-os .amin-brand-icon .amin-orbit-mark,#amin-os .amin-mark .amin-orbit-mark{margin:0;padding:0;position:static;transform:none;align-self:center;justify-self:center;max-width:none;max-height:none}
