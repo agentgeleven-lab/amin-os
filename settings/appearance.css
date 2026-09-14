@@ -103,7 +103,9 @@
 #amin-os .amin-icon-button .amin-collapse-mark{display:block;width:18px;height:18px;flex:none;margin:0;padding:0;position:static;transform:none;pointer-events:none}
 #amin-os .amin-brand-icon .amin-orbit-mark,#amin-os .amin-mark .amin-orbit-mark{margin:0;padding:0;position:static;transform:none;align-self:center;justify-self:center;max-width:none;max-height:none}
 
-@font-face{font-family:'Amin Allura';src:url('../assets/fonts/Allura-Regular.ttf') format('truetype');font-weight:400;font-style:normal;font-display:swap}
-#amin-os[data-amin-surface] .amin-brand>div>div:first-child,#amin-os[data-amin-surface] .amin-launcher-name{font-family:'Amin Allura','Segoe Script',cursive;font-weight:400;font-style:normal;font-synthesis:none;letter-spacing:0;white-space:nowrap}
-#amin-os[data-amin-surface] .amin-brand>div>div:first-child{font-size:clamp(28px,calc(var(--amin-font) + 19px),38px);line-height:1.15}
-#amin-os[data-amin-surface] .amin-launcher-name{font-size:clamp(22px,calc(var(--amin-font) + 10px),26px);line-height:1.2}
+/* Approved calligraphy artwork; alpha mask inherits the global theme ink. */
+#amin-os[data-amin-surface] .amin-wordmark,#amin-os[data-amin-surface] .amin-launcher-name{display:block;background:var(--amin-text);-webkit-mask:url('../assets/brand/wordmark-mask.svg') center/contain no-repeat;mask:url('../assets/brand/wordmark-mask.svg') center/contain no-repeat;font-size:0!important;line-height:0!important;color:transparent!important;letter-spacing:0;flex-shrink:0}
+#amin-os[data-amin-surface] .amin-wordmark{width:120px;height:40px}
+#amin-os[data-amin-surface] .amin-launcher-name{width:76px;height:26px}
+#amin-os[data-amin-surface] .amin-launcher{gap:6px;padding:9px 8px}
+#amin-os[data-amin-surface] .amin-launcher .amin-mark{width:22px;height:24px;flex-basis:22px}

@@ -24,7 +24,7 @@ export function createShell(){
     const launcher=el('button','amin-launcher');launcher.type='button';launcher.title='点击打开 Amin os · 拖动移动';launcher.setAttribute('aria-label','打开 Amin os');launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-controls','amin-drawer');
     const launcherMark=el('span','amin-mark');launcherMark.append(createBrandMark(document,{compact:true}));launcher.append(launcherMark,el('span','amin-launcher-name','Amin os'));
     const drawer=el('section','amin-drawer');drawer.id='amin-drawer';drawer.setAttribute('aria-label','Amin os 应用侧栏');drawer.hidden=true;
-    const head=el('header','amin-head'),brand=el('div','amin-brand');const brandCopy=el('div');brandCopy.append(el('div',null,'Amin os'));const brandMark=el('span','amin-brand-icon');brandMark.append(createBrandMark());brand.append(brandMark,brandCopy);
+    const head=el('header','amin-head'),brand=el('div','amin-brand');const brandCopy=el('div');brandCopy.append(el('div','amin-wordmark','Amin os'));const brandMark=el('span','amin-brand-icon');brandMark.append(createBrandMark());brand.append(brandMark,brandCopy);
     const collapse=el('button','amin-icon-button');collapse.append(createCollapseMark());collapse.type='button';collapse.title='收起';collapse.setAttribute('aria-label','收起 Amin os');head.append(brand,collapse);
     const nav=el('nav','amin-app-nav');nav.setAttribute('aria-label','应用导航');
     const homeButton=el('button','amin-home-tab','⌂');homeButton.type='button';homeButton.title='首页';homeButton.setAttribute('aria-label','Amin os 首页');nav.append(homeButton);

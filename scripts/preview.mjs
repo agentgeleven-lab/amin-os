@@ -11,6 +11,6 @@ const server=http.createServer((req,res)=>{let pathname;try{pathname=decodeURICo
  if(fixtures[pathname]){res.writeHead(200,{'Content-Type':'text/javascript;charset=utf-8'});res.end(fixtures[pathname]);return;}
  const file=path.resolve(root,'.'+(pathname==='/'?'/preview.html':pathname));
  if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
- try{const contents=fs.readFileSync(file);res.writeHead(200,{'Content-Type':({'.js':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json'})[path.extname(file)]+';charset=utf-8','Cache-Control':'no-store'});res.end(contents);}catch{res.writeHead(404).end();}
+ try{const contents=fs.readFileSync(file);res.writeHead(200,{'Content-Type':({'.svg':'image/svg+xml','.png':'image/png','.ttf':'font/ttf','.js':'text/javascript','.css':'text/css','.html':'text/html','.json':'application/json'})[path.extname(file)]+';charset=utf-8','Cache-Control':'no-store'});res.end(contents);}catch{res.writeHead(404).end();}
 });
 server.listen(Number(process.env.PORT??8766),'127.0.0.1',()=>console.log('Amin os preview: http://127.0.0.1:'+server.address().port));
