@@ -1,7 +1,7 @@
 export const TILE_KEY='amin-os.tiles.v1';
 export const defaultTiles=()=>[
  {id:'map',size:'wide'},{id:'status',size:'medium'},{id:'reply',size:'medium'},
- {id:'effects',size:'wide'},{id:'ai',size:'small'},{id:'settings',size:'small'},
+ {id:'information',size:'wide'},{id:'effects',size:'wide'},{id:'ai',size:'small'},{id:'settings',size:'small'},
 ];
 export function normalizeTiles(value){
  const defaults=defaultTiles(),known=new Map(defaults.map(t=>[t.id,t])),seen=new Set(),result=[];

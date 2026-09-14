@@ -24,6 +24,7 @@ export function initialize() {
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const apps={
+        information:()=>import('./apps/information/view.js').then(m=>m.mount(shell.panes.information)),
         effects:()=>import('./apps/effects/view.js').then(m=>m.mount(shell.panes.effects)),
         settings:()=>import('./settings/view.js').then(m=>m.mount(shell.panes.settings)),
         ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
@@ -45,7 +46,7 @@ export function initialize() {
     installReplyFloorButtons();
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.6.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.7.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

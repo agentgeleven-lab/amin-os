@@ -1,0 +1,78 @@
+import {getAI} from '../../ai/service.js';
+import {createInformation} from './service.js';
+import {current,apply,diff,compile,matches,path,fieldKey} from './model.js';
+import {catalog,searchEndpoint} from './sources.js';
+import {generateRecord,simulate} from './generator.js';
+const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
+const STATUS={known:'资料记载',inferred:'待确认推测',invented:'新增设定',unknown:'未知',edited:'手动改写'};
+export function mount(target){
+ const api=createInformation(()=>globalThis.SillyTavern?.getContext?.());const page=node('div',null,'amin-page amin-information'),intro=node('div','查看资料，编辑设定，预览后应用。','amin-context'),tabs=node('nav',null,'amin-tabs'),notice=node('div',null,'amin-notice'),body=node('section');tabs.setAttribute('aria-label','信息面板页面');tabs.setAttribute('role','tablist');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');body.id='amin-information-body';body.setAttribute('role','tabpanel');page.append(intro,tabs,notice,body);target.append(page);
+ let tab='资料面板',draft=null,base=null,token=null,editing=false,review=false,simulation=null,search=null,controller=null,epoch=0,bookList=[],loaded=false,selectedId='',drafts=new Map();
+ const options={name:'',kind:'person',requirement:'',allowInvent:false,scope:'local',books:[],includeCard:true,includeChat:true,keywords:'',sourceLimit:90000,webQuery:'',webKey:'',webEndpoint:'https://api.tavily.com/search'};
+ const say=text=>notice.textContent=text;
+ function stop(){epoch++;controller?.abort();controller=null;}
+ const button=(parent,text,fn,primary=false)=>{const b=node('button',text,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
+ const labels=['资料面板','生成资料','历史版本','检索设置'];const tabButtons=labels.map((name,i)=>{const b=button(tabs,name,()=>{stop();tab=name;render();});b.id='amin-information-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;});
+ tabs.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const i=labels.indexOf(tab),next=e.key==='Home'?0:e.key==='End'?3:(i+(e.key==='ArrowRight'?1:3))%4;stop();tab=labels[next];render();tabButtons[next].focus();};
+ function input(parent,label,value,update,{area=false,type='text',placeholder=''}={}){const row=node('label',label),e=node(area?'textarea':'input');if(!area)e.type=type;e.value=value??'';e.placeholder=placeholder;e.setAttribute('aria-label',label);if(area)e.rows=4;e.oninput=()=>update(e.value);row.append(e);parent.append(row);return e;}
+ function select(parent,label,value,values,update){const row=node('label',label),e=node('select');e.setAttribute('aria-label',label);for(const [v,text]of values){const o=node('option',text);o.value=v;e.append(o);}e.value=value;e.onchange=()=>update(e.value);row.append(e);parent.append(row);return e;}
+ function check(parent,label,value,update){const row=node('label',null,'amin-info-check'),e=node('input');e.type='checkbox';e.checked=value;e.setAttribute('aria-label',label);e.onchange=()=>update(e.checked);row.append(e,node('span',label));parent.append(row);return e;}
+ function card(title,parent=body){const c=node('section',null,'amin-card');if(title)c.append(node('h3',title));parent.append(c);return c;}
+ function dirty(){stop();review=false;simulation=null;}
+ function newDraft(record,old=null){draft=structuredClone(record);base=structuredClone(old);token=api.capture();selectedId=record.id;editing=false;review=false;simulation=null;tab='资料面板';render();}
+ function keepDraft(){if(draft)drafts.set(draft.id,{draft,base,token,search});}
+ function choose(id){stop();keepDraft();selectedId=id;const cached=drafts.get(id);if(cached){({draft,base,token,search}=cached);}else{const record=current(api.read(),api.context().chat).find(r=>r.id===id);draft=structuredClone(record);base=structuredClone(record);token=api.capture();search=null;}editing=false;review=false;simulation=null;render();}
+ async function books(){const t=api.capture(),run=++epoch;const found=await catalog(api.check(t));api.check(t);if(run!==epoch)return;bookList=found;options.books=loaded?options.books.filter(n=>found.some(b=>b.name===n)):found.map(b=>b.name);loaded=true;render();say(`已载入 ${found.length} 本可选世界书`);}
+ async function generate(){
+  if(!options.name.trim())throw Error('请填写人物、事物或世界名称');if(!Number.isInteger(options.sourceLimit)||options.sourceLimit<5000||options.sourceLimit>400000)throw Error('资料字符预算需为 5000–400000');
+  if(options.scope!=='web'&&!loaded)throw Error('请先刷新世界书列表并选择检索范围；没有世界书时仍可选角色卡和聊天');
+  if(options.scope!=='local'){searchEndpoint(options.webEndpoint,location.origin);if(!options.webKey.trim())throw Error('请在检索设置填写搜索 API Key');}
+  stop();const run=epoch,c=new AbortController();controller=c;const t=api.capture(),settings=structuredClone(options);const old=selectedId?current(api.read(),api.context().chat).find(r=>r.id===selectedId&&r.name===settings.name&&r.kind===settings.kind):null;const inputOld=draft&&draft.name===settings.name&&draft.kind===settings.kind?structuredClone(draft):old;
+  const guard=()=>{api.check(t);if(run!==epoch||c.signal.aborted)throw Error('已取消或切换页面');};render();say('开始检索资料…');
+  try{const result=await generateRecord({ai:getAI(),ctx:api.check(t),options:settings,existing:inputOld,signal:c.signal,check:guard,report:text=>{if(run===epoch)say(text);}});guard();keepDraft();search=result.search;controller=null;newDraft(result.record,old);say(`资料草稿已生成：采用 ${search.report.included} 个片段，预算外 ${search.report.omitted} 个。检查后再应用。`);}
+  catch(e){if(run===epoch)say(c.signal.aborted?'已取消，原面板保持不变':e.message);}
+  finally{if(controller===c)controller=null;body.querySelectorAll('[data-running]').forEach(e=>e.disabled=false);}
+ }
+ async function runSimulation(){api.check(token);stop();const run=epoch,c=new AbortController();controller=c;const guard=()=>{api.check(token);if(run!==epoch||c.signal.aborted)throw Error('已取消');};say('正在模拟改写的关联影响…');
+  try{const result=await simulate({ai:getAI(),ctx:api.check(token),before:base,draft:structuredClone(draft),requirement:options.requirement,signal:c.signal,check:guard});guard();simulation=result;controller=null;render();say('模拟完成，建议尚未采用，面板尚未应用。');}catch(e){if(run===epoch)say(c.signal.aborted?'已取消模拟':e.message);}finally{if(controller===c)controller=null;}
+ }
+ function editField(field){stop();tab='资料面板';const c=card('编辑字段');body.replaceChildren(c);input(c,'分类',field.category,v=>{field.category=v;dirty();});input(c,'字段名称',field.label,v=>{field.label=v;dirty();});input(c,'字段值',field.value,v=>{field.value=v;field.status='edited';dirty();},{area:true});button(c,'完成编辑',()=>{if(!field.category.trim()||!field.label.trim())throw Error('分类和字段名称不能为空');field.status='edited';dirty();render();},true);button(c,'删除字段',()=>{draft.fields=draft.fields.filter(f=>f.id!==field.id);dirty();render();});}
+ function sourceDetails(parent,sources){if(!sources?.length)return;const d=node('details');d.append(node('summary','查看来源'));for(const s of sources){d.append(node('p',s.title),node('blockquote',s.quote));if(s.url){const a=node('a','打开来源网页');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);}}parent.append(d);}
+ function board(){
+  const saved=current(api.read(),api.context().chat),choices=new Map(saved.map(r=>[r.id,r]));for(const [id,c]of drafts)choices.set(id,c.draft);if(draft)choices.set(draft.id,draft);
+  if(choices.size)select(body,'选择面板',selectedId,[['','请选择面板'],...[...choices.values()].map(r=>[r.id,r.name+(r.kind==='world'?' · 世界':'')])],id=>{if(id)choose(id);});
+  const actions=node('div',null,'amin-toolbar');body.append(actions);button(actions,'AI 搜索并生成',()=>{stop();tab='生成资料';if(draft){options.name=draft.name;options.kind=draft.kind;}render();},true);button(actions,'新建空白面板',()=>{keepDraft();search=null;newDraft({id:crypto.randomUUID(),name:'新面板',kind:'person',mode:'retcon',fields:[]});editing=true;render();});
+  if(!draft){body.append(node('p','选择人物、物品或整个世界，让 AI 整理资料，或从空白面板开始。'));return;}
+  const heading=card(draft.name);heading.append(node('p',`${{person:'人物面板',thing:'事物面板',world:'世界面板'}[draft.kind]} · ${draft.fields.length} 个字段 · ${base?'已保存版本可供对比':'尚未应用的新面板'}`));
+  const toolbar=node('div',null,'amin-toolbar');heading.append(toolbar);button(toolbar,editing?'完成字段编辑':'编辑字段',()=>{stop();editing=!editing;render();});button(toolbar,'添加字段',()=>{const f={id:crypto.randomUUID(),category:'自定义',label:'新字段',value:'',status:'edited',sources:[]};draft.fields.push(f);dirty();editField(f);});
+  if(editing){input(heading,'面板名称',draft.name,v=>{draft.name=v;dirty();});select(heading,'面板类型',draft.kind,[['person','人物'],['thing','事物'],['world','世界']],v=>{draft.kind=v;dirty();});}
+  select(heading,'改写方式',draft.mode,[['retcon','现实重构：新设定一直成立，仅使用者记得改写前'],['forward','普通修改：从现在起变化，保留历史']],v=>{draft.mode=v;dirty();});
+  if(search){const d=node('details');d.append(node('summary',`检索详情 · ${search.report.included} 个片段 / ${search.report.webResults} 条联网结果`),node('p','关键词：'+search.queries.join('、')),node('p',`有 ${search.report.omitted} 个命中片段因字符预算未送入模型；结果不保证覆盖全部资料。`));for(const s of search.sources){const item=node('details');item.append(node('summary',s.title),node('pre',s.text));if(s.url){const a=node('a','搜索来源');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';item.append(a);}d.append(item);}heading.append(d);}
+  const groups=[...new Set(draft.fields.map(f=>f.category))];for(const category of groups){const section=card(category);for(const f of draft.fields.filter(f=>f.category===category)){const row=node('div',null,'amin-info-field');row.append(node('strong',f.label),node('small',STATUS[f.status],'amin-info-badge'),node('p',f.value||'（空）'));sourceDetails(row,f.sources);button(row,'编辑 '+f.label,()=>editField(f));section.append(row);}}
+  if(!draft.fields.length)body.append(node('p','还没有字段，点击“添加字段”开始编辑。'));
+  const bar=node('div',null,'amin-toolbar');body.append(bar);button(bar,'预览改写',()=>{stop();api.check(token);review=true;render();},true);button(bar,'AI 模拟演变',runSimulation);button(bar,'取消生成 / 模拟',()=>{stop();say('已取消，草稿保留');});button(bar,'放弃草稿',()=>{stop();drafts.delete(draft.id);draft=base?structuredClone(base):null;selectedId=draft?.id??'';token=draft?api.capture():null;review=false;simulation=null;render();});
+  if(simulation){const c=card('模拟结果 · 未应用');c.append(node('p',simulation.summary));for(const p of simulation.proposals)c.append(node('p',`${p.category} / ${p.label} → ${p.value}\n依据：${p.reason}`));button(c,'采用这些建议到草稿',()=>{for(const p of simulation.proposals){const f=draft.fields.find(f=>fieldKey(f)===fieldKey(p));if(f){f.value=p.value;f.status='invented';f.sources=[];}else draft.fields.push({id:crypto.randomUUID(),category:p.category,label:p.label,value:p.value,status:'invented',sources:[]});}dirty();render();say('已采用到草稿，尚未应用到剧情。');});}
+  if(review){const c=card('确认改写');const changes=diff(base,draft);c.append(node('p','只有确认后才保存并用于后续剧情。未知和待确认推测不会作为事实注入。'));for(const d of changes)c.append(node('p',`${d.category} / ${d.label}\n${d.before} → ${d.after}`));if(!changes.length)c.append(node('p','字段值无变化；将保存当前名称和改写方式。'));button(c,'确认应用到当前剧情',async()=>{await api.save(token,s=>apply(s,api.context().chat,draft));drafts.delete(draft.id);base=structuredClone(current(api.read(),api.context().chat).find(r=>r.id===draft.id));draft=structuredClone(base);token=api.capture();review=false;simulation=null;render();say('已应用。原世界书、旧聊天和其他应用的数据未改写。');},true);}
+ }
+ function generation(){
+  const c=card('查询或生成资料');const changed=(key,value)=>{stop();options[key]=value;};
+  input(c,'对象或世界名称',options.name,v=>changed('name',v));select(c,'对象类型',options.kind,[['person','人物'],['thing','物品 / 地点 / 组织等事物'],['world','世界']],v=>changed('kind',v));
+  input(c,'整理要求 / 新增设定要求',options.requirement,v=>changed('requirement',v),{area:true,placeholder:'例如：整理身份、经历和技能；额外设计一个资料里没有的天赋。'});check(c,'允许按要求创造资料里没有的信息',options.allowInvent,v=>changed('allowInvent',v));
+  select(c,'检索范围',options.scope,[['local','酒馆资料'],['web','互联网'],['both','酒馆资料＋互联网']],v=>{changed('scope',v);render();});
+  if(options.scope!=='web'){button(c,'刷新世界书列表',books);for(const b of bookList)check(c,b.name+' · '+b.sources.join(' / '),options.books.includes(b.name),v=>{stop();options.books=v?[...options.books,b.name]:options.books.filter(n=>n!==b.name);});check(c,'读取当前角色卡',options.includeCard,v=>changed('includeCard',v));check(c,'检索当前聊天记录',options.includeChat,v=>changed('includeChat',v));if(!loaded)c.append(node('p','请先刷新列表；系统只检索勾选的来源。'));}
+  if(options.scope!=='local'){input(c,'联网搜索词（空白使用对象名称）',options.webQuery,v=>changed('webQuery',v));c.append(node('p','联网使用检索设置中的 Tavily 或兼容代理。仅将联网搜索词发给搜索服务；结果与所选资料会交给共享 AI 整理。'));}
+  const more=node('details');more.append(node('summary','检索细节'));c.append(more);input(more,'补充检索关键词（逗号分隔）',options.keywords,v=>changed('keywords',v));input(more,'送入模型的资料字符预算',options.sourceLimit,v=>changed('sourceLimit',Number(v)),{type:'number'});
+  const go=button(c,'AI 搜索并生成草稿',generate,true);go.disabled=!!controller;go.dataset.running='true';button(c,'取消生成',()=>{stop();render();say('已取消，原面板和草稿保持不变');});
+ }
+ function history(){const history=api.read().history;if(!history.length){body.append(node('p','应用改写后，这里会保存每次版本与差异。'));return;}const prefix=path(api.context().chat);for(const e of [...history].reverse()){const c=card(e.snapshot?.name??'移除的面板');c.append(node('p',e.at+' · '+e.reason+' · '+(matches(e,prefix)?'当前分支':'其他分支')),node('pre',JSON.stringify(e.changes,null,2)));if(e.snapshot)button(c,'载入此版本为回滚草稿',()=>{keepDraft();search=null;newDraft(e.snapshot,current(api.read(),api.context().chat).find(r=>r.id===e.recordId));say('历史版本已载入草稿。预览并确认应用后才会回滚当前面板。');});}}
+ function settings(){
+  const c=card('联网搜索');c.append(node('p','可选择酒馆、互联网或混合检索。联网需要 Tavily 搜索密钥；也可填写返回同样格式的代理地址。密钥仅保留到本次页面刷新，不写入聊天或预设。'));
+  input(c,'搜索 API 地址',options.webEndpoint,v=>{stop();options.webEndpoint=v;});const key=input(c,'搜索 API Key',options.webKey,v=>{stop();options.webKey=v;},{type:'password'});key.autocomplete='off';button(c,'清除搜索密钥',()=>{options.webKey='';render();});
+  const s=api.read(),t=api.capture(),r=card('当前剧情提醒');let enabled=s.enabled,limit=s.limit;check(r,'生成剧情时附加本应用已确认的设定',enabled,v=>enabled=v);input(r,'提醒字符上限（1000–200000）',limit,v=>limit=Number(v),{type:'number'});button(r,'保存提醒设置',async()=>{if(!Number.isInteger(limit)||limit<1000||limit>200000)throw Error('上限需为 1000–200000');await api.save(t,s=>({...s,enabled,limit}));if(draft)token=api.capture();render();},true);
+  const d=node('details');d.append(node('summary','查看当前剧情提醒'));try{d.append(node('pre',compile(s,api.context().chat)||'无提醒'));}catch(e){d.append(node('p',e.message));}r.append(d);
+ }
+ function render(){body.replaceChildren();for(const b of tabButtons){const on=b.textContent===tab;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;if(on)body.setAttribute('aria-labelledby',b.id);}notice.textContent=api.status();try{if(tab==='资料面板')board();else if(tab==='生成资料')generation();else if(tab==='历史版本')history();else settings();}catch(e){say(e.message);}}
+ api.subscribe(()=>say(api.status()));const ctx=api.context(),events=ctx.eventTypes??ctx.event_types??{};
+ if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{stop();draft=null;base=null;token=null;search=null;simulation=null;drafts.clear();selectedId='';bookList=[];loaded=false;options.books=[];options.name='';options.requirement='';options.webQuery='';render();});
+ render();return {open(){render();}};
+}

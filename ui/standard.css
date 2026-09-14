@@ -108,3 +108,13 @@ html[data-wsh-frame][data-amin-surface] #status.error {color:var(--amin-text)!im
 #amin-os .amin-ability-tile .amin-toolbar {margin:0;padding:4px;gap:4px}
 #amin-os .amin-ability-grid.is-editing .amin-ability-launch {touch-action:none;cursor:grab}
 #amin-os .amin-ability-tile.is-dragging {outline:2px solid var(--amin-accent);opacity:.65}
+#amin-os .amin-information .amin-card {margin:var(--amin-gap) 0;padding:var(--amin-gap)}
+#amin-os .amin-information label {display:block;margin:var(--amin-gap) 0;color:var(--amin-muted)}
+#amin-os .amin-information .amin-info-check {display:flex;align-items:center;gap:8px}
+#amin-os .amin-information pre,#amin-os .amin-information blockquote {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:340px;overflow:auto;margin:8px 0;padding:8px}
+#amin-os .amin-information blockquote {border-inline-start:2px solid var(--amin-accent);color:var(--amin-muted)}
+#amin-os .amin-info-field {border-top:1px solid var(--amin-line);padding:var(--amin-gap) 0;overflow-wrap:anywhere}
+#amin-os .amin-info-field>strong {font-size:calc(var(--amin-font) + 1px)}
+#amin-os .amin-info-badge {display:inline-block;margin-inline-start:8px;padding:2px 7px;background:var(--amin-control);color:var(--amin-muted);border-radius:var(--amin-radius)}
+#amin-os .amin-information p {white-space:pre-wrap;overflow-wrap:anywhere}
+#amin-os .amin-information a {color:var(--amin-accent);text-decoration:underline}
