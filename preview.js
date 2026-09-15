@@ -11,6 +11,7 @@ async generateRaw(request){await new Promise(r=>setTimeout(r,350));
   if(request.systemPrompt?.includes('信息面板资料整理助手'))return JSON.stringify({fields:[{category:'身份',label:'身份说明',value:'星港的向导',status:'known',sources:[{id:'card:amin-preview.png:0',quote:'星港的向导'}]},{category:'能力',label:'星语资质',value:'能理解星辰低语',status:'invented',sources:[]},{category:'档案',label:'年龄',value:'未查到',status:'unknown',sources:[]}]});
   if(request.systemPrompt?.includes('信息面板模拟推演助手'))return JSON.stringify({summary:'模拟：新增职业可能需要配套经历。尚未应用。',proposals:[{category:'经历',label:'学习记录',value:'曾在星港学习星象学',reason:'为新增能力提供履历基础'}]});
   if(request.systemPrompt?.includes('持续效果规则编辑助手'))return '适用范围：仅对已确认目标和指定层面生效。\n持续：直到主动解除或转让。\n指令变更不解除所有权关系。\n死亡及继承：依原规则人工确认。';
+  if(request.systemPrompt?.includes('作者与编剧'))return JSON.stringify(['下一幕让队伍抵达观测站，发现地图与真实地形不符；围绕是否继续前进产生分歧，结尾留下站内传来的求救信号。','安排向导隐瞒一段与观测站有关的经历，通过旧物揭示线索；暂不揭露全部真相，以队伍的信任危机推动后续。','放缓节奏，让队伍在山脚整理补给，通过共同解决小问题建立默契；以远处异常的星光为下一幕埋下伏笔。']);
   if(request.systemPrompt?.includes('回复拟稿助手'))return JSON.stringify(['“那就出发吧。”我跟上她，沿着旧路向山脊走去。','“你来过这里多少次？”我望向观测站，放慢了脚步。','我把地图展开，仔细核对通往山顶的另一条路线。']);
   if(request.systemPrompt?.includes('状态')||request.prompt?.includes('状态栏'))return state('旅人');
   const {createDemoDocument}=await import('./apps/map/src/core/demo.js');return JSON.stringify(createDemoDocument());
