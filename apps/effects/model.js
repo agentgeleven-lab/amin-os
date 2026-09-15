@@ -1,7 +1,7 @@
 import {LIBRARY_KEY,mergeLibrary} from './library.js';
 export const KEY='amin_os_effects_v1';
 export const empty=()=>({version:1,skills:[],events:[],enabled:true,limit:30000});
-export function readStore(ctx){const s=ctx?.chatMetadata?.[KEY];if(s&&s.version!==1)throw Error('持续效果数据版本不兼容');const result=structuredClone(s??empty());result.skills=mergeLibrary(ctx?.extensionSettings?.[LIBRARY_KEY],result.skills).skills;return result;}
+export function readStore(ctx){const s=ctx?.chatMetadata?.[KEY];if(s&&s.version!==1)throw Error('持续效果数据版本不兼容');const result=structuredClone(s??empty());const library=mergeLibrary(ctx?.extensionSettings?.[LIBRARY_KEY],result.skills);result.skills=library.skills;result.trash=library.trash;return result;}
 // Exact prefix evidence also survives reloads and copied chat branches. No message mutations.
 export const anchor=chat=>(chat??[]).map(m=>JSON.stringify([m.name??'',!!m.is_user,m.mes??'',m.swipe_id??0]));
 export const belongs=(event,now)=>event.anchor.length<=now.length&&event.anchor.every((v,i)=>v===now[i]);
@@ -31,6 +31,18 @@ export function change(store,chat,op,data){
   else throw Error('不支持的变更');
  }
  next.events.push(event);return next;
+}
+export function splitEffect(store,chat,id,parts){
+ if(!Array.isArray(parts)||parts.length<2)throw Error('至少填写两个分割范围');
+ const effect=activeEffects(store,chat).find(e=>e.id===id);
+ if(!effect)throw Error('该效果已失效或不在当前分支');
+ let next=change(store,chat,'end',{id,reason:'分割为：'+parts.map(x=>x.scope).join('、')});
+ const skills=next.skills;
+ for(const part of parts){
+  next=change({...next,skills:[structuredClone(effect.skill)]},chat,'create',{...part,skillId:effect.skill.id,target:effect.target,command:effect.command,condition:effect.condition});
+  next.events.at(-1).effect.parentId=id;
+ }
+ next.skills=skills;return next;
 }
 export function compile(store,chat){
  if(!store.enabled)return '';

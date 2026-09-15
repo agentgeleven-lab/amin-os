@@ -1,9 +1,10 @@
+import {deleteAbility,restoreAbility} from './library.js';
 import {renderConsole,appearance} from './console.js';
 import {getAI} from '../../ai/service.js';
 import {draftRule} from './draft.js';
 import {bookCatalog,readBook} from './books.js';
 import {hostWorldSettings} from '../reply/world-context.js';
-import {activeEffects,anchor,belongs,change,compile} from './model.js';
+import {activeEffects,anchor,belongs,change,compile,splitEffect} from './model.js';
 import {getSharedService} from './service.js';
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function mount(target){
@@ -51,6 +52,11 @@ export function mount(target){
   c.append(node('p','使用 Amin os 的共享 API 和预设。AI 草稿不会自动保存，也不会改动已生效的规则快照。'));
   button(c,'保存能力',async()=>{if(!name.value.trim()||!sourceText().trim())throw Error('能力名称和原文不能为空');if(!reminder.value.trim())reminder.value=sourceText();await api.saveLibrary(token,s=>{if(!existing&&s.skills.some(x=>x.book===entry.book&&x.entryId===entry.id))throw Error('此条目已经关联');if(existing){const skill=s.skills.find(x=>x.id===existing.id);if(!skill)throw Error('技能已不存在');skill.name=name.value.trim();skill.reminder=reminder.value.trim();skill.ui=buttonConfig();if(entry.custom)skill.original=sourceText();return s;}s.skills.push({id:crypto.randomUUID(),book:entry.book,entryId:entry.id,name:name.value.trim(),original:sourceText(),custom:!!entry.custom,ui:buttonConfig(),reminder:reminder.value.trim()});return s;});finish('已保存到共享能力库，可在任意角色和聊天中发动');},true);button(c,'返回',render);
  }
+ function deleteForm(skill){const token=api.capture();stopDraft();body.replaceChildren();const c=card('删除能力：'+skill.name);
+  c.append(node('p','将从共享能力库和所有角色、聊天的能力按钮中移除。已发动效果继续保留，可在“生效中”单独暂停或解除。原世界书不受影响。'));
+  c.append(node('p','删除后可在能力管理下方的“已删除能力”中恢复。'));
+  button(c,'确认删除能力',async()=>{await api.saveLibrary(token,s=>deleteAbility(s,skill.id));finish('已删除能力；可在“已删除能力”中恢复，已发动效果保留');});button(c,'取消',render);
+ }
  function effectForm(effect){const token=api.capture(),store=api.read();body.replaceChildren();const c=card(effect?'调整指令 / 转让':'建立生效记录');let skill;
   if(!effect)skill=select(c,'技能',store.skills.map(s=>[s.id,s.name]));
   const holder=field(c,'持有者',effect?.holder??''),targetField=field(c,'目标',effect?.target??''),scope=field(c,'作用层面',effect?.scope??'');if(effect){targetField.disabled=true;scope.disabled=true;}
@@ -59,7 +65,7 @@ export function mount(target){
  }
  function endForm(effect){const token=api.capture();body.replaceChildren();const c=card('解除：'+effect.target+' / '+effect.scope),reason=field(c,'解除依据','',true);button(c,'确认解除',async()=>{await api.save(token,s=>change(s,api.context().chat,'end',{id:effect.id,reason:reason.value}));finish('已解除此项效果');},true);button(c,'取消',render);}
  function splitForm(effect){const token=api.capture();body.replaceChildren();const c=card('分割：'+effect.target+' / '+effect.scope);c.append(node('p','每行填写“作用层面 | 持有者”。保存后原关系结束，由子记录接替；请完整列出需要保留的范围。'));
-  const parts=field(c,'分割与分配','',true);button(c,'确认分割',async()=>{const rows=parts.value.split('\n').filter(x=>x.trim()).map(x=>x.split('|').map(v=>v.trim()));if(rows.length<2||rows.some(x=>x.length!==2||!x[0]||!x[1]))throw Error('至少填写两行，格式为：右手 | 持有者');await api.save(token,s=>{let next=change(s,api.context().chat,'end',{id:effect.id,reason:'分割为：'+rows.map(x=>x[0]).join('、')});for(const [scope,holder]of rows){next=change(next,api.context().chat,'create',{skillId:effect.skill.id,target:effect.target,holder,scope,command:effect.command,condition:effect.condition});next.events.at(-1).effect.parentId=effect.id;next.events.at(-1).effect.skill=structuredClone(effect.skill);}return next;});finish('已分割，子记录保留原规则快照');},true);button(c,'取消',render);
+  const parts=field(c,'分割与分配','',true);button(c,'确认分割',async()=>{const rows=parts.value.split('\n').filter(x=>x.trim()).map(x=>x.split('|').map(v=>v.trim()));if(rows.length<2||rows.some(x=>x.length!==2||!x[0]||!x[1]))throw Error('至少填写两行，格式为：右手 | 持有者');await api.save(token,s=>splitEffect(s,api.context().chat,effect.id,rows.map(([scope,holder])=>({scope,holder}))));finish('已分割，子记录保留原规则快照');},true);button(c,'取消',render);
  }
  function render(){
   body.onpointerdown=body.onpointermove=body.onpointerup=body.onpointercancel=null;
@@ -75,7 +81,8 @@ export function mount(target){
     button(body,'刷新世界书列表',load,true);
     if(books.length){const picker=select(body,'选择世界书',[['','请选择一本世界书'],...books.map(b=>[b.name,b.name+' · '+b.sources.join(' / ')])]);picker.value=chosenBook;picker.onchange=()=>{chosenBook=picker.value;entries=[];loadedBook='';loadEpoch++;render();};button(body,'读取所选世界书',loadSelected,true).disabled=!chosenBook;}
     if(loadedBook)body.append(node('p','当前查看：'+loadedBook+(entries.length?'':' · 没有启用的非空条目')));
-    for(const s of store.skills){const c=card(s.name);c.append(node('p',s.book+' · 条目 '+s.entryId));const d=node('details');d.append(node('summary','查看保存的原文与提醒规则'),node('pre',s.original),node('pre',s.reminder));c.append(d);button(c,'编辑能力',()=>importForm({book:s.book,id:s.entryId,title:s.name,content:s.original,custom:s.custom},s));}
+    for(const s of store.skills){const c=card(s.name);c.append(node('p',s.book+' · 条目 '+s.entryId));const d=node('details');d.append(node('summary','查看保存的原文与提醒规则'),node('pre',s.original),node('pre',s.reminder));c.append(d);button(c,'编辑能力',()=>importForm({book:s.book,id:s.entryId,title:s.name,content:s.original,custom:s.custom},s));button(c,'删除能力',()=>deleteForm(s));}
+    if(store.trash?.length){const deleted=node('details');deleted.append(node('summary','已删除能力 · '+store.trash.length));body.append(deleted);for(const item of store.trash){const row=node('section',null,'amin-card');row.append(node('h3',item.skill.name));button(row,'恢复能力',async()=>{const token=api.capture();await api.saveLibrary(token,s=>restoreAbility(s,item.skill.id));finish('能力已恢复到共享能力库');});deleted.append(row);}}
     if(!store.skills.length)body.append(node('p','先刷新列表，选择一本全局启用或当前绑定的世界书，再选择技能条目保存。'));
     if(entries.length){const filter=field(body,'筛选世界书条目'),list=node('div');body.append(list);const draw=()=>{list.replaceChildren();for(const e of entries.filter(e=>(e.book+e.title+e.content).includes(filter.value))){button(list,(e.title||'条目 '+e.id)+' · '+e.book,()=>importForm(e));}};filter.oninput=draw;draw();}
    }else if(selected==='生效中'){

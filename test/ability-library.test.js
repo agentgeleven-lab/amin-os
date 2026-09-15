@@ -53,3 +53,30 @@ test('multiple launches keep distinct rule versions within the same chat',()=>{
  const data=JSON.parse(text.slice(text.indexOf('{')));assert.equal(data.技能规则.length,2);
  assert.deepEqual(data.生效记录.map(e=>e.规则编号),[1,2]);
 });
+
+import {deleteAbility,restoreAbility} from '../apps/effects/library.js';
+import {activeEffects,splitEffect} from '../apps/effects/model.js';
+test('deleted shared abilities stay removed across legacy chats and reload, and can be restored',async()=>{
+ const f=fixture(),legacy={...empty(),skills:[skill()]};f.get().chatMetadata[KEY]=structuredClone(legacy);f.api.read();
+ await f.api.saveLibrary(f.api.capture(),s=>deleteAbility(s,'one'));
+ f.switchChat({[KEY]:structuredClone(legacy)});assert.equal(f.api.read().skills.length,0);assert.equal(f.api.read().trash.length,1);
+ f.get().extensionSettings=JSON.parse(JSON.stringify(f.get().extensionSettings));assert.equal(createEffects(f.get).read().skills.length,0);
+ await f.api.saveLibrary(f.api.capture(),s=>restoreAbility(s,'one'));
+ assert.deepEqual(f.api.read().skills,[skill()]);assert.equal(f.api.read().trash.length,0);
+ assert.deepEqual(f.get().chatMetadata[KEY],legacy);
+});
+test('deleting a library ability preserves effects, transfer, split, pause and end',async()=>{
+ const f=fixture();await f.api.saveLibrary(f.api.capture(),s=>({...s,skills:[skill()]}));
+ await f.api.save(f.api.capture(),s=>change(s,f.get().chat,'create',{skillId:'one',holder:'甲',target:'乙',scope:'身体',condition:'直到解除'}));
+ const prompt=compile(f.api.read(),f.get().chat);
+ await f.api.saveLibrary(f.api.capture(),s=>deleteAbility(s,'one'));
+ assert.equal(compile(f.api.read(),f.get().chat),prompt);
+ const id=activeEffects(f.api.read(),f.get().chat)[0].id;
+ await f.api.save(f.api.capture(),s=>splitEffect(s,f.get().chat,id,[{scope:'左手',holder:'甲'},{scope:'右手',holder:'丙'}]));
+ assert.equal(f.api.read().skills.length,0);const effects=activeEffects(f.api.read(),f.get().chat);assert.equal(effects.length,2);assert.ok(effects.every(e=>e.skill.reminder==='旧规则'));
+ await f.api.save(f.api.capture(),s=>change(s,f.get().chat,'update',{id:effects[0].id,holder:'丁',condition:'直到解除',command:'保持'}));
+ await f.api.save(f.api.capture(),s=>change(s,f.get().chat,'pause',{id:effects[0].id,paused:true}));
+ await f.api.save(f.api.capture(),s=>change(s,f.get().chat,'end',{id:effects[1].id,reason:'主动解除'}));
+ assert.equal(compile(f.api.read(),f.get().chat),'');assert.equal(f.api.read().trash.length,1);
+ assert.equal(f.get().chatMetadata[KEY].trash,undefined);
+});

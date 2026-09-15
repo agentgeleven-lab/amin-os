@@ -21,7 +21,9 @@ export function createEffects(getContext){
   if(!c.extensionSettings||typeof c.saveSettingsDebounced!=='function')throw Error('当前酒馆缺少全局设置保存接口');
   migrate(c);const before=c.extensionSettings[LIBRARY_KEY],store=readStore(c),events=JSON.stringify(store.events),next=update(store);
   if(JSON.stringify(next.events)!==events)throw Error('能力库不能修改聊天生效记录');
-  const library={...before,skills:structuredClone(next.skills)};busy=true;c.extensionSettings[LIBRARY_KEY]=library;
+  const trash=structuredClone(next.trash??before.trash??[]);
+  const imported=[...new Set([...before.imported,...trash.map(e=>JSON.stringify(e.skill))])];
+  const library={...before,skills:structuredClone(next.skills),trash,imported};busy=true;c.extensionSettings[LIBRARY_KEY]=library;
   try{await c.saveSettingsDebounced();message='能力库已保存，所有角色和聊天共享；已发动效果保持原规则';}
   catch(e){if(c.extensionSettings[LIBRARY_KEY]===library)c.extensionSettings[LIBRARY_KEY]=before;message='能力库保存失败：'+e.message;throw e;}
   finally{busy=false;notify();}
@@ -30,6 +32,7 @@ export function createEffects(getContext){
   if(busy)throw Error('正在保存，请稍候');const c=check(token);if(typeof c.saveMetadata!=='function')throw Error('当前酒馆缺少聊天保存接口');
   migrate(c);const before=c.chatMetadata[KEY],next=update(readStore(c));busy=true;
   if(c.extensionSettings?.[LIBRARY_KEY])next.skills=structuredClone(before?.skills??[]);
+  delete next.trash;
   c.chatMetadata[KEY]=next;
   try{await c.saveMetadata();clear();message='已保存，下次生成时使用当前记录';}
   catch(e){c.chatMetadata[KEY]=before;message='保存失败：'+e.message;throw e;}
