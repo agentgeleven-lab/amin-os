@@ -11,7 +11,7 @@ test('role location projects onto ancestor entrances and paths distinguish maps'
  const d=fixture(),before=structuredClone(d);assert.equal(projectedLocation(d,'world'),'longmen_city');assert.equal(projectedLocation(d,'city'),'hall');assert.equal(projectedLocation(d,'room'),'study');assert.match(locationPath(d),/龙门城内 → 城主府 → 书房/);assert.match(mapChoices(d).find(m=>m.id==='room').name,/龙门城内 → 城主府/);assert.deepEqual(d,before);
 });
 test('each generation level has a distinct prompt and explicit parent context',()=>{
- const d=fixture(),scope=generationScope(d,'room','interior');assert.equal(scope.入口地点.id,'hall');assert.equal(scope.上级地图.id,'city');assert.equal(scope.当前地图.name,'城主府');assert.equal(scope.层级路径.length,3);assert.equal(new Set(GENERATION_LEVELS.map(l=>levelPrompt(l.id))).size,6);assert.match(levelPrompt('city'),/街区/);assert.match(levelPrompt('interior'),/房间/);assert.throws(()=>levelPrompt('bad'));
+ const d=fixture(),scope=generationScope(d,'room','interior');assert.equal(scope.入口地点.id,'hall');assert.equal(scope.上级地图.id,'city');assert.equal(scope.当前地图.name,'城主府');assert.equal(scope.层级路径.length,3);assert.equal(new Set(GENERATION_LEVELS.map(l=>levelPrompt(l.id))).size,7);assert.match(levelPrompt('city'),/街区/);assert.match(levelPrompt('interior'),/房间/);assert.throws(()=>levelPrompt('bad'));
  const parent=generationScope(d,'city','city');assert.equal(parent.必须保留的子地图入口[0].id,'hall');
 });
 test('generation undo restores the whole prior draft without notifying committed state',()=>{
@@ -22,4 +22,10 @@ test('generation undo restores the whole prior draft without notifying committed
 });
 test('external role-map changes conflict with unsaved location edits',()=>{
  const store=createStore(fixture()),p={scope:()=> 'A',token:()=>0,ensureActive(){},importDocument:d=>store.replace(d)},draft=createDraftSession(store,p);draft.mutate(d=>{d.maps.city.name='草稿';});store.applyUpdate([{type:'setActiveMap',mapId:'world'}]);assert.equal(draft.status().conflict,true);assert.throws(()=>draft.save(),/发生变化/);
+});
+
+test('free landmark level does not inherit parent boundary or fixed-scale restrictions',()=>{
+ const prompt=levelPrompt('free');assert.match(prompt,/不受固定生成层级约束/);assert.match(prompt,/城市、街区、建筑、房间/);
+ assert.doesNotMatch(prompt,/以提供的层级路径和入口地点说明限定范围/);assert.match(prompt,/用户明确指定的范围/);assert.match(prompt,/新增模式只补/);assert.match(prompt,/JSON 协议/);
+ assert.equal(generationScope(fixture(),'room','free').生成层级,'主要地点／自由');
 });

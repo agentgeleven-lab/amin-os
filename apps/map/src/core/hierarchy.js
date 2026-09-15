@@ -19,6 +19,11 @@ export const GENERATION_LEVELS=[
 覆盖清单：检查主次入口、门厅、走廊、楼梯或其他垂直通路、核心功能房间、生活与服务空间、储藏及维护区、安全出口；地下城依据设定检查分岔、洞室、门禁与已知机关。物品和家具通常写入房间说明，不为了增加数量变成独立地点。
 连接规则：以门、走廊、楼梯等实际通路连接，检查每层的可达性及跨层衔接。上下层关系写在 description 或道路 metadata.note；协议中的平面 direction 仅作布局示意，不用它伪装真实上下关系，不添加协议不支持的方位值。明确单向或封闭通道时遵循设定。
 排除内容：不要生成城镇、国家或外部区域；普通房屋不强行添加地下密室、宝库、怪物或隐藏通道。资料明确未发现的空间遵守 discovered 设置，不自动揭示剧情秘密。`},
+    {id:'free',name:'主要地点／自由',prompt:`不受固定生成层级约束：以用户要求、角色卡、世界书和聊天中与故事有关的主要地点为中心，可以在同一张地图中放置城市、街区、建筑、房间、野外区域或跨区域地点，不强制统一空间尺度。
+按剧情重要性挑选：优先用户明确指定、角色经常活动、剧情目标与关键事件涉及的地点，并保留必要交通枢纽。主要地点不等于固定少数几个；有多个重要地点时完整保留，不设默认数量上限，也不为覆盖所有行政分区而塞入大量无关地点。
+不把当前地图标题、上级地图或入口自动当作生成边界；它们仅提供背景。用户明确指定的范围和排除项仍需遵守。全面／适中／简略在这里表示主要地点的收录深度，不要求填满城市或建筑分类清单。
+不同尺度地点可共存，说明所属地区和包含关系；包含关系本身不等于道路。连接只表达可通行关系，未知距离留空，必要的推定注明依据；不把跨城或跨层移动伪装成直接相邻。不要因名称相似合并不同地点。
+仍只生成当前这一张地图，保留其他地图、既有子地图入口 ID 与身份，遵守现有地图类型和 JSON 协议。新增模式只补地点和道路，不改写原内容。资料不足不强行编造地点，用户要求的创作内容应标注。提交前核对重要地点是否遗漏，不输出自检过程。`},
     {id:'custom',name:'自定义',prompt:`尺度与边界：严格按用户指定的空间范围与细节尺度生成。先从要求识别地域边界、节点代表什么、应包含及排除的内容、允许的依据与补充方式；要求不明确时结合当前地图路径缩小范围，不擅自扩展至上级区域。
 覆盖清单：把用户列出的地点、分类、数量要求和连接要求逐项核对；按用户给定分组组织，不能套用固定的城市或国家模板。有明确数量目标但资料不足时优先保留可靠信息，不凑数编造地点。
 连接规则：根据用户定义的空间语义组织路线，允许分支、闭环和独立区域，未知连接不强加。仍使用当前地图类型、类型目录和输出协议；自定义不代表可以输出额外地图、脚本或不受支持的字段。
@@ -32,7 +37,7 @@ export function generationScope(doc,mapId,level){
     const map=doc.maps[mapId],parent=doc.maps[map.parentMap],entrance=parent?.nodes[map.metadata.parentNode];
     return {当前地图:{id:map.id,name:map.name,type:map.type,currentLocation:map.currentLocation,当前位置资料:map.nodes[map.currentLocation]??null},生成层级:GENERATION_LEVELS.find(l=>l.id===level)?.name,层级路径:mapPath(doc,mapId).map(m=>({id:m.id,name:m.name})),上级地图:parent?{id:parent.id,name:parent.name}:null,入口地点:entrance?{id:entrance.id,name:entrance.name,description:entrance.description}:null,必须保留的子地图入口:Object.values(doc.maps).filter(m=>m.parentMap===mapId&&m.metadata.parentNode).map(m=>map.nodes[m.metadata.parentNode])};
 }
-export function levelPrompt(level){const entry=GENERATION_LEVELS.find(l=>l.id===level);if(!entry)throw new Error('请选择有效生成层级');return `\n本次生成层级：${entry.name}。${entry.prompt}\n以提供的层级路径和入口地点说明限定范围。上级地图只提供背景，不属于本次重建目标。必须保留已有子地图入口的 ID 和地点身份。只生成当前一张地图。
+export function levelPrompt(level){const entry=GENERATION_LEVELS.find(l=>l.id===level);if(!entry)throw new Error('请选择有效生成层级');if(level==='free')return `\n本次生成层级：${entry.name}。${entry.prompt}`;return `\n本次生成层级：${entry.name}。${entry.prompt}\n以提供的层级路径和入口地点说明限定范围。上级地图只提供背景，不属于本次重建目标。必须保留已有子地图入口的 ID 和地点身份。只生成当前一张地图。
 覆盖自检：生成前按“范围 → 分区 → 地点类别 → 交通骨架”在内部整理候选清单；提交前核对用户点名地点、素材中范围内明确地点、各主要分区和必要入口是否遗漏。类别是检查维度，不是凭空补齐的配额；有依据优先，数量服从实际尺度。
 同一地点与别名合并，不同分区的同名地点区分；不得把地点概括成一个节点而丢掉明确要求的其他地点。连通性不足时标明未知原因，不强行补路。完整生成保留子地图入口；新增模式只补遗漏，不删除或重写既有节点。
 资料不足或范围冲突时，只在相关地点 description 或道路 metadata.note 简短标注待确认；输出仍严格遵守 JSON 协议，不额外输出自检过程，不宣称已穷尽全部地点。`;}
