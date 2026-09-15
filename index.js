@@ -48,7 +48,7 @@ export function initialize() {
     installExtraFloorButtons('effects');installExtraFloorButtons('information');
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.8.8',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.8.9',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 
