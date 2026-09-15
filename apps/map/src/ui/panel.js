@@ -241,7 +241,8 @@ export function createPanel(store,persistence,preferences,options={}){
     function renderAI(map){
         const form=el('div',undefined,'dm-form');page.append(form);form.append(button('AI 设置 · 全局 API 与预设',()=>globalThis.AminOS?.openApp('ai')));
         if(aiMapKey!==map.id){aiMapKey=map.id;aiLevel=map.metadata.generationLevel??(map.type==='graph'?'world':'city');}
-        const level=field(form,'生成层级',select(GENERATION_LEVELS,aiLevel));level.disabled=aiBusy;level.onchange=()=>{aiLevel=level.value;};
+        const level=field(form,'生成层级',select(GENERATION_LEVELS,aiLevel));level.disabled=aiBusy;level.onchange=()=>{aiLevel=level.value;levelRules.textContent=levelPrompt(aiLevel);};
+        const levelGuide=el('details'),levelRules=el('pre',levelPrompt(aiLevel));levelGuide.append(el('summary','查看当前层级的生成约束'),levelRules);form.append(levelGuide);
         const density=field(form,'地点覆盖程度',select([{id:'full',name:'全面 · 覆盖各分区与相关地点'},{id:'balanced',name:'适中 · 主要地点与枢纽'},{id:'brief',name:'简略 · 少量地标概览'}],coverage));density.disabled=aiBusy;density.onchange=()=>{coverage=density.value;};
         form.append(el('p','全面模式优先覆盖范围内地点，不保证穷尽现实世界。较大地图需要更多输出预算；可在 AI 设置中调整，或分地区生成后继续新增。','dm-help'));
         if(coverage==='full'&&getAI().capture().config.maxTokens<8192)form.append(el('p','当前输出上限低于 8192 tokens，较大地图可能受预算限制；可按模型支持范围提高至 8192–16384。不会自动更改你的 API 设置。','dm-help'));
