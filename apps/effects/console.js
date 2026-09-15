@@ -25,7 +25,7 @@ export function renderConsole({body,api,state,say,render,manage,adjust,end}){
  if(!skills.length)body.append(el('p','先添加一个能力按钮，再选择目标发动。可手动创建，也可从世界书导入。'));
  if(state.editing)body.append(el('p','拖动按钮调整位置；跨组拖动会移入目标分组。也可用前移、后移按钮。大小、图标、颜色在能力管理中设置。'));
  const groups=[...new Set(skills.map(s=>appearance(s).group||'能力'))];
- async function move(id,to,after){await api.save(token,s=>({...s,skills:reorder(s.skills,id,to,after)}));render();say('布局已保存');}
+ async function move(id,to,after){await api.saveLibrary(token,s=>({...s,skills:reorder(s.skills,id,to,after)}));render();say('共享能力布局已保存，所有角色和聊天通用');}
  for(const group of groups){
   body.append(el('h3',group));const grid=el('div',null,'amin-ability-grid');grid.classList.toggle('is-editing',!!state.editing);body.append(grid);
   for(const skill of skills.filter(s=>(appearance(s).group||'能力')===group)){

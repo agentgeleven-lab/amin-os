@@ -49,7 +49,7 @@ export function mount(target){
   },true);
   const cancel=button(actions,'取消生成',()=>{draftController?.abort();});cancel.hidden=true;
   c.append(node('p','使用 Amin os 的共享 API 和预设。AI 草稿不会自动保存，也不会改动已生效的规则快照。'));
-  button(c,'保存能力',async()=>{if(!name.value.trim()||!sourceText().trim())throw Error('能力名称和原文不能为空');if(!reminder.value.trim())reminder.value=sourceText();await api.save(token,s=>{if(!existing&&s.skills.some(x=>x.book===entry.book&&x.entryId===entry.id))throw Error('此条目已经关联');if(existing){const skill=s.skills.find(x=>x.id===existing.id);if(!skill)throw Error('技能已不存在');skill.name=name.value.trim();skill.reminder=reminder.value.trim();skill.ui=buttonConfig();if(entry.custom)skill.original=sourceText();return s;}s.skills.push({id:crypto.randomUUID(),book:entry.book,entryId:entry.id,name:name.value.trim(),original:sourceText(),custom:!!entry.custom,ui:buttonConfig(),reminder:reminder.value.trim()});return s;});finish('能力已保存，可返回能力面板发动');},true);button(c,'返回',render);
+  button(c,'保存能力',async()=>{if(!name.value.trim()||!sourceText().trim())throw Error('能力名称和原文不能为空');if(!reminder.value.trim())reminder.value=sourceText();await api.saveLibrary(token,s=>{if(!existing&&s.skills.some(x=>x.book===entry.book&&x.entryId===entry.id))throw Error('此条目已经关联');if(existing){const skill=s.skills.find(x=>x.id===existing.id);if(!skill)throw Error('技能已不存在');skill.name=name.value.trim();skill.reminder=reminder.value.trim();skill.ui=buttonConfig();if(entry.custom)skill.original=sourceText();return s;}s.skills.push({id:crypto.randomUUID(),book:entry.book,entryId:entry.id,name:name.value.trim(),original:sourceText(),custom:!!entry.custom,ui:buttonConfig(),reminder:reminder.value.trim()});return s;});finish('已保存到共享能力库，可在任意角色和聊天中发动');},true);button(c,'返回',render);
  }
  function effectForm(effect){const token=api.capture(),store=api.read();body.replaceChildren();const c=card(effect?'调整指令 / 转让':'建立生效记录');let skill;
   if(!effect)skill=select(c,'技能',store.skills.map(s=>[s.id,s.name]));
@@ -69,6 +69,8 @@ export function mount(target){
   try{const store=api.read(),chat=api.context()?.chat??[];
    if(selected==='能力面板'){renderConsole({body,api,state:consoleState,say,render,manage:()=>{selected='能力管理';render();},adjust:effectForm,end:endForm});
    }else if(selected==='能力管理'){
+    body.append(node('p','共享能力库 · 所有角色和聊天通用。能力原文、规则和按钮布局独立保存，原世界书停用或删除也可使用。生效记录仅属于当前聊天。'));
+    body.append(node('p','打开旧聊天的能力面板时，会自动收纳其中的旧能力；不同版本保留为独立能力。'));
     button(body,'手动添加能力',()=>importForm({book:'自定义能力',id:crypto.randomUUID(),title:'',content:'',custom:true}),true);
     button(body,'刷新世界书列表',load,true);
     if(books.length){const picker=select(body,'选择世界书',[['','请选择一本世界书'],...books.map(b=>[b.name,b.name+' · '+b.sources.join(' / ')])]);picker.value=chosenBook;picker.onchange=()=>{chosenBook=picker.value;entries=[];loadedBook='';loadEpoch++;render();};button(body,'读取所选世界书',loadSelected,true).disabled=!chosenBook;}
