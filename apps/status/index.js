@@ -27,7 +27,7 @@ let generationForm, formHome;
 let selectedPage = 'state';
 let selectHudPage = null;
 let requestUpdate = null;
-const defaults = { theme: 'nexus', floorButtons: true, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096, maxSourceChars: 100000 };
+const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096, maxSourceChars: 100000 };
 const getSettings = () => ({ ...defaults, ...context().extensionSettings[KEY] });
 function node(tag, text, className) {
   const e = document.createElement(tag);
@@ -262,6 +262,8 @@ function mount() {
   const sharedSettings=document.createElement('button');sharedSettings.type='button';sharedSettings.textContent='AI 设置 · 全局 API 与预设';sharedSettings.onclick=()=>globalThis.AminOS?.openApp('ai');generationForm.append(sharedSettings);
   field('extraBooks', '额外世界书（每行一本）', 'textarea');
   field('updateNote', '当前情况补充（更新数值时使用，可留空）', 'textarea');
+  field('allowTypeChange', '允许更改已有字段类型（默认关闭，仅用于 AI 更新）', 'checkbox');
+  generationForm.append(node('p','未勾选时保留原类型。可在当前情况补充或状态栏要求中明确填写“把体力改为数字”，仅授权指定字段；填写“允许更改已有字段类型”可授权本次更新中的类型转换。'));
   field('instructions', '状态栏要求', 'textarea').placeholder = '例如：仅显示玩家、世界、队伍；不要数值化感情。';
   field('maxSourceChars', '设定字符上限（超过会停止，不会截断）', 'number').min = '1000';
   field('includeGlobalBooks', '包含已启用的全局世界书', 'checkbox');
@@ -291,7 +293,7 @@ function mount() {
     try {
       const result = await generateStatus({ api: { baseUrl: s.baseUrl, apiKey: sessionKey, model: s.model, timeoutMs: 120000, maxTokens: s.maxTokens }, mode,
         includeGlobalBooks: s.includeGlobalBooks, extraBooks: s.extraBooks.split(/\r?\n/).map(x=>x.trim()).filter(Boolean), maxSourceChars: s.maxSourceChars,
-        updateNote: s.updateNote || '', instructions: s.instructions || '根据世界观设计简洁实用的状态栏。', statusRules: compileRules(context(), KEY, mode === 'update' ? 'update' : 'generate') }, running.signal);
+        allowTypeChange:s.allowTypeChange===true, updateNote: s.updateNote || '', instructions: s.instructions || '根据世界观设计简洁实用的状态栏。', statusRules: compileRules(context(), KEY, mode === 'update' ? 'update' : 'generate') }, running.signal);
       report.textContent = result.ok ? (result.changed ? '操作完成，可打开状态栏查看。' : '没有需要修改的内容。') + ' 读取世界书：' + (result.books?.join('、') || '无') : result.message || '已有任务运行中。';
       return result;
     } finally { syncHistory(); running = null; generateButton.disabled = replaceButton.disabled = saveButton.disabled = false; }

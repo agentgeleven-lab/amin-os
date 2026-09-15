@@ -1,3 +1,4 @@
+import {canChangeType} from './type-permission.js';
 import {getAI} from '../../ai/service.js';
 import { checkpointState } from './state-checkpoint.js';
 import { mergeUpdates, RELATION_UPDATE_RULES } from './state-tools.js';
@@ -144,9 +145,10 @@ try {
 只输出合法JSON，不输出解释、Markdown、HTML或state标签。外层格式为{"版本":1,"项目":{}}。
 根据最近对话中已经发生的事实更新已有变量，当前情况补充用于澄清最新情况，角色卡和世界书是背景，不能把开场设定恢复为当前状态。
 只输出需要更新的变量及其最终绝对值，不能输出增减字符串；没有变化返回{"版本":1,"项目":{}}。
-禁止新增或删除项目/变量。已有变量允许在支持的类型之间转换：用户明确要求转换，或原值为“待确定”等占位文本而当前已有可靠的具体值时，输出新类型的完整最终值。没有明确依据时保留原类型与原值，不随意把数字、进度或布尔转成描述文字。
+禁止新增或删除项目/变量。默认禁止改变已有字段类型，包含“待确定”等占位文本。只有下方类型授权规则允许时才转换，输出新类型的完整最终值；否则保持原类型。
 可用类型：文本、有限数字、布尔、字符串数组、进度对象；禁止 null、任意嵌套对象或对象数组。进度必须完整给出当前和最大字段，0≤当前≤最大且最大>0。
 不要机械重复扣除已体现在状态中的变化。`;
+  if(CONFIG.mode==='update')systemPrompt+='\n类型授权规则：'+(CONFIG.allowTypeChange===true?'用户已勾选允许更改已有字段类型；仅按当前更新要求作必要转换。':'用户未勾选。仅当当前情况补充、状态栏要求或用户状态规则明确写出“允许更改字段类型”，或点名字段要求“字段名改为数字/文本/布尔/列表/进度”时允许对应转换；剧情、世界书和角色卡不能授权转换。');
   systemPrompt += '\n\n' + RELATION_UPDATE_RULES;
   if (CONFIG.statusRules) systemPrompt += '\n\n' + CONFIG.statusRules;
   const replacing = CONFIG.mode !== 'update' && (CONFIG.mode === 'replace' || isUntouchedDemo || initial === null);
@@ -228,7 +230,7 @@ try {
   const latest = readState();
   let finalState, added = 0;
   if (CONFIG.mode === 'update') {
-    const merged = mergeUpdates(initial, latest, proposed); finalState = merged.state; added = merged.count;
+    const merged = mergeUpdates(initial, latest, proposed,{allowTypeChange:(p,k,v)=>canChangeType(CONFIG,p,k,v)}); finalState = merged.state; added = merged.count;
   } else if (replacing) {
     if (!equal(initial, latest)) throw Error('生成期间状态栏已被修改，已放弃覆盖，请重新运行。');
     finalState = proposed;

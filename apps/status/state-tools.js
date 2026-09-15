@@ -29,13 +29,14 @@ function safeName(k) { return /^[\p{L}\p{N}_]{1,32}$/u.test(k) && !['__proto__',
 const canonical = v => Array.isArray(v) ? v.map(canonical) : object(v)
   ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
-export function mergeUpdates(initial, latest, proposed) {
+export function mergeUpdates(initial, latest, proposed, {allowTypeChange=false} = {}) {
   if (!initial || !latest) throw Error('状态栏不存在或已被清空，无法更新。');
   const result = cloneState(latest); let count = 0;
   for (const [p, fields] of Object.entries(proposed.项目)) {
     for (const [k, value] of Object.entries(fields)) {
       if (!own(initial.项目, p) || !own(initial.项目[p], k)) throw Error('更新不能新增变量：' + p + '.' + k);
       if (valueType(value) === '不支持') throw Error('更新包含不支持的变量类型或取值：' + p + '.' + k);
+      if(valueType(value)!==valueType(initial.项目[p][k]) && !(typeof allowTypeChange==='function'?allowTypeChange(p,k,value):allowTypeChange===true))throw Error('未授权更改字段类型：'+p+'.'+k+'。请勾选允许更改已有字段类型，或在更新要求中明确写出转换要求。');
       if (same(value, initial.项目[p][k])) continue;
       if (!own(latest.项目, p) || !own(latest.项目[p], k) || !same(latest.项目[p][k], initial.项目[p][k])) {
         throw Error('更新期间该变量已改变，未写入任何更新：' + p + '.' + k);
