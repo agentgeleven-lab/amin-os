@@ -1,3 +1,4 @@
+import {attachPinch} from './pinch.js';
 import { nodeGlyph, labelPositions } from './map-presentation.js';
 import { cellKey, cellColor, cellRules } from '../core/cells.js';
 import { isTileMap, cellPoint, pointCell, tilePlacement, CELL_SIZE } from '../core/tiles.js';
@@ -100,9 +101,14 @@ export function renderMap(map, options) {
         viewport.append(lattice);
     }
     paintEdges(); viewport.append(edgeLayer,compass,nodeLayer);svg.append(viewport);
-    let drag=null;
+    let drag=null,liveCamera={...camera};
     const point=e=>new DOMPoint(e.clientX,e.clientY).matrixTransform(svg.getScreenCTM().inverse());
     const world=e=>new DOMPoint(e.clientX,e.clientY).matrixTransform(viewport.getScreenCTM().inverse());
+    const pinch=attachPinch(svg,{point,getCamera:()=>liveCamera,preview:view=>{liveCamera={...view};viewport.setAttribute('transform',`translate(${view.x} ${view.y}) scale(${view.zoom})`);},commit:onCamera,start:()=>{
+        if(drag?.id){const original=map.nodes[drag.id].position;const p={x:original.x??0,y:original.y??0};points.set(drag.id,p);groups.get(drag.id)?.setAttribute('transform',`translate(${p.x} ${p.y})`);paintEdges();}
+        if(drag?.cells){for(const key of drag.cells){const shape=cellShapes.get(key);if(shape){shape.removeAttribute('stroke');shape.removeAttribute('stroke-opacity');shape.removeAttribute('stroke-width');}}for(const key of options.selectedCells??[])highlight(key);}
+        drag=null;compass.replaceChildren();onHint('双指张合缩放，移动双指平移地图');
+    }});
     svg.addEventListener('pointerdown',e=>{
         if(!e.isPrimary||e.button!==0)return;
         const id=e.target.closest('[data-node-id]')?.dataset.nodeId;
@@ -136,7 +142,7 @@ export function renderMap(map, options) {
                 const d=DIRECTIONS.find(d=>d.id===plan.direction).label;
                 onHint(`松手：${plan.reconnect?'连接':'相对'} ${map.nodes[plan.anchorId].name} · ${d}${plan.reconnect?'':' · 保留全部路线'}${names.length?' · 断开：'+names.join('、'):''}`);
             } else if(plan.mode==='cell'){compass.append(svgNode('circle',{cx:plan.position.x,cy:plan.position.y,r:30,fill:'none',stroke:'var(--dm-accent)'}));onHint(`松手：放置到格子 ${plan.cell.q}, ${plan.cell.r}，保留全部路线`);} else onHint(plan.mode==='blocked'?plan.reason:`松手：自由放置${plan.reconnect?'':' · 保留全部路线'}${names.length?' · 断开：'+names.join('、'):''}`);
-        }else viewport.setAttribute('transform',`translate(${camera.x+dx} ${camera.y+dy}) scale(${camera.zoom})`);
+        }else {liveCamera={...camera,x:camera.x+dx,y:camera.y+dy};viewport.setAttribute('transform',`translate(${liveCamera.x} ${liveCamera.y}) scale(${liveCamera.zoom})`);}
     });
     function finish(e){
         if(drag?.pointer!==e.pointerId)return;
@@ -153,7 +159,7 @@ export function renderMap(map, options) {
     }
     svg.addEventListener('pointerup',finish);svg.addEventListener('pointercancel',finish);
     svg.addEventListener('wheel',e=>{
-        e.preventDefault();if(drag)return;
+        e.preventDefault();if(drag||pinch.active())return;
         const p=point(e),zoom=Math.max(.1,Math.min(3,camera.zoom*(e.deltaY<0?1.12:1/1.12))),ratio=zoom/camera.zoom;
         onCamera({zoom,x:p.x-(p.x-camera.x)*ratio,y:p.y-(p.y-camera.y)*ratio});
     },{passive:false});
