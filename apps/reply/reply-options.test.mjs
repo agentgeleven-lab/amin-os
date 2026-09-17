@@ -62,3 +62,12 @@ test('optional shared prompt applies to both modes and author instructions remai
  await generateOptions(ctx,{count:2,nsfwEnabled:false,nsfwPrompt:'测试附加要求'},{world:[]});assert.doesNotMatch(requests[2].systemPrompt,/测试附加要求/);
  await generateOptions(ctx,{count:2,nsfwEnabled:true,nsfwPrompt:''},{world:[]});assert.doesNotMatch(requests[3].systemPrompt,/NSFW/);
 });
+
+test('editable roleplay prompt survives normalization and is isolated from author mode',async()=>{
+ assert.match(normalizeSettings({}).roleplaySystemPrompt,/回复拟稿助手/);
+ const saved=normalizeSettings({roleplaySystemPrompt:'自定义角色定位',count:2});assert.equal(normalizeSettings(JSON.parse(JSON.stringify(saved))).roleplaySystemPrompt,'自定义角色定位');
+ const requests=[],ctx={chat:[{mes:'测试上下文'}],generateRaw:async r=>{requests.push(r);return '["A","B"]';}};
+ await generateOptions(ctx,saved,{world:[]});await generateOptions(ctx,saved,{world:[],draft:'草稿'});await generateOptions(ctx,{...saved,writingMode:'author'},{world:[]});
+ assert.ok(requests.slice(0,2).every(r=>r.systemPrompt.includes('自定义角色定位')&&r.systemPrompt.includes('只输出 JSON')&&r.systemPrompt.includes('叙述人称')));
+ assert.doesNotMatch(requests[2].systemPrompt,/自定义角色定位/);
+});
