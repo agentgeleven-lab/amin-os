@@ -4,11 +4,13 @@ export async function mount(target,{manager}={}){
  const api=manager??await getManager(),page=el('div',null,'amin-page amin-worldbooks'),intro=el('div',null,'amin-context'),tabs=el('nav',null,'amin-tabs'),notice=el('p',null,'amin-notice'),body=el('section');
  notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');tabs.setAttribute('aria-label','世界书管理页面');page.append(intro,tabs,notice,body);target.append(page);
  let tab='角色组合',role=api.context()?.id,profile=api.profile(),names=[],query='',entryQuery='',book='',data=null,selected=new Set(),epoch=0,disposed=false;
+ const expanded=new Set();
  const say=text=>notice.textContent=text;
  const button=(parent,text,fn,primary=false)=>{const b=el('button',text,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
  const check=(parent,text,on,fn)=>{const label=el('label',null,'amin-wb-check'),input=el('input');input.type='checkbox';input.checked=on;input.onchange=()=>fn(input.checked);label.append(input,el('span',text));parent.append(label);return input;};
  const search=(parent,label,value,fn)=>{const row=el('label',label),input=el('input');input.type='search';input.value=value;input.oninput=()=>fn(input.value);row.append(input);parent.append(row);};
  const card=(parent,title)=>{const c=el('section',null,'amin-card');if(title)c.append(el('h3',title));parent.append(c);return c;};
+ const fold=(parent,key,title)=>{const c=el('details',null,'amin-card amin-wb-fold');c.append(el('summary',title));c.open=expanded.has(key);c.ontoggle=()=>{if(!c.isConnected)return;if(c.open)expanded.add(key);else expanded.delete(key);};parent.append(c);return c;};
  const modes=[['keep','保持原样'],['on','启用'],['off','关闭']];
  function setRule(id,mode){profile.entries[book]??={};if(mode==='keep')delete profile.entries[book][id];else profile.entries[book][id]=mode;}
  async function loadBook(name){const run=++epoch,current=role;const result=await api.load(name);if(disposed||run!==epoch||current!==role)return;book=name;data=result;selected=new Set();entryQuery='';render();}
@@ -47,10 +49,11 @@ export async function mount(target,{manager}={}){
    function draw(){list.replaceChildren();for(const name of names.filter(n=>n.toLowerCase().includes(query.toLowerCase())))check(list,name,api.snapshot().visible.includes(name),async on=>{try{const visible=api.snapshot().visible.filter(n=>n!==name);if(on)visible.push(name);await api.setVisible(visible);}catch(e){say(e.message);}});}draw();return;
   }
   if(tab==='接管记录'){
-   const logs=card(body,'操作提示');for(const text of api.messages())logs.append(el('p',text));
+   const logs=fold(body,'logs',`操作提示 · ${api.messages().length} 条`);for(const text of api.messages())logs.append(el('p',text));
    button(body,'撤回全部插件改动并暂停',()=>api.withdraw());const c=card(body,'本次接管');
    for(const name of state.session.books){const row=el('div',null,'amin-toolbar');row.append(el('span',name+' · 插件临时启用'));button(row,'保留为全局启用',()=>api.keepBook(name));c.append(row);}
-   for(const r of state.session.entries){const row=el('div',null,'amin-toolbar');row.append(el('span',`${r.book} / ${r.id} · ${r.before.value===true?'关闭':'启用'} → ${r.after.value?'关闭':'启用'}`));button(row,'保留此状态',()=>api.keepEntry(r.book,r.id));c.append(row);}
+   const groups=new Map();for(const r of state.session.entries){if(!groups.has(r.book))groups.set(r.book,[]);groups.get(r.book).push(r);}
+   for(const [name,records]of groups){const group=fold(c,'record:'+name,`${name} · ${records.length} 个条目改动`);for(const r of records){const row=el('div',null,'amin-toolbar');row.append(el('span',`条目 ${r.id} · ${r.before.value===true?'关闭':'启用'} → ${r.after.value?'关闭':'启用'}`));button(row,'保留此状态',()=>api.keepEntry(r.book,r.id));group.append(row);}}
    if(!state.session.books.length&&!state.session.entries.length)c.append(el('p','当前没有接管项目'));return;
   }
   const actions=el('div',null,'amin-toolbar');body.append(actions);
@@ -59,13 +62,15 @@ export async function mount(target,{manager}={}){
   button(actions,'重新应用已保存组合',async()=>{profile=api.profile();await api.apply(role,profile,true);await api.sync(true);if(book)await loadBook(book);}).disabled=!role;
   body.append(el('p',state.paused?'自动应用已暂停，保存只记录设置；恢复后生效。':'离开角色时撤回接管项目；同角色切换聊天保持组合。'));
   if(!state.visible.length){button(body,'选择要展示的世界书',()=>{tab='展示范围';render();},true);return;}
+  const folding=el('div',null,'amin-toolbar');body.append(folding);button(folding,'全部展开',()=>{for(const name of state.visible)expanded.add('book:'+name);render();});button(folding,'全部折叠',()=>{for(const name of state.visible)expanded.delete('book:'+name);render();});
   const globals=api.globals();for(const name of state.visible){
-   const c=card(body,name);const exists=names.includes(name);c.append(el('p',!exists?'世界书不存在或已改名':state.session.books.includes(name)?'插件临时启用':globals.includes(name)?'已全局启用（非插件接管）':'未全局启用'));
+   const exists=names.includes(name),status=!exists?'世界书不存在或已改名':state.session.books.includes(name)?'插件临时启用':globals.includes(name)?'已全局启用（非插件接管）':'未全局启用';
+   const c=fold(body,'book:'+name,`${name} · ${status}${profile.books.includes(name)?' · 已加入组合':''}`);
    check(c,'加入当前角色的全局组合',profile.books.includes(name),on=>{profile.books=profile.books.filter(n=>n!==name);if(on)profile.books.push(name);profile.entries[name]??={};render();}).disabled=!role;
    if(exists&&profile.books.includes(name))button(c,'设置条目',()=>loadBook(name));
+   if(name===book&&profile.books.includes(book))renderEntries(c,state);
   }
   const hidden=profile.books.filter(n=>!state.visible.includes(n));if(hidden.length)body.append(el('p',`组合中另有 ${hidden.length} 本未在此展示；可在展示范围中选中管理。`));
-  if(profile.books.includes(book))renderEntries(body,state);
  }
  const unsubscribe=api.subscribe(render);await refresh();
  return {open:refresh,dispose(){disposed=true;epoch++;unsubscribe();page.remove();}};
