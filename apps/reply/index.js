@@ -30,8 +30,17 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
         if(options)for(const [value,text] of options){const o=node('option',text);o.value=value;el.append(o);}
         if(type==='checkbox'){el.type='checkbox';el.checked=settings[key];}else {if(type==='number'){el.type='number';el.min=key==='count'?2:key==='timeout'?15:1;el.max=key==='count'?6:key==='timeout'?300:40;}el.value=settings[key];}
         if(key==='thirdPersonName'){el.type='text';el.maxLength=100;el.placeholder='留空：参考上文中的用户角色名字';}
-        if(type==='textarea')el.maxLength=['prompt','authorPrompt'].includes(key)?4000:600;
+        if(type==='textarea')el.maxLength=['nsfwPrompt','authorSystemPrompt'].includes(key)?8000:4000;
         el.addEventListener('change',()=>{settings=normalizeSettings({...settings,[key]:type==='checkbox'?el.checked:el.value});if(type!=='checkbox')el.value=settings[key];save();invalidate('设置已保存，请重新生成。');});row.append(el);settingsBox.append(row);
+    }
+    function directionsEditor(key,rowKey,title){
+        const box=node('section',null,'ro-direction-list');fieldRows.set(rowKey,box);settingsBox.append(box);
+        const persist=()=>{settings=normalizeSettings({...settings,[key]:settings[key]});save();invalidate('方向已保存，请重新生成。');};
+        function draw(){box.replaceChildren();box.append(node('strong',title));for(const item of settings[key]){
+            const row=node('div',null,'ro-direction-item'),toggle=node('input'),text=node('input');toggle.type='checkbox';toggle.checked=item.enabled;toggle.setAttribute('aria-label','启用'+title+'：'+(item.text||'未命名'));text.value=item.text;text.maxLength=600;text.setAttribute('aria-label',title+'内容');
+            toggle.addEventListener('change',()=>{settings[key].find(v=>v.id===item.id).enabled=toggle.checked;persist();draw();});text.addEventListener('change',()=>{settings[key].find(v=>v.id===item.id).text=text.value;persist();draw();});row.append(toggle,text);button('删除',()=>{settings[key]=settings[key].filter(v=>v.id!==item.id);persist();draw();},row);box.append(row);
+        }button('添加'+title,()=>{settings[key].push({id:crypto.randomUUID(),text:'',enabled:true});persist();draw();},box);box.append(node('p','仅抽取启用且非空的方向；全部禁用时不会请求模型。'));}
+        draw();
     }
     if(getAI())button('AI 设置 · 全局 API 与预设',()=>globalThis.AminOS?.openApp('ai'),settingsBox);
     field('count','选项数量','number');field('depth','最近聊天条数','number');
@@ -41,17 +50,19 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     field('thirdPersonName','第三人称名字（仅第三人称生效）','text');
     field('mode','普通生成填入方式','select',[['append','保留原草稿，切换候选'],['replace','替换原草稿，支持撤销']]);
     field('persona','参考用户人设','checkbox');field('character','参考角色设定（含绑定世界书）','checkbox');field('world','参考激活的全体世界书','checkbox');
-    field('directions','选项方向（每行一个，按数量随机抽取）','textarea');field('prompt','自定义生成要求','textarea');
-    field('authorDirections','剧情方向（每行一个）','textarea');field('authorPrompt','作者要求（节奏、冲突、伏笔、希望避免的走向等）','textarea');
+    directionsEditor('directionItems','directions','选项方向');field('prompt','自定义生成要求','textarea');
+    directionsEditor('authorDirectionItems','authorDirections','剧情方向');
+    field('authorSystemPrompt','剧情模式提示词（作者 / 编剧定位）','textarea');field('nsfwPrompt','NSFW 模式提示词（自行填写，两种模式共用）','textarea');field('authorPrompt','作者要求（节奏、冲突、伏笔、希望避免的走向等）','textarea');
     const roleHelp=node('p','第三人称名字留空时参考上文，无法识别时使用当前用户名称；自定义名字优先。对白中的人称按语义保留。方向少于选项数量时允许重复抽取；方向足够时不重复抽取。重复方向仍生成不同回复。草稿扩写会用候选替换原草稿，可撤销。角色设定包含绑定世界书；全体世界书包含当前全局启用及角色、聊天、人设绑定的书。读取全部未禁用的非空条目，不要求关键词触发。');settingsBox.append(roleHelp);
     const settingsButton=button('设置',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
     settingsButton.setAttribute('aria-controls',settingsId);
     settingsButton.setAttribute('aria-expanded','false');
     if(target){const heading=node('header',null,'amin-reply-heading');heading.append(node('h2',headingText||'下一句，由你决定'),node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
     const modeRow=node('label',null,'ro-writing-mode'),modeSelect=node('select'),modeHelp=node('p',null,'ro-status');modeRow.append(node('span','创作模式'));modeSelect.setAttribute('aria-label','创作模式');for(const [value,label]of [['roleplay','角色扮演 · 拟写角色回复'],['author','创意写作 · 规划剧情走向']]){const option=node('option',label);option.value=value;modeSelect.append(option);}modeRow.append(modeSelect);
-    function reflectMode(){const author=settings.writingMode==='author';roleHelp.hidden=author;modeSelect.value=settings.writingMode;for(const key of ['style','perspective','thirdPersonName','directions','prompt'])fieldRows.get(key).hidden=author;for(const key of ['authorDirections','authorPrompt'])fieldRows.get(key).hidden=!author;expand.textContent=author?'展开作者构想':'根据草稿扩写';modeHelp.textContent=author?'以作者 / 编剧视角选择下一步事件、冲突与转折。选中后填入作者指令，不自动发送。':'以用户角色视角生成对白与行动。选中后填入输入框，不自动发送。';const heading=panel.querySelector('.amin-reply-heading h2');if(heading)heading.textContent=author?'接下来，故事怎么走':headingText||'下一句，由你决定';}
+    function reflectMode(){const author=settings.writingMode==='author';roleHelp.hidden=author;modeSelect.value=settings.writingMode;for(const key of ['style','perspective','thirdPersonName','directions','prompt'])fieldRows.get(key).hidden=author;for(const key of ['authorDirections','authorPrompt','authorSystemPrompt'])fieldRows.get(key).hidden=!author;expand.textContent=author?'展开作者构想':'根据草稿扩写';modeHelp.textContent=author?'以作者 / 编剧视角选择下一步事件、冲突与转折。选中后填入作者指令，不自动发送。':'以用户角色视角生成对白与行动。选中后填入输入框，不自动发送。';const heading=panel.querySelector('.amin-reply-heading h2');if(heading)heading.textContent=author?'接下来，故事怎么走':headingText||'下一句，由你决定';}
     modeSelect.onchange=()=>{settings=normalizeSettings({...settings,writingMode:modeSelect.value});save();invalidate('模式已切换，请重新生成。');reflectMode();};
-    panel.append(modeRow,modeHelp,controls,settingsBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
+    const nsfwRow=node('label',null,'ro-writing-mode'),nsfwToggle=node('input');nsfwToggle.type='checkbox';nsfwToggle.checked=settings.nsfwEnabled;nsfwToggle.setAttribute('aria-label','启用 NSFW 模式');nsfwRow.append(nsfwToggle,node('span','NSFW 模式 · 两种创作模式共用'));nsfwToggle.addEventListener('change',()=>{settings=normalizeSettings({...settings,nsfwEnabled:nsfwToggle.checked});save();invalidate(settings.nsfwEnabled&&!settings.nsfwPrompt.trim()?'请在设置中填写 NSFW 模式提示词；留空时不追加要求。':'模式已保存，请重新生成。');});
+    panel.append(modeRow,nsfwRow,modeHelp,controls,settingsBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});
     function updateSelection(){undo.disabled=draft.base===null;for(const b of cards.children)b.setAttribute('aria-pressed','false');}
     updateSelection();

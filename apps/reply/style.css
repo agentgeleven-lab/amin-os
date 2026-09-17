@@ -21,3 +21,7 @@
 
 .ro-panel .ro-writing-mode {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 6px;}
 .ro-panel .ro-writing-mode select {flex:1;min-width:0;max-width:100%;font:inherit;color:inherit;}
+
+.ro-panel .ro-direction-list {margin:12px 0;}
+.ro-panel .ro-direction-item {display:flex;align-items:center;gap:8px;margin:8px 0;}
+.ro-panel .ro-direction-item input:not([type=checkbox]) {flex:1;min-width:0;}

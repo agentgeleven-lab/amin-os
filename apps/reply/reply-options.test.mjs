@@ -46,3 +46,19 @@ test('author generation and draft expansion use screenplay planning without role
  await generateOptions(ctx,{...settings,writingMode:'roleplay'},{world:[]});
  assert.match(requests[2].systemPrompt,/回复拟稿助手/);assert.doesNotMatch(requests[2].prompt,/在两幕内揭露秘密/);
 });
+
+test('direction entries migrate, persist disabled values and block empty selections before model calls',async()=>{
+ const s=normalizeSettings({directions:'甲\n乙'});assert.deepEqual(s.directionItems.map(i=>i.text),['甲','乙']);assert.ok(s.directionItems.every(i=>i.enabled));
+ let request,calls=0;const ctx={chat:[{mes:"测试上下文"}],generateRaw:async r=>{calls++;request=r;return '["A","B"]';}};
+ const config={count:2,directionItems:[{id:'a',text:'使用方向',enabled:true},{id:'b',text:'停用方向',enabled:false}]};
+ const result=await generateOptions(ctx,config,{world:[]});assert.deepEqual(result.map(v=>v.label),['使用方向','使用方向']);assert.doesNotMatch(request.prompt,/停用方向/);
+ await assert.rejects(generateOptions(ctx,{...config,directionItems:config.directionItems.map(i=>({...i,enabled:false}))},{world:[]}),/至少/);assert.equal(calls,1);
+ assert.equal(normalizeSettings(JSON.parse(JSON.stringify(config))).directionItems[1].enabled,false);
+});
+test('optional shared prompt applies to both modes and author instructions remain editable',async()=>{
+ const requests=[];const ctx={chat:[{mes:"测试上下文"}],generateRaw:async r=>{requests.push(r);return '["A","B"]';}};
+ for(const writingMode of ['roleplay','author'])await generateOptions(ctx,{count:2,writingMode,nsfwEnabled:true,nsfwPrompt:'测试附加要求',authorSystemPrompt:'自定义作者定位'},{world:[]});
+ assert.ok(requests.every(r=>r.systemPrompt.includes('测试附加要求')));assert.match(requests[1].systemPrompt,/自定义作者定位/);assert.match(requests[1].systemPrompt,/只输出 JSON/);
+ await generateOptions(ctx,{count:2,nsfwEnabled:false,nsfwPrompt:'测试附加要求'},{world:[]});assert.doesNotMatch(requests[2].systemPrompt,/测试附加要求/);
+ await generateOptions(ctx,{count:2,nsfwEnabled:true,nsfwPrompt:''},{world:[]});assert.doesNotMatch(requests[3].systemPrompt,/NSFW/);
+});
