@@ -71,3 +71,14 @@ test('editable roleplay prompt survives normalization and is isolated from autho
  assert.ok(requests.slice(0,2).every(r=>r.systemPrompt.includes('自定义角色定位')&&r.systemPrompt.includes('只输出 JSON')&&r.systemPrompt.includes('叙述人称')));
  assert.doesNotMatch(requests[2].systemPrompt,/自定义角色定位/);
 });
+
+test('content styles migrate NSFW and send only selected style in either writing mode',async()=>{
+ assert.equal(normalizeSettings({nsfwEnabled:true,nsfwPrompt:'保留原文'}).contentMode,'nsfw');assert.equal(normalizeSettings({nsfwEnabled:true,contentMode:'normal'}).contentMode,'normal');
+ const prompts={normalPrompt:'正常风格要求',nsfwPrompt:'自填风格要求',violencePrompt:'动作风格要求',absurdPrompt:'荒诞风格要求'};
+ const modes=['normal','nsfw','violence','absurd'],texts=Object.values(prompts),requests=[];
+ const ctx={chat:[{mes:'测试上下文'}],generateRaw:async r=>{requests.push(r);return '["A","B"]';}};
+ for(const writingMode of ['roleplay','author'])for(const [i,contentMode]of modes.entries()){
+  const s=normalizeSettings({...prompts,writingMode,contentMode,count:2});assert.equal(normalizeSettings(JSON.parse(JSON.stringify(s))).contentMode,contentMode);
+  await generateOptions(ctx,s,{world:[]});const system=requests.at(-1).systemPrompt;assert.ok(system.includes(texts[i]));for(const other of texts.filter(t=>t!==texts[i]))assert.ok(!system.includes(other));
+ }
+});
