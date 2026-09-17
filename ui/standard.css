@@ -133,3 +133,8 @@ html[data-wsh-frame][data-amin-surface] #status.error {color:var(--amin-text)!im
 :is(#amin-os,.amin-extra-floor-window) .amin-ui[data-amin-theme^=win10] :is(button,input,select,textarea):focus-visible{outline:2px solid #60b8ff;outline-offset:1px}
 
 body .amin-floor[data-amin-surface][data-amin-theme^=win10]>.amin-floor-toolbar>button{color:var(--amin-text)!important}
+
+/* Worldbook manager uses the shared appearance tokens. */
+.amin-worldbooks .amin-wb-check {display:flex;align-items:center;gap:8px;margin:8px 0}
+.amin-worldbooks .amin-wb-entry {padding:var(--amin-gap);border-bottom:1px solid var(--amin-line)}
+.amin-worldbooks pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;font:inherit}

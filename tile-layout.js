@@ -3,7 +3,7 @@ export const TILE_KEY='amin-os.tiles.v2';
 export const LEGACY_TILE_KEY='amin-os.tiles.v1';
 export const defaultTiles=()=>[
  {id:'map',target:'map',label:'',size:'wide'},{id:'status',target:'status',label:'',size:'medium'},{id:'reply',target:'reply',label:'',size:'medium'},
- {id:'information',target:'information',label:'',size:'wide'},{id:'effects',target:'effects',label:'',size:'wide'},{id:'ai',target:'ai',label:'',size:'small'},{id:'settings',target:'settings',label:'',size:'small'},
+ {id:'information',target:'information',label:'',size:'wide'},{id:'effects',target:'effects',label:'',size:'wide'},{id:'worldbooks',target:'worldbooks',label:'',size:'medium'},{id:'ai',target:'ai',label:'',size:'small'},{id:'settings',target:'settings',label:'',size:'small'},
 ];
 export function normalizeTiles(value){
  if(!Array.isArray(value))return defaultTiles();

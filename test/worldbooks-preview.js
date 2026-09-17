@@ -1,0 +1,13 @@
+import {createShell} from '../shell.js';
+import {initializeAppearance,getAppearance,installAppearance} from '../settings/appearance.js';
+import {mount} from '../apps/worldbooks/view.js';
+import {createManager,emptyState} from '../apps/worldbooks/service.js';
+const ctx={characterId:0,characters:[{avatar:'preview-a.png',name:'旅人 A'},{avatar:'preview-b.png',name:'向导 B'}],extensionSettings:{},saveSettingsDebounced(){}};
+initializeAppearance(()=>ctx);let globals=['通用设定'];
+const books={'通用设定':{entries:{0:{uid:0,comment:'世界背景',content:'世界书原始文字，只切换开关。',disable:false}}},'星港资料':{entries:{0:{uid:0,comment:'星港守则',content:'星港是旅途的起点。',disable:false},1:{uid:1,comment:'隐藏路线',content:'北边的航线尚未开放。',disable:true},2:{uid:2,comment:'观测站',content:'观测站守望着星海。',disable:false}}}};
+const initial=emptyState();initial.visible=Object.keys(books);
+const display=()=>document.querySelector('#state').textContent=JSON.stringify({role:ctx.characters[ctx.characterId].name,globals,entries:books['星港资料'].entries},null,2);
+const manager=createManager({context:()=>ctx,initial,persist:display,host:{names:async()=>Object.keys(books),globals:()=>[...globals],load:async n=>structuredClone(books[n]),save:async(n,d)=>{books[n]=structuredClone(d);display();},setGlobal:async(n,on)=>{globals=globals.filter(x=>x!==n);if(on)globals.push(n);display();}}});
+const shell=createShell();installAppearance(document);const view=await mount(shell.panes.worldbooks,{manager});shell.register('worldbooks',()=>view.open());await shell.showApp('worldbooks');
+document.querySelector('#switch').onclick=async()=>{ctx.characterId=1-ctx.characterId;await manager.sync();display();};
+document.querySelector('#theme').onclick=()=>{const service=getAppearance(),settings=service.snapshot();settings.desktop.windowTheme=settings.desktop.windowTheme==='win10light'?'win10':'win10light';service.save(settings);};display();

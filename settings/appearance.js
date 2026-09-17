@@ -9,7 +9,7 @@ export const PALETTES = {
  violet:{name:'夜色紫晶',bg:'#171529',card:'#242039',control:'#322b4d',text:'#efeafb',muted:'#b6acd0',line:'#51466eaa',accent:'#c5a9ff',ink:'#251737',scheme:'dark'},
  mono:{name:'极简墨白',bg:'#f4f5f6',card:'#ffffff',control:'#e9ecef',text:'#202b37',muted:'#586674',line:'#c7cdd4',accent:'#304d66',ink:'#ffffff',scheme:'light'},
 };
-export const APP_NAMES={information:'信息面板',effects:'能力面板',map:'地图',status:'世界状态',reply:'回复选项',ai:'AI 设置'};
+export const APP_NAMES={worldbooks:'世界书管理',information:'信息面板',effects:'能力面板',map:'地图',status:'世界状态',reply:'回复选项',ai:'AI 设置'};
 export const defaults=()=>({global:{theme:'mint',fontSize:13,radius:14,density:'comfortable',opacity:100,blur:12},window:{width:448,height:720},desktop:{style:'classic',windowTheme:'auto',effects:effectsDefaults()},apps:{},floor:{width:900,desktopHeight:65,mobileHeight:55,alignment:'left',sizeMode:'fixed',buttons:{map:true,status:true,reply:true,effects:true,information:true},overrides:{}}});
 const clone=x=>structuredClone(x);
 function number(value,min,max){if(!Number.isFinite(value)||value<min||value>max)throw Error(`数值需在 ${min}–${max} 之间`);return value;}
