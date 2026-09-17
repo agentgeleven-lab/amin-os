@@ -19,6 +19,12 @@ export async function mount(target,{manager}={}){
  function renderEntries(parent,state){
   if(!book||!data)return;
   const c=card(parent,`条目 · ${book}`);c.append(el('p','默认保持原样；仅修改启用开关，仍遵循原本的触发规则。保存组合后生效。'));
+  const all=el('div',null,'amin-toolbar');all.setAttribute('aria-label','整本世界书条目操作');c.append(all);
+  for(const [mode,label]of [['on','全部启用'],['off','全部关闭'],['keep','全部恢复原样']])button(all,label,()=>{
+   if(mode==='keep')profile.entries[book]={};else for(const id of Object.keys(data.entries))setRule(id,mode);
+   drawList();say(`「${book}」已设置${label}，保存组合或临时应用后生效。`);
+  }).disabled=mode!=='keep'&&!Object.keys(data.entries).length;
+  c.append(el('p','整本操作包含搜索结果之外的所有条目；恢复原样会撤销本书的条目覆盖，不撤下世界书。'));
   const list=el('div');search(c,'搜索条目名称、UID 或正文',entryQuery,v=>{entryQuery=v;drawList();});
   const bar=el('div',null,'amin-toolbar');c.append(bar);
   for(const [mode,label]of modes)button(bar,'所选'+label,()=>{for(const id of selected)setRule(id,mode);drawList();});
