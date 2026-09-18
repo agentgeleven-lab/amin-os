@@ -34,7 +34,7 @@ test('floor dimensions migrate, share defaults, and allow independent overrides'
 });
 
 test('floor button visibility migrates and reply sizes persist independently',()=>{
- const old=validate({floor:{width:800}});assert.deepEqual(old.floor.buttons,{map:true,status:true,reply:true,effects:true,information:true});
+ const old=validate({floor:{width:800}});assert.deepEqual(old.floor.buttons,{map:true,status:true,reply:true,effects:true,information:true,worldbooks:true});
  old.floor.buttons.status=false;old.floor.overrides.reply={width:500,desktopHeight:40,mobileHeight:45};
  const ctx={extensionSettings:{},saveSettingsDebounced(){}};createAppearance(()=>ctx).save(old);
  const restored=createAppearance(()=>ctx).snapshot();assert.equal(restored.floor.buttons.status,false);
@@ -58,4 +58,9 @@ test('Windows 10 window pairing follows desktop choice and preserves independent
 test('explicit Windows light overrides automatic dark and accent text remains readable',()=>{
  const ctx={extensionSettings:{},saveSettingsDebounced(){}};const a=createAppearance(()=>ctx),d=a.snapshot();d.desktop.style='win10';d.desktop.windowTheme='win10light';a.save(d);assert.equal(a.resolve('').theme,'win10light');assert.equal(themeVariables(a.resolve(''))['--amin-accent-text'],'#202020');
  d.desktop.windowTheme='win10';a.save(d);assert.equal(themeVariables(a.resolve(''))['--amin-accent-text'],'#ffffff');assert.equal(themeVariables(a.resolve(''))['--amin-accent'],'#0078d4');
+});
+test('worldbook floor visibility and separate dimensions persist without changing other apps',()=>{
+ const ctx={extensionSettings:{},saveSettingsDebounced(){}},a=createAppearance(()=>ctx),s=a.snapshot();
+ assert.equal(s.floor.buttons.worldbooks,true);s.floor.buttons.worldbooks=false;s.floor.overrides.worldbooks={width:620,desktopHeight:50,mobileHeight:45};a.save(s);
+ const restored=createAppearance(()=>ctx).snapshot();assert.equal(restored.floor.buttons.worldbooks,false);assert.equal(resolveFloor(restored,'worldbooks').width,620);assert.equal(resolveFloor(restored,'map').width,900);
 });

@@ -78,6 +78,6 @@ export async function mount(target,{manager}={}){
   }
   const hidden=profile.books.filter(n=>!state.visible.includes(n));if(hidden.length)body.append(el('p',`组合中另有 ${hidden.length} 本未在此展示；可在展示范围中选中管理。`));
  }
- const unsubscribe=api.subscribe(render);await refresh();
+ const unsubscribe=api.subscribe(render);try{await refresh();}catch(error){disposed=true;epoch++;unsubscribe();page.remove();throw error;}
  return {open:refresh,dispose(){disposed=true;epoch++;unsubscribe();page.remove();}};
 }

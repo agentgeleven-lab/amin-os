@@ -140,3 +140,5 @@
 
 .amin-floor-toolbar>[data-floor-app=effects]{order:3}
 .amin-floor-toolbar>[data-floor-app=information]{order:4}
+
+.amin-floor-toolbar>[data-floor-app=worldbooks]{order:5}

@@ -38,3 +38,11 @@ test('five floor apps use fixed button order and click order for windows',()=>{
  buttons[1].click=()=>docks[1].setOpen(false);docks[1].setVisible(false);assert.equal(buttons[1].hidden,true);assert.equal(hosts[0].style.order,'4');
  docks.forEach(d=>d.dispose());assert.equal(message.children.length,0);
 });
+test('worldbook floor window shares button order and follows opening order',()=>{
+ const document={createElement:()=>new Node()},message=new Node(),ids=['worldbooks','information','effects','reply','status','map'];
+ const hosts=ids.map(()=>new Node()),buttons=ids.map(()=>new Node()),docks=ids.map((id,i)=>mountFloorControl(message,id,hosts[i],buttons[i],document));
+ assert.deepEqual(message.children[0].children[0].children.map(b=>b.dataset.floorApp),['map','status','reply','effects','information','worldbooks']);
+ docks[0].setOpen(true);docks[5].setOpen(true);assert.equal(hosts[0].style.order,'1');assert.equal(hosts[5].style.order,'2');
+ docks[0].setOpen(false);docks[0].setOpen(true);assert.equal(hosts[0].style.order,'2');assert.equal(hosts[5].style.order,'1');
+ buttons[0].click=()=>docks[0].setOpen(false);docks[0].setVisible(false);assert(buttons[0].hidden);assert.equal(hosts[5].style.order,'1');docks.forEach(d=>d.dispose());
+});
