@@ -1,3 +1,4 @@
+import {launchTarget,waitForService} from './launcher.js';
 import {isCloud,BASE_VOICE} from './cloud.js';
 import {getPlayer,scopedPlayer,settings,saveSettings,health} from './service.js';
 import {classify,profiles} from './dialogue.js';
@@ -20,8 +21,18 @@ export function mount(target,{readMessage=null,source='app'}={}){
  text.onchange=quotes.onchange=()=>{try{analyze();}catch(e){status.textContent=e.message;}};
  button(detail,'保存设置',()=>{try{saveSettings(collect());analyze();status.textContent='设置已保存';}catch(e){status.textContent=e.message;}});
  button(detail,'检查配置',async()=>{try{await health(collect());status.textContent=isCloud(collect())?'必填配置完整；点击播放验证实际合成（可能产生费用）':provider.value==='mimo'?'已连接 MiMo → DXL1':'东雪莲服务已连接';}catch(e){status.textContent=e.message;}});
+ let launchController=null;
+ const localBar=el('div');localBar.className='amin-toolbar';
+ const launch=button(localBar,'启动本地服务',async()=>{try{
+  const config=collect(),destination=launchTarget(config);launchController?.abort();launchController=new AbortController();const signal=launchController.signal;
+  // Dispatch within the click gesture. No credentials or arbitrary commands enter the URI.
+  window.open(destination.uri,'_blank','noopener,noreferrer');launch.disabled=true;status.textContent='已请求启动，请允许系统打开启动器，正在等待连接…';
+  const h=await waitForService(config,{signal});status.textContent=config.provider==='mimo'&&!h.key_configured?'DXL1 服务已启动；点击“打开本地配置页”填写 MiMo 密钥。':'本地服务已连接，可以播放';
+ }catch(e){if(e.name!=='AbortError')status.textContent=e.message;}finally{launch.disabled=false;}});
+ button(localBar,'打开本地配置页',()=>{try{window.open(launchTarget(collect()).base,'_blank','noopener,noreferrer');}catch(e){status.textContent=e.message;}});
+ detail.append(localBar);
  const play=button(bar,readMessage?'朗读本层':'播放',()=>{try{if(readMessage){const latest=readMessage();if(latest!==rendered){rendered=latest;text.value=latest;}}const config=collect();saveSettings(config);analyze();player.play(sections.map(s=>({...s})),config);}catch(e){status.textContent=e.message;}});play.className='amin-primary';
  const pause=button(bar,'暂停',()=>player.pause()),resume=button(bar,'继续',()=>player.resume()),stop=button(bar,'停止',()=>player.stop());
  root.append(bar,status,detail,preview);const off=player.subscribe(s=>{status.textContent=s.message;pause.disabled=s.phase!=='playing';resume.disabled=s.phase!=='paused';stop.disabled=!['loading','playing','paused','waiting'].includes(s.phase);});
- function reflectProvider(){const cloud=['mimo-direct','volcengine'].includes(provider.value);url.parentElement.hidden=cloud;seed.parentElement.hidden=cloud;ratioLabel.hidden=provider.value!=='mimo';mimoKey.parentElement.hidden=provider.value!=='mimo-direct';for(const f of [volcAppId,volcToken,speaker,resource])f.parentElement.hidden=provider.value!=='volcengine';cloudFields.hidden=!cloud;voiceLabel.hidden=provider.value==='volcengine'||provider.value==='azuma';for(const v of Object.values(fields)){v.emotion.parentElement.hidden=!['mimo-direct','mimo'].includes(provider.value);v.volcEmotion.parentElement.hidden=provider.value!=='volcengine';}}provider.onchange=()=>{url.value=provider.value==='mimo'?'http://127.0.0.1:9884':'http://127.0.0.1:9883';reflectProvider();};target.append(root);reflectProvider();analyze();return {dispose(){off();root.remove();},open(){}};
+ function reflectProvider(){const cloud=['mimo-direct','volcengine'].includes(provider.value);localBar.hidden=cloud;url.parentElement.hidden=cloud;seed.parentElement.hidden=cloud;ratioLabel.hidden=provider.value!=='mimo';mimoKey.parentElement.hidden=provider.value!=='mimo-direct';for(const f of [volcAppId,volcToken,speaker,resource])f.parentElement.hidden=provider.value!=='volcengine';cloudFields.hidden=!cloud;voiceLabel.hidden=provider.value==='volcengine'||provider.value==='azuma';for(const v of Object.values(fields)){v.emotion.parentElement.hidden=!['mimo-direct','mimo'].includes(provider.value);v.volcEmotion.parentElement.hidden=provider.value!=='volcengine';}}provider.onchange=()=>{launchController?.abort();url.value=provider.value==='mimo'?'http://127.0.0.1:9884':'http://127.0.0.1:9883';reflectProvider();};target.append(root);reflectProvider();analyze();return {dispose(){launchController?.abort();off();root.remove();},open(){}};
 }
