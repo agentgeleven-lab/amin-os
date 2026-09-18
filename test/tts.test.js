@@ -20,3 +20,16 @@ test('floor controls and progress never operate on another floor',()=>{
  first.pause();assert.deepEqual(calls,['pause']);second.play('仅第二层正文');assert.deepEqual(calls.at(-1),['play','仅第二层正文','floor-2']);
  state={source:'floor-2',phase:'playing',message:'播放 1/1 段'};notify(state);assert.equal(visible.message,'播放 1/1 段');first.stop();assert.equal(calls.length,2);second.stop();assert.equal(calls.at(-1),'stop');
 });
+import {classify,planSpeech,quotePairs,delay} from '../apps/tts/dialogue.js';
+test('dialogue classification preserves order, nested quotes and unmatched text',()=>{
+ const text='她说：“你好，『朋友』。”随后离开。';const parts=classify(text);assert.deepEqual(parts.map(p=>p.type),['narration','dialogue','narration']);assert.equal(parts.map(p=>p.text).join(''),text);assert.deepEqual(classify('他说：“没说完'),[{type:'narration',text:'他说：“没说完'}]);assert.throws(()=>quotePairs('一行太多字'));assert.equal(classify('甲【乙】丙','【】')[1].type,'dialogue');
+});
+test('speech plan filters and applies independent parameters without reordering',()=>{
+ const c={...config,range:'all',profiles:{dialogue:{speed:1.2,volume:.5,pauseMs:200},narration:{speed:.8,volume:.8,pauseMs:100}}};const text='她说：“你好。”随后离开。';const plan=planSpeech(text,c);assert.deepEqual(plan.map(p=>p.speed),[.8,1.2,.8]);assert.deepEqual(plan.map(p=>p.volume),[.8,.5,.8]);assert.equal(planSpeech(text,{...c,range:'dialogue'}).length,1);assert.equal(planSpeech(text,{...c,range:'narration'}).length,2);assert.equal(planSpeech([{type:'dialogue',text:'手动纠正'}],{...c,range:'dialogue'})[0].speed,1.2);
+});
+test('typed playback sends different speeds and volumes in original sequence',async()=>{
+ const requests=[];const {player,audio}=rig(async(url,init)=>{requests.push(JSON.parse(init.body));return response();});const c={...config,profiles:{dialogue:{speed:1.2,volume:.4,pauseMs:0},narration:{speed:.8,volume:.9,pauseMs:0}}};const done=player.play('旁白。“对话。”','floor',c);await tick();assert.equal(requests[0].speed,.8);assert.equal(audio.volume,.9);audio.onended();await tick();assert.equal(requests[1].speed,1.2);assert.equal(audio.volume,.4);audio.onended();await done;
+});
+test('stop during paragraph pause prevents the next synthesis',async()=>{
+ let count=0;const {player,audio}=rig(async()=>{count++;return response();});const done=player.play('旁白。“对话。”','floor',{...config,profiles:{narration:{pauseMs:5000}}});await tick();audio.onended();await tick();assert.equal(player.snapshot().phase,'waiting');player.stop();await done;assert.equal(count,1);
+});
