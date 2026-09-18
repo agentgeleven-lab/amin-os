@@ -19,7 +19,7 @@ export function createManager({host,context,initial=emptyState(),persist}){
  const save=()=>persist(structuredClone(state));
  const emit=()=>{for(const fn of listeners)fn();};
  const report=text=>{message=text;messages.push(text);if(messages.length>20)messages.shift();emit();};
- const enqueue=fn=>{const run=queue.then(fn);queue=run.catch(e=>report(e.message));return run.finally(emit);};
+ const enqueue=fn=>{const run=queue.then(async()=>{try{return await fn();}finally{try{await host.refreshEditor?.();}finally{emit();}}});queue=run.catch(e=>report(e.message));return run;};
  const check=role=>{if(character(context())?.id!==role)throw Error('角色已切换，未继续应用；请刷新查看当前组合');};
  async function restoreEntry(record){
   if(!(await host.names()).includes(record.book)){report(`世界书已不存在：${record.book}，已释放旧名称接管；未匹配其他书`);return;}

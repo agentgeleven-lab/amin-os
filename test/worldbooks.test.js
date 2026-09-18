@@ -86,3 +86,15 @@ test('host rejects a concurrent cache edit before writing the worldbook',async()
 test('queued save captures the profile at click time',async()=>{
  const f=fixture(),draft=profile();const saving=f.api.apply('a.png',draft);draft.books.push('two');await saving;assert.deepEqual(f.api.profile().books,['one']);
 });
+test('host verifies disk state, synchronizes original enabled and refreshes only the open editor',async()=>{
+ let cached={entries:{0:{uid:0,disable:false,content:'original'}}},disk,shown=[],events=0;
+ const wi={world_names:['one','other'],loadWorldInfo:async()=>cached,worldInfoCache:{get:()=>cached,set:(n,d)=>cached=d},setWIOriginalDataValue(d,id,key,v){d.originalData={id,[key]:v};},showWorldEditor:async n=>shown.push(n)};
+ const host=createHost(wi,()=>({getRequestHeaders:()=>({}),eventTypes:{WORLDINFO_UPDATED:'updated'},eventSource:{emit(){events++;}}}),{jquery:()=>({val:()=> '0'}),request:async(url,options)=>{if(url.endsWith('/edit')){disk=JSON.parse(options.body).data;return {ok:true};}return {ok:true,json:async()=>structuredClone(disk)};}});
+ const draft=await host.load('one');draft.entries[0].disable=true;await host.save('one',draft);assert.equal(disk.originalData.enabled,false);assert.equal(cached.entries[0].disable,true);assert.equal(events,1);assert.deepEqual(shown,[]);await host.refreshEditor();await host.refreshEditor();assert.deepEqual(shown,['one']);
+});
+test('successful HTTP save with unchanged server flags is rejected instead of reporting disabled',async()=>{
+ let cached={entries:{0:{uid:0,disable:false}}},events=0;
+ const wi={loadWorldInfo:async()=>cached,worldInfoCache:{get:()=>cached,set:(n,d)=>cached=d}};
+ const host=createHost(wi,()=>({getRequestHeaders:()=>({}),eventTypes:{WORLDINFO_UPDATED:'updated'},eventSource:{emit(){events++;}}}),{request:async()=>({ok:true,json:async()=>({entries:{0:{uid:0,disable:false}}})})});
+ const draft=await host.load('one');draft.entries[0].disable=true;await assert.rejects(host.save('one',draft),/未保存或被覆盖/);assert.equal(cached.entries[0].disable,false);assert.equal(events,0);
+});
