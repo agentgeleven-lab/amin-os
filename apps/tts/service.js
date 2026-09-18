@@ -27,17 +27,30 @@ export function createPlayer({audio=new Audio(),request=fetch,check=health,urls=
   session={parts,config:snapshot,source,index:0,generateOnly:options.generateOnly===true};return run(session);
  }
  function retry(){if(state.phase!=='error'||!state.canRetry||!session)return;return run(session);}
+ async function synthesize(part,job,signal,alive){const {config,source}=job;
+    let blob=part.blob;
+    if(!blob){const response=isCloud(config)?await generateCloud(part,config,signal,request):config.provider==='mimo'?await generateMimo(part,config,signal):await request(endpoint(config.url)+'/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:part.text,speed:part.speed,seed:config.seed}),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});
+    if(!response.ok)throw Error('合成失败：HTTP '+response.status);blob=await response.blob();if(!alive())return;if(!blob.type.includes('audio/')||blob.size<44)throw Error('服务未返回有效音频');
+    const warning=await library.put({id:JSON.stringify([source,part.segmentId]),source,text:part.text,type:part.type,segmentId:part.segmentId,sectionNumber:part.sectionNumber,blob,provider:config.provider,speed:part.speed,volume:part.volume,updatedAt:Date.now()});if(!alive())return;if(warning)job.warning=warning;}
+ return blob;
+ }
  async function run(job){
   const {parts,config,source}=job;const ticket=++epoch;controller?.abort();controller=new AbortController();const signal=controller.signal;
   const alive=()=>ticket===epoch&&!signal.aborted;
-  try{volumeControl.prepare(parts[job.index].volume);emit({phase:'loading',message:'正在连接语音服务…',source,canRetry:false});if(!parts.every(p=>p.blob))await check(config,signal);if(!alive())return;
+  try{volumeControl.prepare(parts[job.index].volume);emit({phase:'loading',message:'正在连接语音服务…',source,canRetry:false});const readiness=parts.every(p=>p.blob)?{}:await check(config,signal);if(!alive())return;
+   if(job.generateOnly&&parts.length>1){
+    const limit=config.provider==='mimo'?Math.min(3,readiness?.batch_concurrency||1):isCloud(config)?3:1;
+    let next=0,complete=0;const failed=[];
+    const worker=async()=>{while(alive()&&next<parts.length){const index=next++;try{await synthesize(parts[index],job,signal,alive);}catch(error){if(alive())failed.push({index,message:error.message});}if(!alive())return;complete++;emit({phase:'loading',message:`批量生成 ${complete}/${parts.length} 段 · ${limit} 路并发 · ${failed.length} 段失败`,source});}};
+    await Promise.all(Array.from({length:Math.min(limit,parts.length)},worker));if(!alive())return;
+    if(failed.length){failed.sort((a,b)=>a.index-b.index);job.parts=failed.map(x=>parts[x.index]);job.index=0;emit({phase:'error',message:`已保存 ${parts.length-failed.length} 段，${failed.length} 段失败：${failed[0].message}。点击重试仅补生成失败段落。`,source,canRetry:true});}
+    else{session=null;emit({phase:'idle',message:job.warning||'全部所选段落已生成并保存',source,canRetry:false});}
+    return;
+   }
    for(let i=job.index;i<parts.length;i++){
     job.index=i;
     emit({phase:'loading',message:`${parts[i].blob?'正在读取已保存语音':'正在合成'} ${i+1}/${parts.length} 段…`,source});
-    let blob=parts[i].blob;
-    if(!blob){const response=isCloud(config)?await generateCloud(parts[i],config,signal,request):config.provider==='mimo'?await generateMimo(parts[i],config,signal):await request(endpoint(config.url)+'/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:parts[i].text,speed:parts[i].speed,seed:config.seed}),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});
-    if(!response.ok)throw Error('合成失败：HTTP '+response.status);blob=await response.blob();if(!alive())return;if(!blob.type.includes('audio/')||blob.size<44)throw Error('服务未返回有效音频');
-    const part=parts[i];const warning=await library.put({id:JSON.stringify([source,part.segmentId]),source,text:part.text,type:part.type,segmentId:part.segmentId,sectionNumber:part.sectionNumber,blob,provider:config.provider,speed:part.speed,volume:part.volume,updatedAt:Date.now()});if(!alive())return;if(warning)job.warning=warning;}
+    const blob=await synthesize(parts[i],job,signal,alive);if(!alive())return;
     if(job.generateOnly)continue;
     clear();objectURL=urls.createObjectURL(blob);audio.src=objectURL;volumeControl.set(parts[i].volume);audio.playbackRate=['mimo','mimo-direct'].includes(config.provider)?parts[i].speed:1;audio.preservesPitch=true;
     await new Promise((resolve,reject)=>{finish=()=>{audio.onended=null;audio.onerror=null;resolve();};audio.onended=()=>finish?.();audio.onerror=()=>{finish=null;reject(Error('音频播放失败'));};emit({phase:'playing',message:`播放 ${i+1}/${parts.length} 段`,source});audio.play().catch(error=>{if(!alive())return;if(error.name==='NotAllowedError')emit({phase:'paused',message:'音频已就绪，请点击继续播放',source});else reject(error);});});

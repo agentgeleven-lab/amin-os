@@ -1,0 +1,76 @@
+--- a/app.py
++++ b/app.py
+@@ -20,7 +20,7 @@
+ from typing import Literal
+ from pydantic import BaseModel,Field
+ import uvicorn
+-app=FastAPI();token=secrets.token_urlsafe(32);key=os.environ.get('MIMO_API_KEY','');jobs={};lock=threading.Lock();vc=None
++app=FastAPI();token=secrets.token_urlsafe(32);key=os.environ.get('MIMO_API_KEY','');jobs={};lock=threading.Lock();slots=threading.BoundedSemaphore(3);vc=None
+ BASE='一位二十多岁的年轻成年女性，声音清亮柔和，音高中等偏高，发声轻松自然。普通话清晰，咬字轻巧，像与熟悉的人面对面聊天。语速适中，句间停顿自然，尾音收束干净。整体亲切，带少许俏皮感，避免刻意挤压的尖细嗓音和夸张播音腔。'
+ EMOTIONS={'日常':'语气放松亲切，情绪起伏适度。','温柔':'语速稍慢，语气柔和，带着认真倾听后的关心。','开心':'语调轻快，略带笑意，重点词自然上扬。','小吐槽':'带一点无奈和玩笑意味，重音清楚，避免尖叫。'}
+ @app.middleware('http')
+@@ -40,7 +40,7 @@
+ @app.get('/',response_class=HTMLResponse)
+ def index():return (ROOT/'index.html').read_text(encoding='utf-8').replace('__TOKEN__',token)
+ @app.get('/health')
+-def health():return {'app':'mimo-rvc-studio','key_configured':bool(key),'rvc_loaded':vc is not None,'busy':lock.locked(),'rvc_model':'DXL1.pth','loaded_model':'DXL1.pth' if vc is not None else None,'index_ratios':[0.5,0.75]}
++def health():return {'app':'mimo-rvc-studio','key_configured':bool(key),'rvc_loaded':vc is not None,'batch_concurrency':3,'busy':any(j.get('state')=='running' for j in jobs.values()),'rvc_model':'DXL1.pth','loaded_model':'DXL1.pth' if vc is not None else None,'index_ratios':[0.5,0.75]}
+ @app.get('/api/session')
+ def session():return {'token':token,'base_prompt':BASE}
+ @app.post('/api/jobs/{uid}/cancel')
+@@ -50,7 +50,7 @@
+ @app.post('/api/key')
+ def set_key(req:KeyInput):
+  global key
+- if lock.locked():raise HTTPException(409,'生成中，请稍后更换密钥')
++ if any(j.get('state')=='running' for j in jobs.values()):raise HTTPException(409,'生成中，请稍后更换密钥')
+  key=req.api_key.strip()
+  return {'key_configured':bool(key)}
+ def init_rvc():
+@@ -90,30 +90,33 @@
+   if j.get('cancel_requested'):j.update(state='cancelled',status='已取消');return
+   j['results']=[{'label':source_label,'url':f'/audio/{job_id}/original.wav',**validate_audio(source)}]
+   if req.rvc:
+-   j['status']='加载 DXL1 RVC…';engine=init_rvc()
+-   for ratio,name in ((.5,'rvc-050'),(.75,'rvc-075')):
+-    if req.ratio is not None and req.ratio!=ratio:continue
++   j['status']='等待 DXL1 变声…'
++   with lock:
+     if j.get('cancel_requested'):j.update(state='cancelled',status='已取消');return
+-    import torch
+-    torch.manual_seed(42);np.random.seed(42)
+-    j['status']=f'RVC 正在转换，索引比例 {ratio}…';begin=time.perf_counter()
+-    info,result=engine.vc_single(0,str(source),req.pitch,'rmvpe',str(INDEX),ratio,0,1.0,.33)
+-    if result is None or result[0] is None:raise RuntimeError('RVC 转换失败；详情请查看本机 server-error.log')
+-    if j.get('cancel_requested'):j.update(state='cancelled',status='已取消');return
+-    sr,audio=result;dest=out/(name+'.wav');sf.write(dest,audio,sr,subtype='PCM_16')
+-    j['results'].append({'label':f'DXL1 RVC · {ratio}','url':f'/audio/{job_id}/{name}.wav','model':'DXL1.pth','ratio':ratio,'elapsed':round(time.perf_counter()-begin,2),**validate_audio(dest)})
++    j['status']='加载 DXL1 RVC…';engine=init_rvc()
++    for ratio,name in ((.5,'rvc-050'),(.75,'rvc-075')):
++     if req.ratio is not None and req.ratio!=ratio:continue
++     if j.get('cancel_requested'):j.update(state='cancelled',status='已取消');return
++     import torch
++     torch.manual_seed(42);np.random.seed(42)
++     j['status']=f'RVC 正在转换，索引比例 {ratio}…';begin=time.perf_counter()
++     info,result=engine.vc_single(0,str(source),req.pitch,'rmvpe',str(INDEX),ratio,0,1.0,.33)
++     if result is None or result[0] is None:raise RuntimeError('RVC 转换失败；详情请查看本机 server-error.log')
++     if j.get('cancel_requested'):j.update(state='cancelled',status='已取消');return
++     sr,audio=result;dest=out/(name+'.wav');sf.write(dest,audio,sr,subtype='PCM_16')
++     j['results'].append({'label':f'DXL1 RVC · {ratio}','url':f'/audio/{job_id}/{name}.wav','model':'DXL1.pth','ratio':ratio,'elapsed':round(time.perf_counter()-begin,2),**validate_audio(dest)})
+   j.update(state='done',status='生成完成',elapsed=round(time.perf_counter()-started,2))
+   (out/'result.json').write_text(json.dumps({**j,'text':req.text if not local else '复用已有 MiMo 试听','prompt':req.prompt,'emotion':req.emotion,'pitch':req.pitch,'source':'cached-mimo-test' if local else 'mimo-v2.5-tts-voicedesign','rvc':{'f0':'rmvpe','protect':.33,'model':'DXL1.pth','index':INDEX.name,'seed':42,'ratios':[req.ratio] if req.ratio else [.5,.75]}},ensure_ascii=False,indent=2),encoding='utf-8')
+  except Exception as exc:
+   # Do not expose HTTP request headers, credentials, or upstream response bodies.
+   safe=str(exc) if isinstance(exc,RuntimeError) else '生成失败（'+type(exc).__name__+'），请检查网络或返回音频格式。'
+   j.update(state='error',status=safe)
+- finally:lock.release()
++ finally:slots.release()
+ def start(req,local=False):
+  if not local and not key:raise HTTPException(400,'请先填写 MiMo API Key')
+  if req.emotion not in EMOTIONS:raise HTTPException(400,'未知情绪')
+  if not req.text.strip() or not req.prompt.strip():raise HTTPException(400,'台词和音色描述不能为空')
+- if not lock.acquire(blocking=False):raise HTTPException(409,'已有任务生成中')
++ if not slots.acquire(blocking=False):raise HTTPException(409,'已有 3 个任务，请稍后重试')
+  uid=uuid.uuid4().hex;jobs[uid]={'id':uid,'state':'running','status':'开始生成…','results':[]}
+  threading.Thread(target=process,args=(uid,req,local),daemon=True).start()
+  return {'id':uid}
