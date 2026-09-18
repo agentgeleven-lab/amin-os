@@ -3,7 +3,7 @@ const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textCont
 export async function mount(target,{manager}={}){
  const api=manager??await getManager(),page=el('div',null,'amin-page amin-worldbooks'),intro=el('div',null,'amin-context'),tabs=el('nav',null,'amin-tabs'),notice=el('p',null,'amin-notice'),body=el('section');
  notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');tabs.setAttribute('aria-label','世界书管理页面');page.append(intro,tabs,notice,body);target.append(page);
- let tab='角色组合',role=api.context()?.id,profile=api.profile(),names=[],query='',entryQuery='',book='',data=null,selected=new Set(),epoch=0,disposed=false;
+ let tab='角色组合',role=api.context()?.id,profile=api.profile(),names=[],query='',entryQuery='',book='',data=null,selected=new Set(),epoch=0,disposed=false,selecting=false;
  const expanded=new Set();
  const say=text=>notice.textContent=text;
  const button=(parent,text,fn,primary=false)=>{const b=el('button',text,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
@@ -68,14 +68,20 @@ export async function mount(target,{manager}={}){
   button(actions,'重新应用已保存组合',async()=>{profile=api.profile();await api.apply(role,profile,true);await api.sync(true);if(book)await loadBook(book);}).disabled=!role;
   body.append(el('p',state.paused?'自动应用已暂停，保存只记录设置；恢复后生效。':'离开角色时撤回接管项目；同角色切换聊天保持组合。'));
   if(!state.visible.length){button(body,'选择要展示的世界书',()=>{tab='展示范围';render();},true);return;}
-  const folding=el('div',null,'amin-toolbar');body.append(folding);button(folding,'全部展开',()=>{for(const name of state.visible)expanded.add('book:'+name);render();});button(folding,'全部折叠',()=>{for(const name of state.visible)expanded.delete('book:'+name);render();});
+  const picker=fold(body,'book-picker',`选择启用的世界书 · 已选 ${profile.books.length} 本`);
+  picker.append(el('p','勾选后自动保存并应用当前角色组合；取消勾选只撤回插件接管的改动。'));
+  const choices=el('div',null,'amin-wb-choices');picker.append(choices);
   const globals=api.globals();for(const name of state.visible){
    const exists=names.includes(name),status=!exists?'世界书不存在或已改名':state.session.books.includes(name)?'插件临时启用':globals.includes(name)?'已全局启用（非插件接管）':'未全局启用';
-   const c=fold(body,'book:'+name,`${name} · ${status}${profile.books.includes(name)?' · 已加入组合':''}`);
-   check(c,'加入当前角色的全局组合',profile.books.includes(name),on=>{profile.books=profile.books.filter(n=>n!==name);if(on)profile.books.push(name);profile.entries[name]??={};render();}).disabled=!role;
-   if(exists&&profile.books.includes(name))button(c,'设置条目',()=>loadBook(name));
-   if(name===book&&profile.books.includes(book))renderEntries(c,state);
+   const row=el('div',null,'amin-wb-entry');choices.append(row);
+   check(row,name,profile.books.includes(name),async on=>{
+    const captured=role;selecting=true;profile.books=profile.books.filter(n=>n!==name);if(on)profile.books.push(name);profile.entries[name]??={};render();let failure='';
+    try{await api.apply(captured,profile,true);}catch(error){failure=error.message;}finally{selecting=false;render();if(failure)say(failure);}
+   }).disabled=!role||selecting||(!exists&&!profile.books.includes(name));
+   row.append(el('small',status));
+   if(exists&&profile.books.includes(name))button(row,'设置条目',()=>loadBook(name));
   }
+  if(profile.books.includes(book))renderEntries(body,state);
   const hidden=profile.books.filter(n=>!state.visible.includes(n));if(hidden.length)body.append(el('p',`组合中另有 ${hidden.length} 本未在此展示；可在展示范围中选中管理。`));
  }
  const unsubscribe=api.subscribe(render);try{await refresh();}catch(error){disposed=true;epoch++;unsubscribe();page.remove();throw error;}

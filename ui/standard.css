@@ -141,3 +141,7 @@ body .amin-floor[data-amin-surface][data-amin-theme^=win10]>.amin-floor-toolbar>
 
 .amin-worldbooks .amin-wb-fold > summary {cursor:pointer;overflow-wrap:anywhere;font-weight:600}
 .amin-worldbooks .amin-wb-fold[open] > summary {margin-bottom:var(--amin-gap)}
+
+.amin-worldbooks .amin-wb-choices {max-height:320px;max-height:min(320px,45dvh);overflow:auto}
+.amin-worldbooks .amin-wb-choices .amin-wb-entry {padding:8px 0}
+.amin-worldbooks .amin-wb-choices small {display:block;color:var(--amin-muted)}
