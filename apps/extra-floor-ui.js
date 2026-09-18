@@ -1,3 +1,4 @@
+import {readRenderedMessage} from './tts/rendered-text.js';
 import {mount as mountTTS} from './tts/view.js';
 import {mount as mountInformation} from './information/view.js';
 import {mount as mountEffects} from './effects/view.js';
@@ -25,7 +26,7 @@ export function installExtraFloorButtons(id){
    const body=node('div','amin-reply-floor-body amin-ui');windowElement.append(bar,body);host.append(windowElement);
    if(id!=='tts')body.append(node('p','amin-reply-floor-note','显示当前聊天的数据，操作与 OS 内应用共享；此入口不是历史楼层快照。'));
    const run=++epoch;
-   try{const mountedView=mountApp(body,id==='tts'?{message:message.mes,source:chatKey+':'+index}:undefined);if(mountedView?.then)mountedView.then(value=>{if(run!==epoch){value?.dispose?.();return;}view=value;},error=>{if(run===epoch)body.append(node('p','',error.message));});else view=mountedView;}
+   try{const mountedView=mountApp(body,id==='tts'?{readMessage:()=>readRenderedMessage(element),source:chatKey+':'+index}:undefined);if(mountedView?.then)mountedView.then(value=>{if(run!==epoch){value?.dispose?.();return;}view=value;},error=>{if(run===epoch)body.append(node('p','',error.message));});else view=mountedView;}
    catch(error){body.append(node('p','',error.message));}
    button.setAttribute('aria-expanded','true');dock.setOpen(true);
   };
