@@ -13,7 +13,7 @@ export function classify(text,rules=DEFAULT_QUOTES){
  }
  if(start<chars.length)result.push({type:'narration',text:chars.slice(start).join('')});return result;
 }
-export function profiles(config){return Object.fromEntries(['dialogue','narration'].map(type=>[type,{speed:config.speed??1,volume:config.volume??1,pauseMs:0,emotion:'日常',...config.profiles?.[type]}]));}
+export function profiles(config){return Object.fromEntries(['dialogue','narration'].map(type=>[type,{speed:config.speed??1,volume:config.volume??1,pauseMs:0,emotion:'日常',volcEmotion:'',...config.profiles?.[type]}]));}
 export function planSpeech(text,config){
  const sections=Array.isArray(text)?text:classify(text,config.quotes??DEFAULT_QUOTES),p=profiles(config);
  return sections.filter(s=>!config.range||config.range==='all'||s.type===config.range).flatMap(s=>{const parts=chunks(s.text);return parts.map((text,i)=>({text,...p[s.type],pauseMs:i===parts.length-1?p[s.type].pauseMs:0}));});

@@ -27,3 +27,14 @@
 本机服务须为已更新 DXL1 版本：GET /health 报告 rvc_model=DXL1.pth；GET /api/session 返回本机会话令牌和默认声线；POST /api/generate 创建任务；GET /api/jobs/{id} 查询，结果须包括 model 和 ratio；POST /api/jobs/{id}/cancel 请求取消。写请求带 X-Local-Token，服务明确允许酒馆本地来源跨域访问。RVC/模型不随插件分发。
 
 停止不保证中断已经提交给 MiMo 的计费请求或正在执行的 GPU 推理，但会取消后续步骤、丢弃旧结果且不播放。分段串行执行，不连续读取别的楼层。
+
+## 插件直连合成（0.8.33）
+选择“MiMo · 插件内合成”或“火山引擎 · 插件内合成”，不需要启动 9883 / 9884。密钥在插件的密码框填写，随酒馆设置保存；不要公开包含密钥的设置文件。不会从旧试听服务自动提取密钥。
+
+MiMo 使用官方 API Key、mimo-v2.5-tts-voicedesign；可编辑基础声线与对话/旁白的自由情绪描述。火山使用语音控制台 App ID / Access Token（不是 AK/SK），填写已开通的资源 ID 和音色 ID；情绪代码仅适用于支持该情绪的音色，2.0 音色不保证支持 emotion，留空使用原声线。本版本火山不提供文字创建新音色。新版 X-Api-Key 未出现在实测跨域允许头中，插件采用 App ID / Access Token 路径。
+
+音量支持 0～200%，使用 Web Audio 增益；超过100%可能使高峰声音失真，按实际听感调整。音量不改变云端请求原文。旧版声线、正则过滤、本层范围及分段顺序保留。DXL1 仍是可选的本地引擎，需要原来的运行环境；纯云端模式不经过 DXL1。
+
+“检查配置”只检查必填项，不产生合成请求；点击播放才验证鉴权与实际合成。MiMo / 火山请求直接发送官方端点，不经外部试听台。浏览器跨域支持取决于服务端策略。
+
+接口依据：[MiMo 合成文档](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5)、[火山 V3 文档](https://www.volcengine.com/docs/6561/1598757)、[字节官方请求示例](https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-text-to-speech/scripts/text_to_speech.py)。
