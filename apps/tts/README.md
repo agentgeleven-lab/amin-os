@@ -38,3 +38,6 @@ MiMo 使用官方 API Key、mimo-v2.5-tts-voicedesign；可编辑基础声线与
 “检查配置”只检查必填项，不产生合成请求；点击播放才验证鉴权与实际合成。MiMo / 火山请求直接发送官方端点，不经外部试听台。浏览器跨域支持取决于服务端策略。
 
 接口依据：[MiMo 合成文档](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5)、[火山 V3 文档](https://www.volcengine.com/docs/6561/1598757)、[字节官方请求示例](https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-text-to-speech/scripts/text_to_speech.py)。
+
+## 0.8.35 MiMo 语速与情绪
+MiMo 直连与 DXL1 的播放倍速范围为 0.7～2.0，保持音高；其他引擎保持 0.7～1.3。18 个情绪预设与自定义文本分别用于对话/旁白。旧 DXL1 服务的新情绪写入基础声线提示词并标记优先级，不需重启；情绪表现取决于模型实际生成。
