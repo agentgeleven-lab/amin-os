@@ -11,3 +11,12 @@ test('TTS accepts local endpoints and removes hidden text',()=>{assert.equal(end
 test('stop discards late audio',async()=>{let release;const {player,audio}=rig(()=>new Promise(r=>release=r));const pending=player.play('正文','floor',config);await tick();player.stop();release(response());await pending;assert.equal(audio.plays,undefined);assert.equal(player.snapshot().phase,'idle');});
 test('sequential playback preserves voice parameters and releases blobs',async()=>{const requests=[];const {player,audio,revoked}=rig(async(url,init)=>{requests.push(JSON.parse(init.body));return response();});const pending=player.play('测试。'.repeat(100),'floor',config);await tick();assert.equal(requests.length,1);assert.equal(audio.plays,1);player.pause();assert.equal(player.snapshot().phase,'paused');await player.resume();audio.onended();await tick();assert.equal(requests.length,2);audio.onended();await pending;assert.equal(player.snapshot().message,'朗读完成');assert.equal(revoked.length,2);assert.ok(requests.every(x=>x.speed===1&&x.seed===42));});
 test('new playback replaces old pending request',async()=>{let release;let count=0;const {player,audio}=rig(()=>++count===1?new Promise(r=>release=r):Promise.resolve(response()));const old=player.play('旧消息','old',config);await tick();const next=player.play('新消息','new',config);await tick();release(response());await old;assert.equal(player.snapshot().source,'new');assert.equal(audio.plays,1);player.stop();await next;});
+import {scopedPlayer} from '../apps/tts/service.js';
+test('floor controls and progress never operate on another floor',()=>{
+ let state={source:'floor-1',phase:'playing',message:'播放 1/2 段'},calls=[],notify;
+ const shared={snapshot:()=>state,subscribe(fn){notify=fn;fn(state);return ()=>{};},play:(text,source)=>calls.push(['play',text,source]),pause:()=>calls.push('pause'),resume:()=>calls.push('resume'),stop:()=>calls.push('stop')};
+ const first=scopedPlayer(shared,'floor-1'),second=scopedPlayer(shared,'floor-2');let visible;
+ second.subscribe(s=>visible=s);assert.equal(visible.phase,'idle');second.pause();second.resume();second.stop();assert.deepEqual(calls,[]);
+ first.pause();assert.deepEqual(calls,['pause']);second.play('仅第二层正文');assert.deepEqual(calls.at(-1),['play','仅第二层正文','floor-2']);
+ state={source:'floor-2',phase:'playing',message:'播放 1/1 段'};notify(state);assert.equal(visible.message,'播放 1/1 段');first.stop();assert.equal(calls.length,2);second.stop();assert.equal(calls.at(-1),'stop');
+});
