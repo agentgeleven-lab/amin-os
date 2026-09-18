@@ -13,7 +13,7 @@ export async function mount(target,{manager}={}){
  const fold=(parent,key,title)=>{const c=el('details',null,'amin-card amin-wb-fold');c.append(el('summary',title));c.open=expanded.has(key);c.ontoggle=()=>{if(!c.isConnected)return;if(c.open)expanded.add(key);else expanded.delete(key);};parent.append(c);return c;};
  const modes=[['keep','保持原样'],['on','启用'],['off','关闭']];
  function setRule(id,mode){profile.entries[book]??={};if(mode==='keep')delete profile.entries[book][id];else profile.entries[book][id]=mode;}
- async function loadBook(name){const run=++epoch,current=role;const result=await api.load(name);if(disposed||run!==epoch||current!==role)return;book=name;data=result;selected=new Set();entryQuery='';render();}
+ async function loadBook(name){const run=++epoch,current=role;book='';data=null;render();say('正在读取世界书条目…');try{const result=await api.load(name);if(disposed||run!==epoch||current!==role||!profile.books.includes(name)||!api.globals().includes(name))return;book=name;data=result;selected=new Set();entryQuery='';render();}catch(error){if(!disposed&&run===epoch)say(error.message);throw error;}}
  async function refresh(){const run=++epoch;const result=await api.catalog();if(disposed||run!==epoch)return;names=result;render();}
  async function apply(remember){const captured=role;if(!captured)throw Error('请先打开单人角色卡');await api.apply(captured,profile,remember);if(book&&role===captured)await loadBook(book);}
  function renderEntries(parent,state){
@@ -67,7 +67,7 @@ export async function mount(target,{manager}={}){
   button(actions,'仅本次临时应用',()=>apply(false)).disabled=!role;
   button(actions,'重新应用已保存组合',async()=>{profile=api.profile();await api.apply(role,profile,true);await api.sync(true);if(book)await loadBook(book);}).disabled=!role;
   body.append(el('p',state.paused?'自动应用已暂停，保存只记录设置；恢复后生效。':'离开角色时撤回接管项目；同角色切换聊天保持组合。'));
-  if(!state.visible.length){button(body,'选择要展示的世界书',()=>{tab='展示范围';render();},true);return;}
+  if(!state.visible.length)button(body,'选择要展示的世界书',()=>{tab='展示范围';render();},true);
   const picker=fold(body,'book-picker',`选择启用的世界书 · 已选 ${profile.books.length} 本`);
   picker.append(el('p','勾选后自动保存并应用当前角色组合；取消勾选只撤回插件接管的改动。'));
   const choices=el('div',null,'amin-wb-choices');picker.append(choices);
@@ -79,9 +79,15 @@ export async function mount(target,{manager}={}){
     try{await api.apply(captured,profile,true);}catch(error){failure=error.message;}finally{selecting=false;render();if(failure)say(failure);}
    }).disabled=!role||selecting||(!exists&&!profile.books.includes(name));
    row.append(el('small',status));
-   if(exists&&profile.books.includes(name))button(row,'设置条目',()=>loadBook(name));
   }
-  if(profile.books.includes(book))renderEntries(body,state);
+  const activeBooks=profile.books.filter(name=>names.includes(name)&&globals.includes(name));
+  const entryPicker=el('label','当前角色已启用的世界书'),select=el('select');select.setAttribute('aria-label','当前角色已启用的世界书');
+  const placeholder=el('option',activeBooks.length?'选择一本世界书查看条目':'当前角色组合没有已启用的世界书');placeholder.value='';select.append(placeholder);
+  for(const name of activeBooks){const option=el('option',name);option.value=name;select.append(option);}
+  select.value=activeBooks.includes(book)?book:'';select.disabled=!role||selecting||!activeBooks.length;
+  select.onchange=async()=>{const name=select.value;if(!name){epoch++;book='';data=null;render();return;}try{await loadBook(name);}catch(error){say(error.message);}};
+  entryPicker.append(select);body.append(entryPicker);
+  if(activeBooks.includes(book))renderEntries(body,state);
   const hidden=profile.books.filter(n=>!state.visible.includes(n));if(hidden.length)body.append(el('p',`组合中另有 ${hidden.length} 本未在此展示；可在展示范围中选中管理。`));
  }
  const unsubscribe=api.subscribe(render);try{await refresh();}catch(error){disposed=true;epoch++;unsubscribe();page.remove();throw error;}
