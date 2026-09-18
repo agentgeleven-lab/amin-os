@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {chunks,endpoint,plainText} from '../apps/tts/model.js';
+import {createPlayer} from '../apps/tts/service.js';
+const tick=()=>new Promise(r=>setTimeout(r,0));
+const config={url:'http://127.0.0.1:9883',speed:1,volume:1,seed:42};
+function rig(request){const audio={src:'',volume:1,pause(){},load(){},removeAttribute(){this.src='';},async play(){this.plays=(this.plays??0)+1;}};let serial=0;const revoked=[];const player=createPlayer({audio,request,check:async()=>{},urls:{createObjectURL:()=>`blob:${++serial}`,revokeObjectURL:x=>revoked.push(x)}});return {player,audio,revoked};}
+const response=()=>({ok:true,blob:async()=>new Blob(['0'.repeat(60)],{type:'audio/wav'})});
+test('TTS chunks preserve text and surrogate pairs',()=>{const text='测试一段文字。'.repeat(100)+'🌸'.repeat(150),parts=chunks(text);assert.equal(parts.join(''),text);assert.ok(parts.every(x=>x.length<=220&&!/[\uD800-\uDBFF]$/.test(x)));});
+test('TTS accepts local endpoints and removes hidden text',()=>{assert.equal(endpoint('http://localhost:9883/'),'http://localhost:9883');assert.throws(()=>endpoint('https://example.com'));assert.throws(()=>endpoint('http://user:pass@localhost'));assert.equal(plainText('<think>secret</think>你好。```hidden```'),'你好。');});
+test('stop discards late audio',async()=>{let release;const {player,audio}=rig(()=>new Promise(r=>release=r));const pending=player.play('正文','floor',config);await tick();player.stop();release(response());await pending;assert.equal(audio.plays,undefined);assert.equal(player.snapshot().phase,'idle');});
+test('sequential playback preserves voice parameters and releases blobs',async()=>{const requests=[];const {player,audio,revoked}=rig(async(url,init)=>{requests.push(JSON.parse(init.body));return response();});const pending=player.play('测试。'.repeat(100),'floor',config);await tick();assert.equal(requests.length,1);assert.equal(audio.plays,1);player.pause();assert.equal(player.snapshot().phase,'paused');await player.resume();audio.onended();await tick();assert.equal(requests.length,2);audio.onended();await pending;assert.equal(player.snapshot().message,'朗读完成');assert.equal(revoked.length,2);assert.ok(requests.every(x=>x.speed===1&&x.seed===42));});
+test('new playback replaces old pending request',async()=>{let release;let count=0;const {player,audio}=rig(()=>++count===1?new Promise(r=>release=r):Promise.resolve(response()));const old=player.play('旧消息','old',config);await tick();const next=player.play('新消息','new',config);await tick();release(response());await old;assert.equal(player.snapshot().source,'new');assert.equal(audio.plays,1);player.stop();await next;});

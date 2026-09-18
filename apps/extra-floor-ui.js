@@ -1,3 +1,4 @@
+import {mount as mountTTS} from './tts/view.js';
 import {mount as mountInformation} from './information/view.js';
 import {mount as mountEffects} from './effects/view.js';
 import {mount as mountWorldbooks} from './worldbooks/view.js';
@@ -5,7 +6,7 @@ import {mountFloorControl} from '../settings/floor-layout.js';
 
 export function installExtraFloorButtons(id){
  const getContext=()=>globalThis.SillyTavern?.getContext?.(),mounted=new Map(),owned=new Set();let queued=false;
- const apps={effects:{title:'能力面板',icon:'✦ ',mount:mountEffects},information:{title:'信息面板',icon:'▤ ',mount:mountInformation},worldbooks:{title:'世界书管理',icon:'▥ ',mount:mountWorldbooks}};
+ const apps={tts:{title:'语音朗读',icon:'▷ ',mount:mountTTS},effects:{title:'能力面板',icon:'✦ ',mount:mountEffects},information:{title:'信息面板',icon:'▤ ',mount:mountInformation},worldbooks:{title:'世界书管理',icon:'▥ ',mount:mountWorldbooks}};
  const app=apps[id];if(!app)throw Error('未知楼层应用：'+id);const titleText=app.title,mountApp=app.mount;
  const key=ctx=>JSON.stringify([ctx?.getCurrentChatId?.()??ctx?.chatId,ctx?.characterId,ctx?.groupId]);
  const node=(tag,cls,text)=>{const e=document.createElement(tag);e.className=cls;if(text)e.textContent=text;return e;};
@@ -22,9 +23,9 @@ export function installExtraFloorButtons(id){
    windowElement=node('section','amin-reply-floor-window amin-extra-floor-window');windowElement.setAttribute('aria-label','第 '+(index+1)+' 楼'+titleText);
    const bar=node('header','amin-reply-floor-header'),title=node('strong','',titleText+' · 第 '+(index+1)+' 楼'),collapse=node('button','','收起');collapse.type='button';collapse.onclick=close;bar.append(title,collapse);
    const body=node('div','amin-reply-floor-body amin-ui');windowElement.append(bar,body);host.append(windowElement);
-   body.append(node('p','amin-reply-floor-note','显示当前聊天的数据，操作与 OS 内应用共享；此入口不是历史楼层快照。'));
+   if(id!=='tts')body.append(node('p','amin-reply-floor-note','显示当前聊天的数据，操作与 OS 内应用共享；此入口不是历史楼层快照。'));
    const run=++epoch;
-   try{const mountedView=mountApp(body);if(mountedView?.then)mountedView.then(value=>{if(run!==epoch){value?.dispose?.();return;}view=value;},error=>{if(run===epoch)body.append(node('p','',error.message));});else view=mountedView;}
+   try{const mountedView=mountApp(body,id==='tts'?{message:message.mes,source:chatKey+':'+index}:undefined);if(mountedView?.then)mountedView.then(value=>{if(run!==epoch){value?.dispose?.();return;}view=value;},error=>{if(run===epoch)body.append(node('p','',error.message));});else view=mountedView;}
    catch(error){body.append(node('p','',error.message));}
    button.setAttribute('aria-expanded','true');dock.setOpen(true);
   };

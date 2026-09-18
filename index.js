@@ -25,6 +25,7 @@ export function initialize() {
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const apps={
+        tts:()=>import('./apps/tts/view.js').then(m=>m.mount(shell.panes.tts)),
         worldbooks:()=>import('./apps/worldbooks/view.js').then(m=>m.mount(shell.panes.worldbooks)),
         information:()=>import('./apps/information/view.js').then(m=>m.mount(shell.panes.information)),
         effects:()=>import('./apps/effects/view.js').then(m=>m.mount(shell.panes.effects)),
@@ -46,10 +47,10 @@ export function initialize() {
         });
     }
     installReplyFloorButtons();
-    installExtraFloorButtons('effects');installExtraFloorButtons('information');installExtraFloorButtons('worldbooks');
+    installExtraFloorButtons('effects');installExtraFloorButtons('information');installExtraFloorButtons('worldbooks');installExtraFloorButtons('tts');
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.8.27',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.8.28',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 
