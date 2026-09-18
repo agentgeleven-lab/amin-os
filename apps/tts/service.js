@@ -17,15 +17,21 @@ export function saveSettings(value){
 export async function health(config=settings(),signal){if(isCloud(config)){validateCloud(config);return {configured:true};}if(config.provider==='mimo')return mimoHealth(config,signal);const r=await fetch(endpoint(config.url)+'/health',{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(8000)]):AbortSignal.timeout(8000)});if(!r.ok)throw Error('语音服务连接失败：HTTP '+r.status);const h=await r.json();if(h.app!=='azuma-bert-vits2'||!h.ready||h.version!=='2.3'||h.weights!=='G_18200.pth')throw Error('服务不是已选的 Azuma Bert-VITS2 2.3 / G_18200');return h;}
 export function createPlayer({audio=new Audio(),request=fetch,check=health,urls=URL}={}){
  const volumeControl=createVolumeControl(audio);
- let epoch=0,controller=null,objectURL=null,finish=null;const listeners=new Set();let state={phase:'idle',message:'准备就绪',source:null};
+ let epoch=0,controller=null,objectURL=null,finish=null,session=null;const listeners=new Set();let state={phase:'idle',message:'准备就绪',source:null,canRetry:false};
  const emit=(patch)=>{state={...state,...patch};for(const f of listeners)f({...state});};
- function clear(){audio.pause();audio.removeAttribute('src');audio.load();if(objectURL)urls.revokeObjectURL(objectURL);objectURL=null;finish?.();finish=null;}
- function stop(message='已停止'){epoch++;controller?.abort();controller=null;clear();emit({phase:'idle',message});}
+ function clear(){audio.onended=null;audio.onerror=null;audio.pause();audio.removeAttribute('src');audio.load();if(objectURL)urls.revokeObjectURL(objectURL);objectURL=null;finish?.();finish=null;}
+ function stop(message='已停止'){epoch++;controller?.abort();controller=null;session=null;clear();emit({phase:'idle',message,canRetry:false});}
  async function play(text,source='app',config=settings()){
-  stop();const parts=planSpeech(text,config);if(!parts.length){emit({phase:'error',message:'本层没有可朗读的正文',source});return;}const ticket=epoch;controller=new AbortController();const signal=controller.signal;
+  stop();const snapshot=structuredClone(config),parts=planSpeech(text,snapshot);if(!parts.length){emit({phase:'error',message:'本层没有可朗读的正文',source,canRetry:false});return;}
+  session={parts,config:snapshot,source,index:0};return run(session);
+ }
+ function retry(){if(state.phase!=='error'||!state.canRetry||!session)return;return run(session);}
+ async function run(job){
+  const {parts,config,source}=job;const ticket=++epoch;controller?.abort();controller=new AbortController();const signal=controller.signal;
   const alive=()=>ticket===epoch&&!signal.aborted;
-  try{volumeControl.prepare(parts[0].volume);emit({phase:'loading',message:'正在连接语音服务…',source});await check(config,signal);if(!alive())return;
-   for(let i=0;i<parts.length;i++){
+  try{volumeControl.prepare(parts[job.index].volume);emit({phase:'loading',message:'正在连接语音服务…',source,canRetry:false});await check(config,signal);if(!alive())return;
+   for(let i=job.index;i<parts.length;i++){
+    job.index=i;
     emit({phase:'loading',message:`正在合成 ${i+1}/${parts.length} 段…`,source});
     const response=isCloud(config)?await generateCloud(parts[i],config,signal,request):config.provider==='mimo'?await generateMimo(parts[i],config,signal):await request(endpoint(config.url)+'/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:parts[i].text,speed:parts[i].speed,seed:config.seed}),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});
     if(!response.ok)throw Error('合成失败：HTTP '+response.status);const blob=await response.blob();if(!alive())return;if(!blob.type.includes('audio/')||blob.size<44)throw Error('服务未返回有效音频');
@@ -33,10 +39,10 @@ export function createPlayer({audio=new Audio(),request=fetch,check=health,urls=
     await new Promise((resolve,reject)=>{finish=()=>{audio.onended=null;audio.onerror=null;resolve();};audio.onended=()=>finish?.();audio.onerror=()=>{finish=null;reject(Error('音频播放失败'));};emit({phase:'playing',message:`播放 ${i+1}/${parts.length} 段`,source});audio.play().catch(error=>{if(!alive())return;if(error.name==='NotAllowedError')emit({phase:'paused',message:'音频已就绪，请点击继续播放',source});else reject(error);});});
     if(!alive())return;
     if(i<parts.length-1&&parts[i].pauseMs>0){emit({phase:'waiting',message:'段后停顿…',source});await delay(parts[i].pauseMs,signal);if(!alive())return;}
-   }clear();emit({phase:'idle',message:'朗读完成',source});
-  }catch(error){if(!alive())return;clear();emit({phase:'error',message:error.name==='TimeoutError'?'合成超时，请检查所选服务':error.message,source});}
+   }clear();session=null;emit({phase:'idle',message:'朗读完成',source,canRetry:false});
+  }catch(error){if(!alive())return;clear();emit({phase:'error',message:`第 ${job.index+1}/${parts.length} 段失败：${error.name==='TimeoutError'?'合成超时':error.message}。可点击“重试失败段落”继续。`,source,canRetry:true});}
  }
- return {play,stop,subscribe(fn){listeners.add(fn);fn({...state});return ()=>listeners.delete(fn);},snapshot:()=>({...state}),setVolume(v){volumeControl.set(v);},pause(){if(state.phase==='playing'){audio.pause();emit({phase:'paused',message:'已暂停'});}},async resume(){if(state.phase==='paused'){try{await volumeControl.resume();await audio.play();emit({phase:'playing',message:'继续播放'});}catch(error){emit({message:error.message});}}}};
+ return {play,retry,stop,subscribe(fn){listeners.add(fn);fn({...state});return ()=>listeners.delete(fn);},snapshot:()=>({...state}),setVolume(v){volumeControl.set(v);},pause(){if(state.phase==='playing'){audio.pause();emit({phase:'paused',message:'已暂停'});}},async resume(){if(state.phase==='paused'){try{await volumeControl.resume();await audio.play();emit({phase:'playing',message:'继续播放'});}catch(error){emit({message:error.message});}}}};
 }
 let player;
 export function getPlayer(){if(!player){player=createPlayer();const ctx=context(),ev=ctx?.eventTypes??ctx?.event_types??{};for(const name of ['CHAT_CHANGED','MESSAGE_EDITED','MESSAGE_SWIPED','MESSAGE_DELETED'])if(ev[name])ctx.eventSource?.on(ev[name],()=>player.stop('聊天或消息已变化，朗读停止'));}return player;}
@@ -46,6 +52,7 @@ export function scopedPlayer(player,source){
  const owns=()=>player.snapshot().source===source;
  return {
   play:(text,config)=>player.play(text,source,config),
+  retry:()=>{if(owns())return player.retry();},
   pause:()=>{if(owns())player.pause();},
   resume:()=>{if(owns())return player.resume();},
   stop:()=>{if(owns())player.stop();},
