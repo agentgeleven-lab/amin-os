@@ -16,6 +16,8 @@ export function classify(text,rules=DEFAULT_QUOTES){
 export function profiles(config){return Object.fromEntries(['dialogue','narration'].map(type=>[type,{speed:config.speed??1,volume:config.volume??1,pauseMs:0,emotion:'日常',volcEmotion:'',...config.profiles?.[type]}]));}
 export function planSpeech(text,config){
  const sections=Array.isArray(text)?text:classify(text,config.quotes??DEFAULT_QUOTES),p=profiles(config);
- return sections.filter(s=>!config.range||config.range==='all'||s.type===config.range).flatMap(s=>{const parts=chunks(s.text);return parts.map((text,i)=>({text,...p[s.type],pauseMs:i===parts.length-1?p[s.type].pauseMs:0}));});
+ return sections.flatMap((s,sectionIndex)=>{if(s.enabled===false||(config.range&&config.range!=='all'&&s.type!==config.range))return [];const parts=chunks(s.text);return parts.map((text,i)=>({text,type:s.type,segmentId:JSON.stringify([s.id??sectionIndex,s.type,text,i]),sectionNumber:sectionIndex+1,...p[s.type],pauseMs:i===parts.length-1?p[s.type].pauseMs:0}));});
 }
 export function delay(ms,signal){return new Promise(resolve=>{let timer;const done=()=>{clearTimeout(timer);signal.removeEventListener('abort',done);resolve();};if(signal.aborted)return resolve();signal.addEventListener('abort',done,{once:true});timer=setTimeout(done,ms);});}
+
+export function previewSections(text,rules){return classify(text,rules).flatMap(section=>section.text.split(/\r?\n/).flatMap(line=>chunks(line).map(text=>({text,type:section.type,enabled:true})))).map((s,id)=>({...s,id}));}
