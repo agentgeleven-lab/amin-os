@@ -3,17 +3,17 @@ import {speedMax} from './emotions.js';
 import {isCloud,validateCloud,generateCloud} from './cloud.js';
 import {createVolumeControl} from './gain.js';
 import {mimoHealth,generateMimo} from './mimo.js';
-import {endpoint} from './model.js';
+import {endpoint,mimoEndpoint} from './model.js';
 import {DEFAULT_QUOTES,quotePairs,profiles,planSpeech,delay} from './dialogue.js';
 const context=()=>globalThis.SillyTavern?.getContext?.();
 export function settings(){return {url:'http://127.0.0.1:9883',speed:1,volume:1,seed:42,provider:'mimo-direct',cloud:{mimoKey:'',volcAppId:'',volcToken:'',speaker:'zh_female_vv_uranus_bigtts',resource:'seed-tts-2.0'},ratio:.5,voicePrompt:'',range:'all',quotes:DEFAULT_QUOTES,...context()?.extensionSettings?.aminTTS};}
 export function saveSettings(value){
- const url=endpoint(value.url),seed=Number(value.seed),p=profiles(value);
+ const url=value.provider==='mimo'?mimoEndpoint(value):endpoint(value.url),seed=Number(value.seed),p=profiles(value);
  if(!['azuma','mimo','mimo-direct','volcengine'].includes(value.provider??'azuma'))throw Error('语音引擎无效');if(![.5,.75].includes(value.ratio??.5))throw Error('索引比例须为 0.5 或 0.75');if((value.voicePrompt??'').length>2000)throw Error('基础声线描述不能超过 2000 字符');
  if(!Number.isInteger(seed)||seed<0||seed>4294967295)throw Error('种子须为 0～4294967295 的整数');
  if(!['all','dialogue','narration'].includes(value.range))throw Error('朗读范围无效');quotePairs(value.quotes);
  for(const [type,v]of Object.entries(p)){const name=type==='dialogue'?'对话':'旁白';if(typeof v.emotion!=='string'||v.emotion.length>1000)throw Error(name+'情绪无效');if(!Number.isFinite(v.speed)||v.speed<.7||v.speed>speedMax(value.provider))throw Error(name+'语速须为 0.7～'+speedMax(value.provider));if(!Number.isFinite(v.volume)||v.volume<0||v.volume>2)throw Error(name+'音量须为 0～200%');if(!Number.isInteger(v.pauseMs)||v.pauseMs<0||v.pauseMs>5000)throw Error(name+'停顿须为 0～5000 毫秒');}
- const ctx=context();ctx.extensionSettings.aminTTS={url,seed,provider:value.provider??'azuma',cloud:{...value.cloud},ratio:value.ratio??.5,voicePrompt:value.voicePrompt??'',speed:p.narration.speed,volume:p.narration.volume,range:value.range,quotes:value.quotes,profiles:p};ctx.saveSettingsDebounced?.();
+ const ctx=context();ctx.extensionSettings.aminTTS={url,seed,remote:value.remote===true,remoteKey:value.remoteKey??'',provider:value.provider??'azuma',cloud:{...value.cloud},ratio:value.ratio??.5,voicePrompt:value.voicePrompt??'',speed:p.narration.speed,volume:p.narration.volume,range:value.range,quotes:value.quotes,profiles:p};ctx.saveSettingsDebounced?.();
 }
 export async function health(config=settings(),signal){if(isCloud(config)){validateCloud(config);return {configured:true};}if(config.provider==='mimo')return mimoHealth(config,signal);const r=await fetch(endpoint(config.url)+'/health',{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(8000)]):AbortSignal.timeout(8000)});if(!r.ok)throw Error('语音服务连接失败：HTTP '+r.status);const h=await r.json();if(h.app!=='azuma-bert-vits2'||!h.ready||h.version!=='2.3'||h.weights!=='G_18200.pth')throw Error('服务不是已选的 Azuma Bert-VITS2 2.3 / G_18200');return h;}
 export function createPlayer({audio=new Audio(),request=fetch,check=health,urls=URL,library=createLibrary()}={}){
