@@ -29,6 +29,7 @@ export function initialize() {
         worldbooks:()=>import('./apps/worldbooks/view.js').then(m=>m.mount(shell.panes.worldbooks)),
         information:()=>import('./apps/information/view.js').then(m=>m.mount(shell.panes.information)),
         effects:()=>import('./apps/effects/view.js').then(m=>m.mount(shell.panes.effects)),
+        factions:()=>import('./apps/factions/view.js').then(m=>m.mount(shell.panes.factions)),
         settings:()=>import('./settings/view.js').then(m=>m.mount(shell.panes.settings)),
         ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
         map:()=>import('./apps/map/index.js').then(m=>m.initialize({mount:shell.panes.map,onOpen:()=>shell.showApp('map')})),
@@ -50,7 +51,7 @@ export function initialize() {
     installExtraFloorButtons('effects');installExtraFloorButtons('information');installExtraFloorButtons('worldbooks');installExtraFloorButtons('tts');
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.8.45',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.9.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

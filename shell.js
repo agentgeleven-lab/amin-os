@@ -10,6 +10,7 @@ const APPS=[
     {id:'effects',name:'能力面板',sub:'世界书技能与当前生效记录',icon:'✧',color:'lavender'},
     {id:'map',name:'地图',sub:'记录地点，探索你的世界',icon:'⌘',color:'mint'},
     {id:'status',name:'世界状态',sub:'角色、关系与剧情的此刻',icon:'◈',color:'lavender'},
+    {id:'factions',name:'势力沙盘',sub:'势力、地盘与战报推演',icon:'⚑',color:'peach'},
     {id:'reply',name:'回复选项',sub:'拟写下一句，由你决定',icon:'≋',color:'peach'},
     {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
     {id:'settings',name:'设置',sub:'全局外观与应用个性化',icon:'⚙',color:'lavender'},
@@ -17,7 +18,7 @@ const APPS=[
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 
 function icon(id){
-    const paths={tts:'M3 9h4l5-5v16l-5-5H3z M16 8q5 4 0 8 M19 4q9 8 0 16',worldbooks:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16',information:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',effects:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z',map:'M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5z M9 3v16 M15 5v16',status:'M4 5h16v14H4z M8 9h3 M8 13h8 M15 9h1',reply:'M4 4h16v12H9l-5 4V4z M8 8h8 M8 12h5',ai:'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};
+    const paths={tts:'M3 9h4l5-5v16l-5-5H3z M16 8q5 4 0 8 M19 4q9 8 0 16',worldbooks:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16',information:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',effects:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z',map:'M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5z M9 3v16 M15 5v16',status:'M4 5h16v14H4z M8 9h3 M8 13h8 M15 9h1',factions:'M6 3v18 M6 4h11l-2.5 3.5L17 11H6',reply:'M4 4h16v12H9l-5 4V4z M8 8h8 M8 12h5',ai:'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
     for(const [key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
     if(id==='settings')paths.settings='M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6';
