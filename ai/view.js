@@ -1,3 +1,4 @@
+import {parseRequestBody} from '../apps/map/src/adapters/request-body.js';
 import {fetchModels} from './models.js';
 import {getAI} from './service.js';
 import {renderPresetEditor} from '../apps/map/src/ui/generation-presets.js';
@@ -24,9 +25,11 @@ export function mount(target){
   const tokens=field(api,'最大输出 tokens',input(config.maxTokens,'number')),timeout=field(api,'等待上限（秒，含排队）',input(config.timeoutSeconds,'number'));
   const queue=field(api,'所有应用的任务策略',select([{id:'serial',name:'依次排队'},{id:'parallel',name:'允许并行'}],config.queueMode));
   const stream=field(api,'独立 API 流式接收（完整后应用）',input('','checkbox'));stream.checked=config.stream;
+  const advanced=el('details');advanced.append(el('summary','OpenAI Compatible · 自定义请求参数'));const requestBody=el('textarea');requestBody.rows=10;requestBody.spellcheck=false;requestBody.style.fontFamily='monospace';requestBody.style.width='100%';requestBody.value=config.requestBody||'';requestBody.placeholder='{\n  "temperature": 0.8,\n  "top_p": 0.95\n}';field(advanced,'requestBody（JSON 对象）',requestBody);advanced.append(el('p','留空使用默认请求体。按顶层字段覆盖，嵌套对象整体替换；null 删除字段。例如用 max_tokens: null 配合 max_completion_tokens。model、messages 和 stream 也可覆盖；覆盖 messages 会替换应用提示词，可能影响输出格式。不要在这里填写 API 密钥或请求头；此处随配置明文保存。'));api.append(advanced);
   const notice=el('p');notice.setAttribute('role','status');
   const safe=fn=>{try{fn();notice.textContent='已保存，对全部应用生效。';}catch(e){notice.textContent=e.message;}};
-  const read=()=>({enabled:mode.value==='custom',baseUrl:address.value,model:model.value,apiKey:key.value,rememberKey:remember.checked,maxTokens:Number(tokens.value),timeoutSeconds:Number(timeout.value),queueMode:queue.value,stream:stream.checked});
+  advanced.append(button('检查并格式化 JSON',()=>{try{requestBody.value=JSON.stringify(parseRequestBody(requestBody.value),null,2);notice.textContent='JSON 格式正确，请保存后应用。';}catch(e){notice.textContent=e.message;}}));
+  const read=()=>({requestBody:requestBody.value,enabled:mode.value==='custom',baseUrl:address.value,model:model.value,apiKey:key.value,rememberKey:remember.checked,maxTokens:Number(tokens.value),timeoutSeconds:Number(timeout.value),queueMode:queue.value,stream:stream.checked});
   const modelList=field(api,'可用模型',select([{id:'',name:'请先拉取模型列表'}],''));modelList.disabled=true;
   let resolvedConnection;
   const invalidateModels=()=>{modelController?.abort();resolvedConnection=undefined;modelList.replaceChildren();modelList.disabled=true;};

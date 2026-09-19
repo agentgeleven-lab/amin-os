@@ -1,6 +1,7 @@
+import {parseRequestBody,buildRequestBody} from './request-body.js';
 import { waitForSignal } from '../core/generation-job.js';
 const targetQueues=new Map();
-const defaults={stream:false,queueMode:'serial',enabled:false,baseUrl:'',model:'',maxTokens:4096,timeoutSeconds:120,rememberKey:false,apiKey:''};
+const defaults={requestBody:'',stream:false,queueMode:'serial',enabled:false,baseUrl:'',model:'',maxTokens:4096,timeoutSeconds:120,rememberKey:false,apiKey:''};
 export function endpointFor(baseUrl){
  let url;try{url=new URL(baseUrl.trim());}catch{throw new Error('请输入完整的 API 地址，例如 https://api.example.com/v1');}
  if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('API 地址只允许 http/https，不要在地址内填写密钥、参数或账号密码');
@@ -8,6 +9,7 @@ export function endpointFor(baseUrl){
 }
 export function validateApiSettings(value){
  const c={...defaults,...value};
+ const extra=parseRequestBody(c.requestBody);c.requestBody=Object.keys(extra).length?JSON.stringify(extra,null,2):'';
  if(typeof c.stream!=='boolean'||!['serial','parallel'].includes(c.queueMode))throw Error('运行策略无效');
  if(typeof c.enabled!=='boolean'||typeof c.rememberKey!=='boolean'||typeof c.baseUrl!=='string'||typeof c.model!=='string'||typeof c.apiKey!=='string')throw new Error('API 配置格式无效');
  if(!Number.isInteger(c.maxTokens)||c.maxTokens<1||c.maxTokens>131072)throw new Error('输出长度需为 1–131072 的整数');
@@ -33,10 +35,11 @@ async function generateMapTextInternal(ctx,config,request,{fetchImpl=globalThis.
  const timer=setTimeout(abort,c.timeoutSeconds*1000);
  try{
   const headers={'Content-Type':'application/json'};if(c.apiKey)headers.Authorization=`Bearer ${c.apiKey}`;
+  const body=buildRequestBody(c,request);
   const response=await fetchImpl(endpointFor(c.baseUrl),{method:'POST',headers,credentials:'omit',redirect:'error',cache:'no-store',signal:controller.signal,
-   body:JSON.stringify({model:c.model,messages:request.messages??[{role:'system',content:request.systemPrompt},{role:'user',content:request.prompt}],max_tokens:c.maxTokens,stream:c.stream})});
+   body:JSON.stringify(body)});
   if(!response.ok)throw new Error(`独立 API 请求失败（HTTP ${response.status}），请检查地址、密钥、模型名称及额度`);
-  if(c.stream&&response.headers?.get('content-type')?.includes('text/event-stream'))return await readMapStream(response,controller.signal);
+  if(body.stream&&response.headers?.get('content-type')?.includes('text/event-stream'))return await readMapStream(response,controller.signal);
   let data;try{data=await response.json();}catch{throw new Error('API 返回的不是有效 JSON 响应');}
   const choice=data?.choices?.[0];if(choice?.finish_reason==='length')throw new Error('模型输出被截断，请增加输出长度后重新生成');
   const content=choice?.message?.content;
