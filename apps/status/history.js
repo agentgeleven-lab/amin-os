@@ -1,7 +1,7 @@
 // History lives in chat metadata, never in the model-facing variable namespace.
 export const HISTORY_KEY = 'world_status_hud_history_v1';
 const copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
-export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {} }) {
+export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {}, historyKey = HISTORY_KEY, messageKey = 'wsh_message_id', allowGroups = false }) {
   let metadata, chatId, previous = [], lastValue, blocked = false;
   const listeners = new Set();
   const emit = () => { changed(); for (const fn of listeners) fn(); };
@@ -9,8 +9,8 @@ export function createHistory({ context, read, write, changed = () => {}, before
     let assigned = false;
     const result = (context().chat || []).map(m => {
       m.extra ||= {};
-      if (!m.extra.wsh_message_id) { m.extra.wsh_message_id = crypto.randomUUID(); assigned = true; }
-      return { id: m.extra.wsh_message_id, variant: String(m.swipe_id ?? 0), message: m };
+      if (!m.extra[messageKey]) { m.extra[messageKey] = crypto.randomUUID(); assigned = true; }
+      return { id: m.extra[messageKey], variant: String(m.swipe_id ?? 0), message: m };
     });
     if (assigned) Promise.resolve(context().saveChat?.()).catch(e => warn('楼层标识保存失败：' + e.message));
     return result;
@@ -19,10 +19,10 @@ export function createHistory({ context, read, write, changed = () => {}, before
   function save() { Promise.resolve(context().saveMetadata()).catch(e => warn('楼层记录保存失败：' + e.message)); }
   function sync() {
     const c = context();
-    if (!c.chatMetadata || c.getCurrentChatId() == null || c.groupId) return;
+    if (!c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return;
     const switched = metadata !== c.chatMetadata || chatId !== c.getCurrentChatId();
     if (switched) { metadata = c.chatMetadata; chatId = c.getCurrentChatId(); previous = []; lastValue = undefined; blocked = false; }
-    const store = metadata[HISTORY_KEY] ||= { records: {} };
+    const store = metadata[historyKey] ||= { records: {} };
     const now = messages();
     const tail = now.at(-1);
     const truncated = !switched && now.length < previous.length && now.every((m, i) => m.id === previous[i].id);
@@ -56,9 +56,9 @@ export function createHistory({ context, read, write, changed = () => {}, before
   }
   function list() {
     if (metadata !== context().chatMetadata || chatId !== context().getCurrentChatId()) return [];
-    const records = metadata?.[HISTORY_KEY]?.records || {};
+    const records = metadata?.[historyKey]?.records || {};
     return (context().chat || []).map((m, index) => {
-      const id = m.extra?.wsh_message_id;
+      const id = m.extra?.[messageKey];
       const record = records[id + ':' + String(m.swipe_id ?? 0)];
       return { index, name: m.name || (m.is_user ? '用户' : '角色'), available: !!record, state: copy(record?.state), savedAt: record?.savedAt };
     });

@@ -145,3 +145,16 @@ body .amin-floor[data-amin-surface][data-amin-theme^=win10]>.amin-floor-toolbar>
 .amin-worldbooks .amin-wb-choices {max-height:320px;max-height:min(320px,45dvh);overflow:auto}
 .amin-worldbooks .amin-wb-choices .amin-wb-entry {padding:8px 0}
 .amin-worldbooks .amin-wb-choices small {display:block;color:var(--amin-muted)}
+
+/* Organization reference pages: scoped to the existing application surface. */
+.amin-organizations .amin-org-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--amin-gap,10px)}
+.amin-organizations .amin-org-row {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--amin-line)}
+.amin-organizations .amin-org-row small {display:block;width:100%;color:var(--amin-muted)}
+.amin-organizations label {display:flex;flex-direction:column;gap:4px;margin:8px 0;min-width:0}
+.amin-organizations input,.amin-organizations select,.amin-organizations textarea {box-sizing:border-box;max-width:100%;min-width:0}
+.amin-organizations input[type=checkbox] {align-self:flex-start}
+.amin-organizations .amin-org-editor-row {border:1px solid var(--amin-line);padding:10px;margin:8px 0}
+.amin-organizations pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;font:inherit}
+.amin-organizations p {white-space:pre-wrap;overflow-wrap:anywhere}
+.amin-organizations .amin-tabs,.amin-organizations .amin-toolbar {flex-wrap:wrap}
+.amin-organizations details {margin:8px 0}

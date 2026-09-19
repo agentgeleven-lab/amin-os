@@ -42,17 +42,18 @@ export function boundWorldbook(ctx) {
   return name;
 }
 
-export function prepareUpdateEntry(original, name, createEntry, extraPrompt = '') {
+export function prepareUpdateEntry(original, name, createEntry, extraPrompt = '', options = {}) {
+  const {ownerField='world_status_hud_owner',marker=ENTRY_MARKER,title=UPDATE_ENTRY_TITLE,prompt=UPDATE_ENTRY_PROMPT,enabled=true}=options;
   if (!original || !original.entries || typeof original.entries !== 'object' || Array.isArray(original.entries)) throw Error('绑定的世界书格式不兼容，未写入。');
   const book = clone(original);
-  const owned = Object.values(book.entries).filter(e => e?.world_status_hud_owner === ENTRY_MARKER);
+  const owned = Object.values(book.entries).filter(e => e?.[ownerField] === marker);
   if (owned.length > 1) throw Error('世界书中存在多个本插件的更新条目，请先保留一个后重试。');
   const previous = owned[0] ? clone(owned[0]) : null;
   const entry = owned[0] || createEntry(name, book);
   if (!entry || !Number.isInteger(entry.uid) || book.entries[entry.uid] !== entry) throw Error('无法创建世界书条目，未写入。');
   Object.assign(entry, {
-    world_status_hud_owner: ENTRY_MARKER, comment: UPDATE_ENTRY_TITLE, content: UPDATE_ENTRY_PROMPT + (extraPrompt ? '\n\n' + extraPrompt : ''),
-    constant: true, disable: false, selective: false, vectorized: false, key: [], keysecondary: [],
+    [ownerField]: marker, comment: title, content: prompt + (extraPrompt ? '\n\n' + extraPrompt : ''),
+    constant: true, disable: !enabled, selective: false, vectorized: false, key: [], keysecondary: [],
     position: 1, order: 100, role: 0, probability: 100, useProbability: false,
     excludeRecursion: true, preventRecursion: true, delayUntilRecursion: 0,
     group: '', groupOverride: false, sticky: null, cooldown: null, delay: null,
@@ -61,7 +62,7 @@ export function prepareUpdateEntry(original, name, createEntry, extraPrompt = ''
   return { book, entry, previous, changed: !same(book, original) };
 }
 
-export async function installUpdateEntry({ context, check, extraPrompt = '', fetcher = fetch, loadModule = () => import('/scripts/world-info.js') }) {
+export async function installUpdateEntry({ context, check, extraPrompt = '', fetcher = fetch, loadModule = () => import('/scripts/world-info.js'), entryOptions = {} }) {
   check();
   const ctx = context(); const name = boundWorldbook(ctx);
   const wi = await loadModule();
@@ -79,10 +80,10 @@ export async function installUpdateEntry({ context, check, extraPrompt = '', fet
   // Do not replace edits that are still in the world's editor/cache.
   const cached = wi.worldInfoCache?.get(name);
   if (cached && !same(cached, original)) throw Error('世界书编辑器中有尚未同步的修改，请保存并关闭编辑器后重试。');
-  const prepared = prepareUpdateEntry(original, name, wi.createWorldInfoEntry, extraPrompt);
+  const prepared = prepareUpdateEntry(original, name, wi.createWorldInfoEntry, extraPrompt, entryOptions);
   if (!prepared.changed) return { name, uid: prepared.entry.uid, action: '已存在，无需重复写入' };
   if (prepared.previous) {
-    const backups = ctx.chatMetadata.world_status_hud_lorebook_backups ||= [];
+    const backups = ctx.chatMetadata[entryOptions.backupKey || 'world_status_hud_lorebook_backups'] ||= [];
     backups.push({ name, entry: prepared.previous, savedAt: Date.now() });
     if (backups.length > 10) backups.splice(0, backups.length - 10);
     await ctx.saveMetadata(); guard();

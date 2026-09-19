@@ -1,0 +1,90 @@
+import {ROOT,read,empty,clone,equal,validate,diff,enforceLocks} from './model.js';
+import {checkpointState} from '../status/state-checkpoint.js';
+import {createHistory} from '../status/history.js';
+export const META='amin_os_organizations_v1',SETTINGS='amin_os_organizations_settings_v1';
+export const defaults=()=>({includeCharacter:true,includeChat:true,books:'',detail:'标准',scope:'',allowInference:false,allowNew:false,groups:['organizations','alliances','regions'],generationRules:'',updateRules:'',assessmentRules:'',generationEnabled:true,updateEnabled:true,assessmentEnabled:true,follow:false});
+export function roleIdentity(ctx){const group=ctx?.groupId;return group!=null&&group!==''?'group:'+String(group):'character:'+String(ctx?.characters?.[ctx?.characterId]?.avatar??'');}
+export function chatIdentity(ctx){
+ const id=ctx?.getCurrentChatId?.();if(id==null||id===''||!ctx.chatMetadata)throw Error('请先打开聊天');
+ return JSON.stringify([roleIdentity(ctx),id]);
+}
+export function createStore({context,setVariable,saveMetadata=ctx=>ctx.saveMetadata(),poll=false}){
+ let disposed=false,busy=false,epoch=0,pending=null,lastError='',lastIdentity='',lastMetadata=null,accepted=null,lastLocks=[],controller=null,requestToken=null;
+ const listeners=new Set();
+ const notify=()=>{for(const fn of listeners)fn();};
+ const meta=()=>{const c=context();chatIdentity(c);return c.chatMetadata[META]??={locks:[],assessment:null,backups:[]};};
+ const readDoc=()=>read(context().chatMetadata?.variables?.[ROOT]);
+ const floor=c=>JSON.stringify((c.chat??[]).map(m=>[m.extra?.amin_org_message_id??null,m.swipe_id??0,m.mes??'']));
+ const scope=()=>{const c=context();return {identity:chatIdentity(c),metadata:c.chatMetadata,floor:floor(c),epoch};};
+ const checkScope=t=>{const s=scope();if(disposed||s.identity!==t.identity||s.metadata!==t.metadata||s.floor!==t.floor||t.epoch!==epoch)throw Error('聊天或楼层已变化，操作已取消');};
+ const invalidate=()=>{epoch++;pending=null;controller?.abort();controller=null;requestToken=null;};
+ function compatible(){const c=context(),l=c.chatMetadata?.extensions?.LittleWhiteBox;if(c.extensionSettings?.LittleWhiteBox?.variablesMode==='1.0')return;for(const k of ['stateCkptV2','stateLogV2'])if(l?.[k]&&(l[k].version??1)!==1)throw Error('小白X记录格式不兼容，未写入');}
+ function writeDoc(doc,{checkpoint=true}={}){
+  const c=context();compatible();const value=validate(doc);setVariable(ROOT,JSON.stringify(value));
+  if(!equal(readDoc(),value))throw Error('变量写入后校验失败');
+  if(checkpoint)checkpointState(c);accepted=clone(value);
+ }
+ const history=createHistory({context,historyKey:'amin_os_organizations_history_v1',messageKey:'amin_org_message_id',allowGroups:true,
+  read:()=>({doc:readDoc(),assessment:clone(meta().assessment)}),
+  write:value=>{writeDoc(value?.doc??empty(),{checkpoint:false});meta().assessment=clone(value?.assessment??null);},
+  beforeRestore:()=>{invalidate();accepted=null;},warn:message=>{lastError=message;notify();},changed:()=>notify()});
+ function sync(){
+  if(disposed||busy)return;
+  try{
+   const id=chatIdentity(context());
+   if(id!==lastIdentity||context().chatMetadata!==lastMetadata){invalidate();lastIdentity=id;lastMetadata=context().chatMetadata;accepted=null;lastLocks=[];lastError='';}
+   if(requestToken){try{checkScope(requestToken);}catch{controller?.abort();controller=null;requestToken=null;}}
+   // History restores the selected floor before external variable validation.
+   history.sync();
+   const next=readDoc(),locks=meta().locks??[];
+   if(accepted){try{enforceLocks(accepted,next,lastLocks);}catch(e){writeDoc(accepted);lastError='外部变量修改触及锁定字段，已恢复：'+e.message;history.sync();notify();return;}}
+   if(!equal(accepted,next)){accepted=clone(next);notify();}
+   lastLocks=clone(locks);
+  }catch(e){if(lastError!==e.message){lastError=e.message;notify();}}
+ }
+ function capture(){sync();const t={...scope(),doc:readDoc(),locks:clone(meta().locks??[])};return t;}
+ function check(t){checkScope(t);if(!equal(t.doc,readDoc())||!equal(t.locks,meta().locks??[]))throw Error('资料或锁定设置已变化，请重新生成/预览');}
+ async function persist(c){try{await saveMetadata(c);}catch{throw Error('已写入内存，但聊天保存失败；请保持本聊天并重试保存，不要重复应用');}}
+ const api={
+  context,read:readDoc,history:()=>history.list(),error:()=>lastError,clearError:()=>{lastError='';},
+  subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},sync,capture,check,
+  pending:()=>pending?{kind:pending.kind,changes:clone(pending.changes),doc:clone(pending.doc),assessment:clone(pending.assessment)}:null,
+  stage(doc,t=capture(),{manual=false}={}){check(t);const checked=validate(doc);if(!manual)enforceLocks(t.doc,checked,t.locks);pending={kind:'data',doc:checked,t,manual,changes:diff(t.doc,checked)};notify();},
+  stageAssessment(value,t){check(t);pending={kind:'assessment',assessment:clone(value),t,changes:[]};notify();},
+  discard(){pending=null;notify();},
+  async confirm(){
+   if(!pending)throw Error('没有待确认结果');if(busy)throw Error('正在保存');
+   const p=pending;check(p.t);compatible();busy=true;
+   try{
+    const c=context(),m=meta();
+    if(p.kind==='data'){
+     if(!p.manual)enforceLocks(p.t.doc,p.doc,p.t.locks);
+     m.backups??=[];m.backups.push({doc:clone(p.t.doc),at:Date.now()});m.backups=m.backups.slice(-5);
+     writeDoc(p.doc);m.locks=(m.locks??[]).filter(path=>{const[g,id,k]=path.split('.');return p.doc[g]?.[id]&&Object.hasOwn(p.doc[g][id],k);});
+    }else m.assessment={...p.assessment,basis:clone(p.t.doc),at:Date.now(),floor:p.t.floor};
+    pending=null; // consume before awaiting persistence; never apply twice
+    history.sync();await persist(c);checkScope(p.t);
+   }finally{busy=false;sync();notify();}
+  },
+  assessment(){const a=meta().assessment;return a?{...clone(a),stale:!equal(a.basis,readDoc())||a.floor!==floor(context())}:null;},
+  locks:()=>clone(meta().locks??[]),
+  async setLocks(locks){if(busy)throw Error('正在保存');const c=context(),d=readDoc();for(const path of locks){const [g,id,k,...rest]=path.split('.');if(rest.length||!d[g]?.[id]||!Object.hasOwn(d[g][id],k))throw Error('锁定路径不存在');}invalidate();meta().locks=[...new Set(locks)];lastLocks=clone(meta().locks);await persist(c);notify();},
+  config(){const c=context();chatIdentity(c);const role=roleIdentity(c);return {...defaults(),...clone(c.extensionSettings?.[SETTINGS]?.[role]??{})};},
+  async saveConfig(value){const c=context();chatIdentity(c);const role=roleIdentity(c);c.extensionSettings[SETTINGS]??={};c.extensionSettings[SETTINGS][role]={...defaults(),...clone(value)};await c.saveSettingsDebounced?.();notify();},
+  beginRequest(){if(controller||busy)throw Error('已有请求或保存正在进行');const t=capture();requestToken=t;controller=new AbortController();const own=controller;return {token:t,signal:own.signal,check:()=>{if(own.signal.aborted)throw Error('任务已取消');check(t);},finish:()=>{if(controller===own){controller=null;requestToken=null;}}};},
+  cancel(){controller?.abort();controller=null;requestToken=null;notify();},
+  busy:()=>busy||!!controller,
+  async retrySave(){const c=context();chatIdentity(c);await persist(c);lastError='';notify();},
+  dispose(){disposed=true;invalidate();clearInterval(timer);for(const [name,fn]of subscriptions)source?.removeListener?.(name,fn);listeners.clear();},
+ };
+ const c=context(),source=c?.eventSource,events=c?.eventTypes??c?.event_types??{},subscriptions=[];
+ for(const name of ['CHAT_CHANGED','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPED','GENERATION_ENDED'])if(events[name]&&source?.on){const fn=()=>{if(name==='CHAT_CHANGED'){invalidate();accepted=null;}sync();};subscriptions.push([events[name],fn]);source.on(events[name],fn);}
+ const timer=poll?setInterval(sync,700):null;sync();return api;
+}
+let shared;
+export async function getStore(){
+ if(shared)return shared;
+ const vars=await import('/scripts/variables.js');
+ if(typeof vars.setLocalVariable!=='function')throw Error('宿主缺少聊天变量写入接口');
+ return shared??=createStore({context:()=>globalThis.SillyTavern?.getContext?.(),setVariable:vars.setLocalVariable,poll:true});
+}
