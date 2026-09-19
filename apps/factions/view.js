@@ -9,7 +9,10 @@ const el = (tag, text, cls) => { const e = document.createElement(tag); if (text
 const INTENSITY_NAMES = { light: '轻', medium: '中', severe: '惨烈' };
 const BATTLE_NAMES = { skirmish: '遭遇战', field: '野战', siege: '围攻', subterfuge: '渗透暗战', diplomacy: '外交斡旋', other: '其他冲突' };
 
+// 模块级单例：同一时刻最多一个挂载实例，重复 mount 先拆旧实例（DOM + 监听），防叠加。
+let activeView = null;
 export function mount(target) {
+    activeView?.dispose?.();
     const api = getSharedFactions();
     const page = el('div', null, 'amin-page amin-factions'), context = el('div', null, 'amin-context');
     const tabs = el('div', null, 'amin-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '势力沙盘页面');
@@ -110,7 +113,7 @@ export function mount(target) {
             item.append(el('h4', tpl.name), el('p', tpl.blurb, 'amin-fx-delta'));
             item.append(el('p', '指标：' + tpl.metrics.map(m => m.label).join(' / ')));
             item.append(el('p', '地区习惯：' + tpl.regionNouns.slice(0, 3).join('、') + ' ｜ 人口：' + tpl.population.min + '–' + tpl.population.max + tpl.population.unit));
-            item.onclick = () => { wizardScale = tpl.id; drawWizard(); };
+            item.onclick = () => { wizardScale = tpl.id; render(); };
             grid.append(item);
         }
         const name = field(c, '棋局名称', template(wizardScale)?.name + '棋局');
@@ -144,6 +147,7 @@ export function mount(target) {
 
     function factionForm(existing) {
         const c = current();
+        body.replaceChildren();
         const form = card(existing ? '编辑势力 · ' + existing.name : '新建势力');
         const name = field(form, '名称', existing?.name ?? '');
         const fallbackColor = template(c?.scaleTemplate)?.colors?.[c.factions.length % (template(c?.scaleTemplate)?.colors?.length ?? 1)] ?? '#888888';
@@ -199,6 +203,7 @@ export function mount(target) {
 
     function battleForm(region) {
         const c = current();
+        body.replaceChildren();
         const form = card('版图变更 / 动态结算 · ' + region.name);
         form.append(el('p', '选择新归属与变更方式；征服类变更按烈度结算人口与状况，其余方式只变更归属。'));
         const to = select(form, '新归属势力', [...c.factions.map(f => [f.id, f.name]), ['', '无主']], region.controller ?? '');
@@ -222,6 +227,7 @@ export function mount(target) {
 
     function regionForm(existing) {
         const c = current();
+        body.replaceChildren();
         const form = card(existing ? '编辑地区 · ' + existing.name : '新建地区');
         const name = field(form, '名称（可用模板习惯：' + (template(c.scaleTemplate)?.regionNouns ?? []).join('、') + '）', existing?.name ?? '');
         const controller = select(form, '归属势力', [...c.factions.map(f => [f.id, f.name]), ['', '无主']], existing?.controller ?? '');
@@ -319,13 +325,14 @@ export function mount(target) {
         } finally { running = null; }
     }
     function drawBoardPreviewInline(board) {
-        body.replaceChildren(); drawContext();
+        body.replaceChildren(); tabs.replaceChildren(); tabs.hidden = true; drawContext();
         drawBoardPreview(board, board.history.at(-1)?.description);
         say('请核对预览后确认写入');
     }
 
     function render() {
-        body.replaceChildren();
+        // 渲染纪律：任何全量重渲染先清空全部动态容器，再重建，杜绝实例叠加。
+        body.replaceChildren(); tabs.replaceChildren();
         if (!drawContext()) return;
         drawPendingNotice();
         if (preview) { drawPreview(); return; }
@@ -352,9 +359,11 @@ export function mount(target) {
     const ctx = api.context(), events = ctx?.eventTypes ?? ctx?.event_types ?? {};
     const chatChanged = () => { preview = null; wizard = false; seenPending = false; render(); };
     if (events.CHAT_CHANGED) ctx.eventSource?.on(events.CHAT_CHANGED, chatChanged);
-    render();
-    return {
+    const handle = {
         open() { seenPending = !!api.pending(); render(); },
-        dispose() { unsubscribe(); if (events.CHAT_CHANGED) ctx.eventSource?.removeListener?.(events.CHAT_CHANGED, chatChanged); page.remove(); },
+        dispose() { unsubscribe(); if (events.CHAT_CHANGED) ctx.eventSource?.removeListener?.(events.CHAT_CHANGED, chatChanged); page.remove(); if (activeView === handle) activeView = null; },
     };
+    activeView = handle;
+    render();
+    return handle;
 }
