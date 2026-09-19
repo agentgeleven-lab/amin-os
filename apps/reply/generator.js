@@ -92,7 +92,7 @@ export function perspectiveInstruction(settings, data) {
 
 }
 export async function generateOptions(ctx, settings, { draft = '', world, onContext, signal, isCurrent = () => true } = {}) {
-    const sharedAI=getAI(),snapshot=sharedAI?.capture();
+    const sharedAI=getAI(),snapshot=sharedAI?.capture('reply');
     if(!sharedAI && typeof ctx?.generateRaw!=='function') throw new Error('当前前端缺少 generateRaw 接口。');
     const s=normalizeSettings(settings);
     const selectedDirections=sampleDirections((s.writingMode==='author'?s.authorDirectionItems:s.directionItems).filter(item=>item.enabled&&item.text.trim()).map(item=>item.text).join('\n'),s.count);

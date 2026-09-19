@@ -4,7 +4,7 @@ import {getAI} from '../../ai/service.js';
 import { checkpointState } from './state-checkpoint.js';
 import { mergeUpdates, RELATION_UPDATE_RULES } from './state-tools.js';
 export async function generateStatus(CONFIG, signal) {
-const sharedAI=getAI(),snapshot=requireStatusChat(sharedAI?.capture());
+const sharedAI=getAI(),snapshot=requireStatusChat(sharedAI?.capture('status'));
 if(snapshot) CONFIG={...CONFIG,api:{...CONFIG.api,maxTokens:snapshot.config.maxTokens,timeoutMs:snapshot.config.timeoutSeconds*1000}};
 const LOCK = '__LWB_HUD_BUILDER_V1_RUNNING__';
 if (window[LOCK]) {

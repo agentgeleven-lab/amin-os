@@ -7,7 +7,7 @@ export async function draftRule({ai,ctx,entry,name,current,instruction,signal,ch
  check();if(signal?.aborted)throw Error('已取消生成');if(!ai)throw Error('共享 AI 尚未就绪，请检查 AI 设置');
  if(!entry?.content?.trim())throw Error('技能原文为空，无法起草');
  const prompt=JSON.stringify({技能名称:name,来源:entry.book,世界书原文:entry.content,现有草稿:current??'',补充要求:instruction??''});
- const result=await ai.generate('持续效果 · 规则起草',ctx,{systemPrompt:RULE_PROMPT,prompt},{signal,snapshot:ai.capture(),data:{request:prompt},includeEffects:false});
+ const result=await ai.generate('持续效果 · 规则起草',ctx,{systemPrompt:RULE_PROMPT,prompt},{signal,snapshot:ai.capture('effects'),data:{request:prompt},includeEffects:false});
  check();if(signal?.aborted)throw Error('已取消生成');
  if(typeof result!=='string'||!result.trim())throw Error('AI 返回空内容，原规则未修改');
  return result.trim();

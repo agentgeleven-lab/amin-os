@@ -4,6 +4,14 @@ import {currentPrompt} from '../apps/effects/model.js';
 import { createApiSettings, createApiProfiles, generateMapText } from '../apps/map/src/adapters/generation.js';
 import { createPresetLibrary, compilePreset } from '../apps/map/src/core/generation-presets.js';
 
+export const AI_APPS = [
+    {id:'map',name:'地图',tasks:['地图']},
+    {id:'status',name:'世界状态',tasks:['世界状态']},
+    {id:'reply',name:'回复选项',tasks:['回复选项']},
+    {id:'effects',name:'能力面板',tasks:['持续效果 · 规则起草']},
+    {id:'information',name:'信息面板',tasks:['信息面板','信息面板 · 模拟推演']},
+];
+const appId = app => AI_APPS.find(a=>a.id===app||a.tasks.includes(app))?.id;
 let shared;
 export const getAI = () => shared;
 export function initializeAI(storage, namespace, options) {
@@ -25,20 +33,32 @@ export function createAI(storage, namespace, {resolveConnection=resolveHostConne
         settings, profiles, presets,
         selected: () => selected,
         select(id) { if (!presets.list().some(p => p.id === id)) throw Error('预设不存在'); storage.setItem(selectionKey, id); selected = id; notify(); },
-        capture() { return structuredClone({ config: settings.snapshot(), preset: presets.list().find(p => p.id === selected) ?? presets.list()[0] }); },
+        channel(app) { const id=appId(app);return id?profiles.binding('app:'+id):''; },
+        setChannel(app, profileId) {
+            const id=appId(app);if(!id)throw Error('未知的 AI 应用');
+            if(profileId&&!profiles.get(profileId))throw Error('API 配置不存在，请重新选择');
+            profiles.bind('app:'+id,profileId||'');notify();
+        },
+        capture(app) {
+            const id=appId(app),profileId=id?profiles.binding('app:'+id):'';
+            const config=profileId?profiles.get(profileId):settings.snapshot();
+            if(!config)throw Error('应用指定的 API 配置已不存在，请在 AI 设置重新选择');
+            const channelName=profileId?profiles.list().find(p=>p.id===profileId)?.name:'全局默认';
+            return structuredClone({config, app:id, profileId, channelName, preset:presets.list().find(p=>p.id===selected)??presets.list()[0]});
+        },
         subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
         tasks: () => tasks.map(({controller, ...rest}) => ({...rest})),
         previews: () => [...previews].map(([app, text]) => ({app, text})),
         cancel(id) { tasks.find(t => t.id === id)?.controller.abort(new Error('已从 AI 设置取消任务')); },
         async generate(app, ctx, request, { signal, snapshot, data, includeEffects = true } = {}) {
             const effectPrompt=includeEffects?currentPrompt(ctx):'';
-            const captured = snapshot ?? this.capture();
+            const captured = snapshot ?? this.capture(app);
             if(!captured.preset.blocks.some(b=>b.type==='request'&&b.enabled))throw Error('共享预设必须启用“本次要求”块，请在 AI 设置中恢复。');
             const controller = new AbortController();
             const abort = () => controller.abort(signal?.reason);
             if (signal?.aborted) abort();
             signal?.addEventListener('abort', abort, {once:true});
-            const task = {id:crypto.randomUUID(), app, state:'等待模型 / 排队中', controller};
+            const task = {id:crypto.randomUUID(), app, channel:captured.channelName||'全局默认', state:'等待模型 / 排队中', controller};
             const messages = [{role:'system',content:request.systemPrompt}, ...compilePreset(captured.preset, data ?? {request:request.prompt})];
             if(effectPrompt)messages.push({role:'system',content:effectPrompt});
             // Keep each application's output protocol outside editable preset blocks.

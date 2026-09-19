@@ -245,7 +245,7 @@ export function createPanel(store,persistence,preferences,options={}){
         const levelGuide=el('details'),levelRules=el('pre',levelPrompt(aiLevel));levelGuide.append(el('summary','查看当前层级的生成约束'),levelRules);form.append(levelGuide);
         const density=field(form,'地点覆盖程度',select([{id:'full',name:'全面 · 覆盖各分区与相关地点'},{id:'balanced',name:'适中 · 主要地点与枢纽'},{id:'brief',name:'简略 · 少量地标概览'}],coverage));density.disabled=aiBusy;density.onchange=()=>{coverage=density.value;};
         form.append(el('p','全面模式优先覆盖范围内地点，不保证穷尽现实世界。较大地图需要更多输出预算；可在 AI 设置中调整，或分地区生成后继续新增。','dm-help'));
-        if(coverage==='full'&&getAI().capture().config.maxTokens<8192)form.append(el('p','当前输出上限低于 8192 tokens，较大地图可能受预算限制；可按模型支持范围提高至 8192–16384。不会自动更改你的 API 设置。','dm-help'));
+        if(coverage==='full'&&getAI().capture('map').config.maxTokens<8192)form.append(el('p','当前输出上限低于 8192 tokens，较大地图可能受预算限制；可按模型支持范围提高至 8192–16384。不会自动更改你的 API 设置。','dm-help'));
         form.append(el('p','生成地图草稿：重新生成「'+mapPath(draft.snapshot(),map.id).map(m=>m.name).join(' → ')+'」，保留其他地图；新增按钮只添加内容。','dm-help'));
         const entrance=field(form,'内部地图入口地点',select([{id:'',name:'请选择地点'},...Object.values(map.nodes)],selected??'')),childType=field(form,'内部地图形态',select(mapTypes,'grid'));entrance.disabled=childType.disabled=aiBusy;
         const progress=el('p',generationStatus,'dm-generation-progress');progress.setAttribute('role','status');form.append(progress);
@@ -258,7 +258,7 @@ export function createPanel(store,persistence,preferences,options={}){
         const generateAction=async(expand=false,childMode=false)=>{
             if(aiBusy||disposed)return;
             if(childMode&&!map.nodes[entrance.value]){notice='请先选择内部地图入口地点';render();return;}
-            const sharedAI=getAI(),snapshot=sharedAI.capture(),api=snapshot.config;
+            const sharedAI=getAI(),snapshot=sharedAI.capture('map'),api=snapshot.config;
             const ctx=globalThis.SillyTavern?.getContext?.();if(!api.enabled&&typeof ctx?.generateRaw!=='function'){notice='当前环境没有酒馆生成接口；请在酒馆中配置模型后使用。';render();return;}
             const token=draft.token(),navToken=navigationRevision,capturedLevel=aiLevel,capturedCoverage=coverage,capturedPrompt=aiPrompt,capturedGlobal=includeGlobal,capturedNaming=nameRoads,capturedDistance=distanceRoads,base=draft.snapshot(),roleMap=base.activeMap;
             base.activeMap=map.id;

@@ -79,7 +79,7 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
         let sources='正在读取世界书…';
         status.textContent=sources;
         try{
-            const options=await waitForResult(generateOptions(initial,config,{draft:fromDraft?original:'',signal:current.signal,isCurrent:()=>!current.signal.aborted && ticket===revision && stamp===chatStamp(context()),onContext:(info,lore)=>{sources=`人设：${info.persona?'已读取':'未使用/为空'}；角色：${info.characters.length}；世界书：${lore.books.length} 本 / ${info.world.length} 条`;status.textContent=`生成中… ${sources}`;}}),(getAI()?.capture().config.timeoutSeconds??config.timeout)*1000,current.signal);
+            const options=await waitForResult(generateOptions(initial,config,{draft:fromDraft?original:'',signal:current.signal,isCurrent:()=>!current.signal.aborted && ticket===revision && stamp===chatStamp(context()),onContext:(info,lore)=>{sources=`人设：${info.persona?'已读取':'未使用/为空'}；角色：${info.characters.length}；世界书：${lore.books.length} 本 / ${info.world.length} 条`;status.textContent=`生成中… ${sources}`;}}),(getAI()?.capture('reply').config.timeoutSeconds??config.timeout)*1000,current.signal);
             if(ticket!==revision||stamp!==chatStamp(context()))throw new Error('聊天已变化，本次结果已丢弃。');
             for(const option of options){const card=node('button',null,'ro-card');card.type='button';card.setAttribute('aria-pressed','false');card.append(node('strong',option.label),node('span',option.text));card.addEventListener('click',()=>{
                 if(ticket!==revision||stamp!==chatStamp(context()))return invalidate();
