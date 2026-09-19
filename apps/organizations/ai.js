@@ -26,7 +26,6 @@ export async function collectSources(ctx,config,options={}){
  if(config.includeCharacter){const c=ctx.characters?.[ctx.characterId],d=c?.data??c;if(d)result.character={name:d.name??'',description:d.description??'',personality:d.personality??'',scenario:d.scenario??'',first_mes:d.first_mes??''};else if(ctx.groupId)result.character={notice:'群聊；未自动读取未选择的其他角色设定'};}
  if(config.includeChat)result.chat=(ctx.chat??[]).filter(m=>!m.is_system&&typeof m.mes==='string').slice(-20).map(m=>({speaker:m.name??(m.is_user?'用户':'角色'),text:m.mes}));
  result.worldbooks=await collectWorldbooks(ctx,config,options);
- if(JSON.stringify(result).length>120000)throw Error('选定素材超过120000字符，请缩小世界书或剧情范围；未静默截断');
  return result;
 }
 export async function generate({api,ai,mode='update',extra='',target=null,sourceOptions={}}){
@@ -37,7 +36,7 @@ export async function generate({api,ai,mode='update',extra='',target=null,source
   const sources=await collectSources(api.context(),config,{...sourceOptions,check:run.check});run.check();
   const ruleKey=mode==='assessment'?'assessment':mode==='update'?'update':'generation';
   const request={operation:mode,scope:config.scope,detail:config.detail,allowInference:config.allowInference,allowNew:config.allowNew,groups:config.groups,target,lockedPaths:run.token.locks,rules:config[ruleKey+'Enabled']?config[ruleKey+'Rules']:'',requirements:extra,current:doc,sources};
-  const prompt=JSON.stringify(request);if(prompt.length>200000)throw Error('请求超过200000字符，请缩小资料或素材范围');
+  const prompt=JSON.stringify(request);
   const text=await ai.generate('势力概览',api.context(),{systemPrompt:mode==='assessment'?ASSESS_PROTOCOL:DATA_PROTOCOL,prompt},{signal:run.signal,snapshot:aiSnapshot,data:{request:prompt},includeEffects:false});
   run.check();
   if(mode==='assessment')api.stageAssessment(parseAssessment(text,doc),run.token);
