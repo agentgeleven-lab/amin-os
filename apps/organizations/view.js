@@ -1,3 +1,4 @@
+import {worldbookChoices,selectedBookNames} from './sources.js';
 import {getAI} from '../../ai/service.js';
 import {getStore,chatIdentity} from './service.js';
 import {GROUPS,LABELS,FIELDS,LINKS,entity,uid,clone,diff,deleteEntity,rankMetrics} from './model.js';
@@ -7,7 +8,7 @@ const el=(tag,text='',cls='')=>{const e=document.createElement(tag);e.textConten
 const show=v=>v===null||v===undefined||v===''?'未明确':typeof v==='object'?JSON.stringify(v,null,2):String(v);
 const tabsMap={overview:'总览',organizations:'组织',alliances:'联盟／阵营',regions:'地区',assessment:'评估排行',settings:'生成与规则'};
 const mounted=new WeakMap();
-export async function mount(target,{api:provided,ai=getAI}={}){
+export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
  mounted.get(target)?.dispose();const api=provided??await getStore();mounted.get(target)?.dispose();
  const page=el('div','','amin-page amin-organizations'),header=el('div','','amin-toolbar'),tabs=el('div','','amin-tabs'),notice=el('div','','amin-notice'),body=el('section');
  notice.setAttribute('role','status');tabs.setAttribute('role','tablist');page.append(header,tabs,notice,body);target.append(page);
@@ -16,7 +17,7 @@ export async function mount(target,{api:provided,ai=getAI}={}){
  const btn=(parent,label,fn,primary=false)=>{const b=el('button',label,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{if(!disposed)b.disabled=false;}};parent.append(b);return b;};
  const card=(title,parent=body)=>{const c=el('section','','amin-card');if(title)c.append(el('h3',title));parent.append(c);return c;};
  const field=(parent,label,value='',multi=false)=>{const row=el('label',label),input=el(multi?'textarea':'input');input.value=String(value??'');input.setAttribute('aria-label',label);if(multi)input.rows=3;row.append(input);parent.append(row);return input;};
- const check=(parent,label,value=false)=>{const row=el('label',label),i=el('input');i.type='checkbox';i.checked=!!value;row.append(i);parent.append(row);return i;};
+ const check=(parent,label,value=false)=>{const row=el('label',label),i=el('input');i.type='checkbox';i.setAttribute('aria-label',label);i.checked=!!value;row.append(i);parent.append(row);return i;};
  const select=(parent,label,options,value)=>{const row=el('label',label),i=el('select');i.setAttribute('aria-label',label);for(const[v,n]of options){const o=el('option',n);o.value=v;i.append(o);}i.value=value??options[0]?.[0]??'';row.append(i);parent.append(row);return i;};
  const leave=()=>!editing||globalThis.confirm?.('离开将放弃尚未保存的表单草稿，是否继续？');
  const navigate=(tab,id)=>{if(!leave())return;editing=false;if(tab==='settings')historyIndex=null;selected=tab;if(id)chosen[tab]=id;render();};
@@ -25,7 +26,7 @@ export async function mount(target,{api:provided,ai=getAI}={}){
  async function run(mode,targetEntity=null){
   if(requesting||api.busy())throw Error('已有操作进行中');
   if(!leave())return;editing=false;historyIndex=null;requesting=true;say('正在准备资料并请求AI…');
-  try{await generate({api,ai:ai(),mode,target:targetEntity});render();say('结果已生成，请检查变更后确认；尚未写入');}
+  try{await generate({api,ai:ai(),mode,target:targetEntity,sourceOptions});render();say('结果已生成，请检查变更后确认；尚未写入');}
   finally{requesting=false;}
  }
  function drawHeader(){
@@ -126,8 +127,22 @@ export async function mount(target,{api:provided,ai=getAI}={}){
   editing=true;const token=api.capture(),cfg=api.config(),f=card('生成范围与资料来源');
   const scope=field(f,'整理范围',cfg.scope,true),detail=select(f,'详细程度',[['简略','简略'],['标准','标准'],['详细','详细']],cfg.detail),groups={};
   for(const g of GROUPS)groups[g]=check(f,'包括'+LABELS[g],cfg.groups.includes(g));
-  const includeCharacter=check(f,'读取当前角色设定',cfg.includeCharacter),includeChat=check(f,'读取已加载的最近20条非系统消息',cfg.includeChat),books=field(f,'世界书名称（每行一本；留空则不读取）',cfg.books,true),allowInference=check(f,'允许合理推演（必须标记）',cfg.allowInference),allowNew=check(f,'剧情更新允许新增主体',cfg.allowNew);
-  f.append(el('p','按钮只读取上述选定素材；不会自动查询未加载历史。规则和选项按角色保存，聊天资料仍彼此隔离。'));
+  const includeCharacter=check(f,'读取当前角色设定',cfg.includeCharacter),includeChat=check(f,'读取已加载的最近20条非系统消息',cfg.includeChat),readWorldbooks=check(f,'是否读取世界书',cfg.readWorldbooks!==false),allowInference=check(f,'允许合理推演（必须标记）',cfg.allowInference),allowNew=check(f,'剧情更新允许新增主体',cfg.allowNew);
+   f.append(el('p','世界书开关默认勾选。保存后，每次生成、重新生成、剧情更新和评估都重新读取最新内容；关闭后不读任何世界书，但保留选书。读取角色设定会一并读取绑定/附加书（受总开关控制）。仅读取启用条目，不判断关键词、概率等激活策略。'));
+   const bookPanel=card('当前已启用世界书 · 手动选择',f),bookList=el('div'),bookStatus=el('p');bookPanel.append(bookStatus,bookList);
+   const selectedBooks=new Set(selectedBookNames(cfg));let choices=[],catalogReady=false,listRequest=0;
+   const drawBooks=()=>{
+    bookList.replaceChildren();const names=new Set(choices.map(b=>b.name));
+    for(const b of [...choices,...[...selectedBooks].filter(n=>!names.has(n)).map(name=>({name,sources:['当前未启用，不会读取；请取消选择或先启用'],automatic:false}))]){
+     const automatic=includeCharacter.checked&&b.automatic;
+     const input=check(bookList,b.name+(automatic?'（随角色自动读取）':'')+' · '+b.sources.join('、'),automatic||selectedBooks.has(b.name));input.dataset.worldbook=b.name;input.disabled=!readWorldbooks.checked||automatic;
+     input.onchange=()=>{if(input.checked)selectedBooks.add(b.name);else selectedBooks.delete(b.name);};
+    }
+    if(!choices.length&&catalogReady)bookList.append(el('p','当前没有已启用的世界书。'));
+   };
+   const refreshBooks=async()=>{const request=++listRequest;catalogReady=false;bookStatus.textContent='正在读取当前启用列表（不加载条目正文）…';try{const next=await worldbookChoices(api.context(),{...sourceOptions,check:()=>api.check(token)});if(disposed||!f.isConnected||request!==listRequest)return;choices=next;catalogReady=true;bookStatus.textContent='只列出当前启用的书；角色自动读取与手选会合并去重。';drawBooks();}catch(e){if(!disposed&&f.isConnected&&request===listRequest){bookStatus.textContent=e.message;drawBooks();}}};
+   includeCharacter.onchange=drawBooks;readWorldbooks.onchange=drawBooks;btn(bookPanel,'刷新已启用世界书列表',refreshBooks);void refreshBooks();
+   f.append(el('p','不会查询未加载的历史消息。选项按角色保存，聊天资料彼此隔离。修改后请先保存，再点击生成或更新。'));
   const rules={};for(const[k,label]of [['generation','生成／补充规则'],['update','剧情更新规则'],['assessment','评估规则']]){const c=card(label);rules[k+'Enabled']=check(c,'启用',cfg[k+'Enabled']);rules[k+'Rules']=field(c,'要求',cfg[k+'Rules'],true);}
   const follow=card('小白X变量管理2.0联动'),followEnabled=check(follow,'启用日常剧情变量更新（保存后需同步世界书）',cfg.follow);
   const mode=api.context()?.extensionSettings?.LittleWhiteBox?.variablesMode;follow.append(el('p','当前检测到的变量模式：'+(mode??'未检测到')+'。按钮生成与手动编辑不依赖日常联动开关。'));
@@ -135,7 +150,7 @@ export async function mount(target,{api:provided,ai=getAI}={}){
   btn(follow,'复制已保存的更新提示词',async()=>{const text=followPrompt(api.config(),api.locks());if(globalThis.navigator?.clipboard?.writeText){await navigator.clipboard.writeText(text);say('已复制，不会自动发送');}else{field(follow,'手动复制',text,true);}});
   btn(follow,'同步已保存规则到世界书',async()=>{api.check(token);const r=await syncWorldbook(api);say(r.name+'：'+r.action+(r.warning?' · '+r.warning:''));});
   const tools=el('div','','amin-toolbar');body.append(tools);
-  btn(tools,'保存生成与规则设置',async()=>{api.check(token);const next={...cfg,scope:scope.value,detail:detail.value,groups:GROUPS.filter(g=>groups[g].checked),includeCharacter:includeCharacter.checked,includeChat:includeChat.checked,books:books.value,allowInference:allowInference.checked,allowNew:allowNew.checked,follow:followEnabled.checked};if(!next.groups.length)throw Error('至少选择一种资料类型');for(const[k,input]of Object.entries(rules))next[k]=k.endsWith('Enabled')?input.checked:input.value;await api.saveConfig(next);editing=false;selected='overview';render();say('规则已保存；日常联动请另行同步世界书');},true);
+  btn(tools,'保存生成与规则设置',async()=>{api.check(token);if(readWorldbooks.checked&&!catalogReady)throw Error('世界书列表尚未成功加载，请刷新或关闭世界书读取');const next={...cfg,scope:scope.value,detail:detail.value,groups:GROUPS.filter(g=>groups[g].checked),includeCharacter:includeCharacter.checked,includeChat:includeChat.checked,readWorldbooks:readWorldbooks.checked,selectedBooks:[...selectedBooks],books:'',allowInference:allowInference.checked,allowNew:allowNew.checked,follow:followEnabled.checked};if(!next.groups.length)throw Error('至少选择一种资料类型');for(const[k,input]of Object.entries(rules))next[k]=k.endsWith('Enabled')?input.checked:input.value;await api.saveConfig(next);editing=false;selected='overview';render();say('规则已保存；日常联动请另行同步世界书');},true);
   btn(tools,'取消',()=>{selected='overview';cancelEdit();});
  }
  function render(){

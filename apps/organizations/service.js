@@ -2,7 +2,7 @@ import {ROOT,read,empty,clone,equal,validate,diff,enforceLocks} from './model.js
 import {checkpointState} from '../status/state-checkpoint.js';
 import {createHistory} from '../status/history.js';
 export const META='amin_os_organizations_v1',SETTINGS='amin_os_organizations_settings_v1';
-export const defaults=()=>({includeCharacter:true,includeChat:true,books:'',detail:'标准',scope:'',allowInference:false,allowNew:false,groups:['organizations','alliances','regions'],generationRules:'',updateRules:'',assessmentRules:'',generationEnabled:true,updateEnabled:true,assessmentEnabled:true,follow:false});
+export const defaults=()=>({includeCharacter:true,includeChat:true,readWorldbooks:true,selectedBooks:null,books:'',detail:'标准',scope:'',allowInference:false,allowNew:false,groups:['organizations','alliances','regions'],generationRules:'',updateRules:'',assessmentRules:'',generationEnabled:true,updateEnabled:true,assessmentEnabled:true,follow:false});
 export function roleIdentity(ctx){const group=ctx?.groupId;return group!=null&&group!==''?'group:'+String(group):'character:'+String(ctx?.characters?.[ctx?.characterId]?.avatar??'');}
 export function chatIdentity(ctx){
  const id=ctx?.getCurrentChatId?.();if(id==null||id===''||!ctx.chatMetadata)throw Error('请先打开聊天');
