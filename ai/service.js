@@ -3,6 +3,7 @@ import {waitForSignal} from '../apps/map/src/core/generation-job.js';
 import {currentPrompt} from '../apps/effects/model.js';
 import { createApiSettings, createApiProfiles, generateMapText } from '../apps/map/src/adapters/generation.js';
 import { createPresetLibrary, compilePreset } from '../apps/map/src/core/generation-presets.js';
+import { parseRequestBody } from '../apps/map/src/adapters/request-body.js';
 
 export const AI_APPS = [
     {id:'map',name:'地图',tasks:['地图']},
@@ -12,6 +13,29 @@ export const AI_APPS = [
     {id:'information',name:'信息面板',tasks:['信息面板','信息面板 · 模拟推演']},
 ];
 const appId = app => AI_APPS.find(a=>a.id===app||a.tasks.includes(app))?.id;
+const renderMessages = messages => messages.map(m => `[${m?.role ?? '未知'}]\n${typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? m) ?? ''}`).join('\n\n');
+const shortValue = value => { const text = JSON.stringify(value); return text === undefined ? String(value) : text.length > 48 ? text.slice(0, 48) + '…' : text; };
+/**
+ * Previews must reflect the request that is really sent: the transport merges the custom requestBody
+ * last, on the independent route and on the inherited host route alike, so an overridden messages
+ * array replaces every assembled block.
+ */
+function previewText(captured, request, messages) {
+    const { config } = captured;
+    let overrides = {};
+    try { overrides = parseRequestBody(config.requestBody); } catch { overrides = {}; }
+    const pick = (key, fallback) => Object.hasOwn(overrides, key) ? overrides[key] === null ? undefined : overrides[key] : fallback;
+    const replaced = Object.hasOwn(overrides, 'messages'), custom = Object.keys(overrides).filter(key => key !== 'messages');
+    const stream = pick('stream', config.stream), sent = replaced ? pick('messages') : messages;
+    const limits = [['max_tokens', pick('max_tokens', config.maxTokens)], ['max_completion_tokens', pick('max_completion_tokens')]].filter(([, value]) => value !== undefined).map(([key, value]) => `${key} ${value}`).join(' / ');
+    const header = `最终请求体：模型 ${pick('model', config.enabled ? config.model : '由酒馆配置决定') ?? '已删除（请求会失败）'} · 输出上限 ${limits || '未设置'} · 流式 ${stream === undefined ? '未设置' : stream ? '开' : '关'}`;
+    const lines = [header];
+    if (custom.length) lines.push(`自定义字段 ${custom.map(key => overrides[key] === null ? `${key}（已删除）` : `${key}=${shortValue(overrides[key])}`).join('、')}`);
+    if (replaced && (!Array.isArray(sent) || !sent.length)) { lines.push('自定义 messages 必须是非空数组；这个请求会被拒绝，请修正自定义请求参数。'); return lines.join('\n\n'); }
+    if (replaced) lines.push('自定义 requestBody 覆盖了 messages：以下就是实际发送的内容，应用组装的上下文不会被发送。');
+    lines.push(renderMessages(sent));
+    return lines.join('\n\n');
+}
 let shared;
 export const getAI = () => shared;
 export function initializeAI(storage, namespace, options) {
@@ -63,7 +87,7 @@ export function createAI(storage, namespace, {resolveConnection=resolveHostConne
             if(effectPrompt)messages.push({role:'system',content:effectPrompt});
             // Keep each application's output protocol outside editable preset blocks.
             messages.push({role:'system',content:request.systemPrompt});
-            previews.set(app, messages.map(m => `[${m.role}]\n${m.content}`).join('\n\n'));
+            previews.set(app, previewText(captured, request, messages));
             tasks.push(task); while(tasks.length > 40 && ['完成','已取消','失败'].includes(tasks[0].state)) tasks.shift(); notify();
             try {
                 if(!connections.has(captured))connections.set(captured,Promise.resolve().then(()=>resolveConnection(captured.config,ctx)));
