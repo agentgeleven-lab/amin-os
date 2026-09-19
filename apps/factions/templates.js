@@ -2,7 +2,7 @@
 // 模板不携带规则系数；规则默认值见 model.js 的 DEFAULT_RULES。
 export const TEMPLATES = {
     street: {
-        id: 'street', name: '街区争斗', blurb: '街区与场子的地盘争夺，人口几十到几百。',
+        id: 'street', name: '街区格局', blurb: '街区与场子的势力格局，人口几十到几百。',
         regionNouns: ['街区', '场子', '码头', '市场', '巷子'],
         metrics: [
             { key: 'manpower', label: '人手', max: 100 },
@@ -14,7 +14,7 @@ export const TEMPLATES = {
         colors: ['#e0564a', '#4f9be0', '#e0b44f', '#8a6fd6', '#4fb87a', '#d6709c'],
     },
     corporate: {
-        id: 'corporate', name: '企业竞争', blurb: '市场区域与业务线的商战，人口为抽象指数。',
+        id: 'corporate', name: '商业版图', blurb: '市场区域与业务线的商业格局，人口为抽象指数。',
         regionNouns: ['市场区域', '业务线', '园区', '渠道', '部门'],
         metrics: [
             { key: 'funds', label: '资金', max: 100 },
@@ -26,7 +26,7 @@ export const TEMPLATES = {
         colors: ['#3f8ea5', '#e08a4f', '#6fae57', '#b25f8f', '#7f8ed6', '#c9c04f'],
     },
     court: {
-        id: 'court', name: '朝堂权斗', blurb: '部门、领地与人脉圈的权斗，抽象为主、少量具体。',
+        id: 'court', name: '朝堂格局', blurb: '部门、领地与人脉圈的势力消长，抽象为主、少量具体。',
         regionNouns: ['部门', '领地', '人脉圈', '衙署', '行省'],
         metrics: [
             { key: 'power', label: '权势', max: 100 },
@@ -38,7 +38,7 @@ export const TEMPLATES = {
         colors: ['#b8863f', '#8f4f4f', '#4f7a63', '#5a5f9e', '#a1704f', '#6f8f9e'],
     },
     interstate: {
-        id: 'interstate', name: '国家战争', blurb: '省、州与城市的战争，人口从万级到千万级。',
+        id: 'interstate', name: '列国格局', blurb: '省、州与城市的列国格局，人口从万级到千万级。',
         regionNouns: ['省', '州', '城市', '要塞', '边疆'],
         metrics: [
             { key: 'military', label: '军事', max: 100 },

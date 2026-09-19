@@ -3,7 +3,14 @@ import { DEFAULT_RULES, clamp, findFaction, findRegion, factionName } from './mo
 export const INTENSITIES = ['light', 'medium', 'severe'];
 export const BATTLE_TYPES = ['skirmish', 'field', 'siege', 'subterfuge', 'diplomacy', 'other'];
 export const NO_CONTROLLER = ['无主', '中立', '放弃', 'none', 'null'];
-export const TYPE_LABELS = { transfer: '地区易主', population: '人口变动', condition: '状况变动', metric: '指标变动', relation: '关系变动', recovery: '休养生息', created: '棋局创建', regenerate: '全量重生成', edit: '手动编辑' };
+export const TYPE_LABELS = { transfer: '版图变更', population: '人口变动', condition: '状况变动', metric: '指标变动', relation: '关系变动', recovery: '休养生息', created: '棋局创建', regenerate: '全量重生成', edit: '手动编辑', development: '发展', decline: '衰退', diplomacy: '外交', migration: '迁徙', disaster: '灾害' };
+export const EVENT_TYPES = Object.keys(TYPE_LABELS);
+export const eventTypeOf = (value, fallback) => EVENT_TYPES.includes(value) ? value : (EVENT_TYPES.includes(fallback) ? fallback : 'edit');
+// 版图变更方式：仅征服（conquest）触发战乱结算，其余只改归属不动人口状况。
+export const CAUSES = ['conquest', 'purchase', 'merge', 'handover', 'other'];
+export const CAUSE_LABELS = { conquest: '征服', purchase: '购买', merge: '合并', handover: '和平移交', other: '其他变更' };
+// 兼容旧协议：未给 cause 但带 intensity/battleType 的变更视为征服；两者皆无视为其他变更。
+const normalizeCause = item => { if (CAUSES.includes(item?.cause)) return item.cause; if (item != null && (item.intensity != null || item.battleType != null)) return 'conquest'; return 'other'; };
 const ratio = (value, fallback, min, max) => Number.isFinite(Number(value)) ? clamp(Number(value), min, max) : fallback;
 
 export function normalizeRules(value = {}) {
@@ -19,7 +26,7 @@ export function normalizeRules(value = {}) {
     };
 }
 
-// 烈度系数 × 战斗类型系数：人口损失比例；状况扣减 = 状况烈度基值 × 战斗类型系数。
+// 征服结算：烈度系数 × 战斗类型系数 → 人口损失比例；状况扣减 = 状况烈度基值 × 战斗类型系数。仅征服类易主与战乱损失使用。
 export function battleImpact(rules, { intensity = 'medium', battleType = 'field' } = {}) {
     const r = normalizeRules(rules);
     const i = INTENSITIES.includes(intensity) ? intensity : 'medium';
@@ -41,8 +48,10 @@ const event = (type, description, deltas, at) => ({ ts: at ?? new Date().toISOSt
 
 /**
  * 统一结算入口。update 结构（AI 隐藏块 / 盘点建议 / 手动操作共用）：
- * { note, transfers:[{region,to,intensity,battleType,note}], populationDelta:[{region,intensity,battleType,ratio}],
- *   conditionDelta:[{region,delta}], metricDelta:[{faction,key,delta}], relationDelta:[{a,b,delta}] }
+ * { note, transfers:[{region,to,cause,intensity,battleType,note}], populationDelta:[{region,type,intensity,battleType,ratio}],
+ *   conditionDelta:[{region,type,delta}], metricDelta:[{faction,key,type,delta}], relationDelta:[{a,b,delta}] }
+ * cause：conquest 征服 / purchase 购买 / merge 合并 / handover 和平移交 / other 其他；仅征服按烈度结算人口与状况。
+ * type：可选拒事性质标注（development/decline/diplomacy/migration/disaster 等），未知值回退通道默认类型。
  * 引用一律支持 id 或名称；无法解析的项进入 rejected，静默忽略，不中断其余结算。
  */
 export function applyUpdate(campaign, update = {}, at) {
@@ -63,15 +72,19 @@ export function applyUpdate(campaign, update = {}, at) {
     for (const item of Array.isArray(update.transfers) ? update.transfers : []) {
         const region = regionOf(item); if (!region) continue;
         const to = factionOf(item?.to); if (to === null) continue;
-        const impact = battleImpact(rules, item);
+        const cause = normalizeCause(item);
         const before = snapshot(region);
-        region.population = Math.max(0, Math.round(region.population * (1 - impact.populationRatio)));
-        region.condition = clamp(Math.round(region.condition - impact.conditionLoss), 0, 100);
-        region.warTally = (region.warTally ?? 0) + 1;
+        let impact = null;
+        if (cause === 'conquest') {
+            impact = battleImpact(rules, item);
+            region.population = Math.max(0, Math.round(region.population * (1 - impact.populationRatio)));
+            region.condition = clamp(Math.round(region.condition - impact.conditionLoss), 0, 100);
+            region.warTally = (region.warTally ?? 0) + 1;
+        }
         const fromName = factionName(next, before.controller);
         region.controller = to.none ? null : to.id;
         touched.push(region.id);
-        events.push(event('transfer', item?.note || (fromName + ' → ' + (to.none ? '无主' : to.name) + '：' + region.name), { region: region.name, before, after: snapshot(region), intensity: impact.intensity, battleType: impact.battleType }, at));
+        events.push(event('transfer', item?.note || (fromName + ' → ' + (to.none ? '无主' : to.name) + '（' + CAUSE_LABELS[cause] + '）：' + region.name), { region: region.name, cause, before, after: snapshot(region), ...(impact ? { intensity: impact.intensity, battleType: impact.battleType } : {}) }, at));
     }
     for (const item of Array.isArray(update.populationDelta) ? update.populationDelta : []) {
         const region = regionOf(item); if (!region) continue;
@@ -83,7 +96,7 @@ export function applyUpdate(campaign, update = {}, at) {
         region.population = Math.max(0, Math.round(region.population * (1 - change)));
         if (change > 0) { region.warTally = (region.warTally ?? 0) + 1; region.condition = clamp(Math.round(region.condition - impact.conditionLoss), 0, 100); }
         touched.push(region.id);
-        events.push(event('population', item?.note || (region.name + '人口变动'), { region: region.name, before, after: snapshot(region) }, at));
+        events.push(event(eventTypeOf(item?.type, 'population'), item?.note || (region.name + '人口变动'), { region: region.name, before, after: snapshot(region) }, at));
     }
     for (const item of Array.isArray(update.conditionDelta) ? update.conditionDelta : []) {
         const region = regionOf(item); if (!region) continue;
@@ -91,7 +104,7 @@ export function applyUpdate(campaign, update = {}, at) {
         const before = snapshot(region);
         region.condition = clamp(Math.round(region.condition + Number(item.delta)), 0, 100);
         touched.push(region.id);
-        events.push(event('condition', item?.note || (region.name + '状况变动'), { region: region.name, before, after: snapshot(region) }, at));
+        events.push(event(eventTypeOf(item?.type, 'condition'), item?.note || (region.name + '状况变动'), { region: region.name, before, after: snapshot(region) }, at));
     }
     for (const item of Array.isArray(update.metricDelta) ? update.metricDelta : []) {
         const faction = factionOf(item?.faction ?? item?.region); if (!faction || faction.none || faction === null) continue;
@@ -100,7 +113,7 @@ export function applyUpdate(campaign, update = {}, at) {
         if (!Number.isFinite(Number(item?.delta))) { rejected.push({ kind: '指标', ref: faction.name + '.' + metric.label, reason: '缺少数值' }); continue; }
         const before = metric.value;
         metric.value = clamp(Math.round(metric.value + Number(item.delta)), 0, metric.max ?? 100);
-        events.push(event('metric', item?.note || (faction.name + ' · ' + metric.label), { faction: faction.name, metric: metric.label, before, after: metric.value }, at));
+        events.push(event(eventTypeOf(item?.type, 'metric'), item?.note || (faction.name + ' · ' + metric.label), { faction: faction.name, metric: metric.label, before, after: metric.value }, at));
     }
     const relations = [];
     for (const item of Array.isArray(update.relationDelta) ? update.relationDelta : []) {

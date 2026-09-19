@@ -24,7 +24,7 @@ test('all four scale templates create campaigns with their own metric sets', () 
 test('createCampaign rejects unknown templates and blank names fall back', () => {
     assert.throws(() => createCampaign({ scaleTemplate: 'galaxy' }), /未知的规模模板/);
     const campaign = createCampaign({ scaleTemplate: 'court' });
-    assert.equal(campaign.name, '朝堂权斗棋局');
+    assert.equal(campaign.name, '朝堂格局棋局');
 });
 
 test('normalizeCampaign repairs broken input, controllers and relations', () => {

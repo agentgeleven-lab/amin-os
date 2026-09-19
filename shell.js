@@ -10,7 +10,7 @@ const APPS=[
     {id:'effects',name:'能力面板',sub:'世界书技能与当前生效记录',icon:'✧',color:'lavender'},
     {id:'map',name:'地图',sub:'记录地点，探索你的世界',icon:'⌘',color:'mint'},
     {id:'status',name:'世界状态',sub:'角色、关系与剧情的此刻',icon:'◈',color:'lavender'},
-    {id:'factions',name:'势力沙盘',sub:'势力、地盘与战报推演',icon:'⚑',color:'peach'},
+    {id:'factions',name:'势力沙盘',sub:'势力、地盘与动态推演',icon:'⚑',color:'peach'},
     {id:'reply',name:'回复选项',sub:'拟写下一句，由你决定',icon:'≋',color:'peach'},
     {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
     {id:'settings',name:'设置',sub:'全局外观与应用个性化',icon:'⚙',color:'lavender'},

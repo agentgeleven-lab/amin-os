@@ -101,3 +101,35 @@ test('chatExcerpt keeps the latest messages and skips system noise', () => {
     assert.ok(excerpt.every(m => !m.text.includes('噪音')));
     assert.deepEqual(chatExcerpt({}), []);
 });
+
+test('parseUpdate passes through cause and neutral event types', () => {
+    const { update, reason } = parseUpdate('[FACTION_UPDATE]\n{"note":"联盟谈判","transfers":[{"region":"码头","to":"商会","cause":"purchase"}],"populationDelta":[{"region":"码头","type":"migration","ratio":-0.2}],"conditionDelta":[{"region":"码头","type":"disaster","delta":-30}],"metricDelta":[{"faction":"商会","key":"现金","type":"development","delta":10}]}\n[/FACTION_UPDATE]');
+    assert.equal(reason, null);
+    assert.equal(update.transfers[0].cause, 'purchase');
+    assert.equal(update.populationDelta[0].type, 'migration');
+    assert.equal(update.conditionDelta[0].type, 'disaster');
+    assert.equal(update.metricDelta[0].type, 'development');
+    const legacy = parseUpdate('[FACTION_UPDATE]\n{"transfers":[{"region":"码头","to":"商会"}]}\n[/FACTION_UPDATE]');
+    assert.equal(legacy.update.transfers[0].cause, undefined, '未给 cause 不硬填，由规则层兼容判定');
+    const bad = parseUpdate('[FACTION_UPDATE]\n{"transfers":[{"region":"码头","to":"商会","cause":"魔法"}]}\n[/FACTION_UPDATE]');
+    assert.equal(bad.update.transfers[0].cause, undefined, '非法 cause 丢弃');
+});
+
+test('followProtocol and review prompts speak general dynamics, not only war', () => {
+    const campaign = createCampaign({ scaleTemplate: 'interstate' });
+    campaign.factions.push(createFaction(campaign, { name: '北朝' }));
+    campaign.regions.push(createRegion(campaign, { name: '北省', controller: campaign.factions[0].id }));
+    const protocol = followProtocol(campaign);
+    assert.ok(protocol.includes('purchase|merge|handover'));
+    assert.ok(/结盟|交恶|迁徙|灾害/.test(protocol), '提到非战争演变');
+    assert.ok(protocol.includes('北朝'));
+});
+
+test('parseReview proposals carry cause and type through to updates', () => {
+    const { proposals, reason } = parseReview('{"summary":"谈判年","proposals":[{"kind":"transfer","region":"北省","to":"北朝","cause":"handover","reason":"和约移交"},{"kind":"metric","faction":"北朝","key":"manpower","type":"diplomacy","delta":5}]}');
+    assert.equal(reason, null);
+    const update = proposalsToUpdate(proposals);
+    assert.equal(update.transfers[0].cause, 'handover');
+    assert.equal(update.transfers[0].note, '和约移交');
+    assert.equal(update.metricDelta[0].type, 'diplomacy');
+});

@@ -154,5 +154,50 @@ test('tickPeace recovers condition, clears war tally and maintains tags', () => 
     assert.equal(healed.regions[0].condition, 100);
     assert.deepEqual(healed.regions[0].statusTags, []);
     const idle = tickPeace(healed);
-    assert.deepEqual(idle.events, [], '满状况时不产生战报');
+    assert.deepEqual(idle.events, [], '满状况时不产生纪事');
+});
+
+test('non-conquest transfers change ownership without collateral damage', () => {
+    const campaign = board();
+    const { campaign: bought, events } = applyUpdate(campaign, { transfers: [{ region: '东城', to: '乙', cause: 'purchase' }] });
+    const region = bought.regions[0];
+    assert.equal(region.controller, bought.factions[1].id);
+    assert.equal(region.population, 1000, '购买不动人口');
+    assert.equal(region.condition, 100, '不动状况');
+    assert.equal(region.warTally, 0);
+    assert.deepEqual(region.statusTags, []);
+    assert.equal(events[0].deltas.cause, 'purchase');
+    assert.ok(events[0].description.includes('购买'), '自动描述含变更方式：' + events[0].description);
+    assert.ok(!('intensity' in events[0].deltas), '非征服不携带烈度');
+    for (const cause of ['merge', 'handover', 'other']) {
+        const { campaign: next } = applyUpdate(campaign, { transfers: [{ region: '东城', to: '乙', cause }] });
+        assert.equal(next.regions[0].population, 1000);
+        assert.equal(next.regions[0].condition, 100);
+        assert.equal(next.regions[0].controller, next.factions[1].id);
+    }
+});
+
+test('legacy transfers without cause keep conquest settlement', () => {
+    const campaign = board();
+    const { campaign: next } = applyUpdate(campaign, { transfers: [{ region: '东城', to: '乙', intensity: 'medium', battleType: 'field' }] });
+    const region = next.regions[0];
+    assert.equal(region.controller, next.factions[1].id);
+    assert.equal(region.population, 880, '未给 cause 但带烈度 → 按征服结算');
+    assert.equal(region.condition, 86);
+    assert.equal(region.warTally, 1);
+});
+
+test('neutral event types flow through delta channels', () => {
+    const campaign = board();
+    const { campaign: next, events } = applyUpdate(campaign, {
+        populationDelta: [{ region: '东城', type: 'migration', ratio: -0.2, note: '难民涌入' }],
+        conditionDelta: [{ region: '东城', type: 'disaster', delta: -30 }],
+        metricDelta: [{ faction: '甲', key: 'cash', type: 'diplomacy', delta: 10 }],
+    });
+    assert.deepEqual(events.map(e => e.type), ['migration', 'disaster', 'diplomacy']);
+    assert.equal(next.regions[0].population, 1200, '1000 × 1.2');
+    assert.equal(next.regions[0].condition, 70);
+    assert.equal(next.factions[0].metrics.find(m => m.key === 'cash').value, 60);
+    const plain = applyUpdate(campaign, { conditionDelta: [{ region: '东城', type: 'nonsense', delta: -10 }] });
+    assert.equal(plain.events[0].type, 'condition', '未知 type 回退通道默认');
 });

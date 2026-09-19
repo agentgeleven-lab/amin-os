@@ -1,7 +1,7 @@
 import { getAI } from '../../ai/service.js';
 import { getSharedFactions } from './service.js';
 import { createCampaign, createFaction, createRegion, territoryCount } from './model.js';
-import { normalizeRules, applyUpdate, tickPeace, describeDelta, TYPE_LABELS, INTENSITIES, BATTLE_TYPES } from './rules.js';
+import { normalizeRules, applyUpdate, tickPeace, describeDelta, TYPE_LABELS, INTENSITIES, BATTLE_TYPES, CAUSES, CAUSE_LABELS } from './rules.js';
 import { templateList, template } from './templates.js';
 import { requestFactions, parseBoard, parseReview, proposalsToUpdate } from './ai.js';
 
@@ -31,7 +31,7 @@ export function mount(target) {
     function button(parent, label, fn, primary = false) { const b = el('button', label, primary ? 'amin-primary' : ''); b.type = 'button'; b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { say(e.message); } finally { b.disabled = false; } }; parent.append(b); return b; }
     function field(parent, label, value = '', multiline = false) { const row = el('label', label); const input = el(multiline ? 'textarea' : 'input'); input.value = String(value ?? ''); input.setAttribute('aria-label', label); if (multiline) input.rows = 3; row.append(input); parent.append(row); return input; }
     function numberField(parent, label, value, attrs = {}) { const input = field(parent, label, value); input.type = 'number'; for (const [k, v] of Object.entries(attrs)) input[k] = v; return input; }
-    function select(parent, label, options) { const row = el('label', label); const input = el('select'); input.setAttribute('aria-label', label); for (const [value, text] of options) { const o = el('option', text); o.value = value; input.append(o); } row.append(input); parent.append(row); return input; }
+    function select(parent, label, options, value) { const row = el('label', label); const input = el('select'); input.setAttribute('aria-label', label); for (const [v, text] of options) { const o = el('option', text); o.value = v; input.append(o); } if (value !== undefined && [...input.options].some(o => o.value === value)) input.value = value; row.append(input); parent.append(row); return input; }
     const card = title => { const c = el('section', null, 'amin-card'); if (title) c.append(el('h3', title)); body.append(c); return c; };
     const finish = text => { preview = null; render(); say(text); };
 
@@ -190,7 +190,7 @@ export function mount(target) {
             item.append(bar(r.condition, 100, faction?.color));
             if (r.statusTags.length) { const tags = el('p'); for (const t of r.statusTags) tags.append(el('span', t, 'amin-fx-tag')); item.append(tags); }
             const tools = el('div', null, 'amin-toolbar'); item.append(tools);
-            button(tools, '易主 / 战斗', () => battleForm(r));
+            button(tools, '版图变更', () => battleForm(r));
             button(tools, '编辑', () => regionForm(r));
             grid.append(item);
         }
@@ -199,15 +199,20 @@ export function mount(target) {
 
     function battleForm(region) {
         const c = current();
-        const form = card('易主 / 战斗 · ' + region.name);
-        form.append(el('p', '选择新归属与烈度，人口与状况由规则引擎按当前棋局参数结算。'));
-        const to = select(form, '易主给', [...c.factions.map(f => [f.id, f.name]), ['', '无主']], region.controller ?? '');
-        const intensity = select(form, '烈度', INTENSITIES.map(i => [i, INTENSITY_NAMES[i]]));
-        const battleType = select(form, '战斗类型', BATTLE_TYPES.map(t => [t, BATTLE_NAMES[t]]));
+        const form = card('版图变更 / 动态结算 · ' + region.name);
+        form.append(el('p', '选择新归属与变更方式；征服类变更按烈度结算人口与状况，其余方式只变更归属。'));
+        const to = select(form, '新归属势力', [...c.factions.map(f => [f.id, f.name]), ['', '无主']], region.controller ?? '');
+        const cause = select(form, '变更方式', CAUSES.map(x => [x, CAUSE_LABELS[x]]), 'conquest');
+        const intensity = select(form, '征服烈度', INTENSITIES.map(i => [i, INTENSITY_NAMES[i]]));
+        const battleType = select(form, '征服类型', BATTLE_TYPES.map(t => [t, BATTLE_NAMES[t]]));
+        const sync = () => { const war = cause.value === 'conquest'; intensity.closest('label').hidden = !war; battleType.closest('label').hidden = !war; };
+        cause.onchange = sync; sync();
         const note = field(form, '事件备注（可空）', '');
         const toolbar = el('div', null, 'amin-toolbar'); form.append(toolbar);
         button(toolbar, '结算并保存', () => {
-            const result = applyUpdate(c, { transfers: [{ region: region.name, to: to.value || '无主', intensity: intensity.value, battleType: battleType.value, note: note.value.trim() }] });
+            const patch = { region: region.name, to: to.value || '无主', cause: cause.value, note: note.value.trim() };
+            if (cause.value === 'conquest') { patch.intensity = intensity.value; patch.battleType = battleType.value; }
+            const result = applyUpdate(c, { transfers: [patch] });
             const miss = result.rejected.filter(r => r.kind === '地区' || r.kind === '势力');
             api.saveCampaign(result.campaign); render();
             say('已结算' + (miss.length ? '；未识别：' + miss.map(r => r.ref).join('、') : ''));
@@ -242,7 +247,7 @@ export function mount(target) {
     }
 
     function drawHistory(c) {
-        if (!c.history.length) { body.append(el('p', '还没有战报。易主、战斗、盘点确认后都会记录在这里。')); return; }
+        if (!c.history.length) { body.append(el('p', '还没有纪事。版图变更、动态结算、盘点确认后都会记录在这里。')); return; }
         const list = el('ol', null, 'amin-fx-time'); body.append(list);
         for (const e of [...c.history].reverse()) {
             const item = el('li');
@@ -258,15 +263,15 @@ export function mount(target) {
     function drawSettings(c) {
         const form = card('棋局参数 · ' + c.name);
         const tpl = template(c.scaleTemplate);
-        form.append(el('p', '模板：' + tpl?.name + '（' + tpl?.blurb + '）。以下系数即时影响后续结算，已保存的战报不变。'));
+        form.append(el('p', '模板：' + tpl?.name + '（' + tpl?.blurb + '）。征服结算系数即时生效，已保存的纪事不变；非征服变更不使用这些系数。'));
         const rules = normalizeRules(c.rulesConfig);
         const inputs = {};
-        for (const i of INTENSITIES) inputs['intensity.' + i] = numberField(form, '烈度系数 · ' + INTENSITY_NAMES[i] + '（人口损失比例 0–1）', rules.intensity[i], { min: 0, max: 1, step: 0.01 });
-        for (const t of BATTLE_TYPES) inputs['battleType.' + t] = numberField(form, '战斗类型系数 · ' + BATTLE_NAMES[t] + '（0–3）', rules.battleType[t], { min: 0, max: 3, step: 0.05 });
-        for (const i of INTENSITIES) inputs['conditionLoss.' + i] = numberField(form, '状况扣减 · ' + INTENSITY_NAMES[i] + '（0–100）', rules.conditionLoss[i], { min: 0, max: 100 });
+        for (const i of INTENSITIES) inputs['intensity.' + i] = numberField(form, '征服烈度 · ' + INTENSITY_NAMES[i] + '（战乱人口损失比例 0–1）', rules.intensity[i], { min: 0, max: 1, step: 0.01 });
+        for (const t of BATTLE_TYPES) inputs['battleType.' + t] = numberField(form, '征服类型系数 · ' + BATTLE_NAMES[t] + '（0–3）', rules.battleType[t], { min: 0, max: 3, step: 0.05 });
+        for (const i of INTENSITIES) inputs['conditionLoss.' + i] = numberField(form, '征服状况扣减 · ' + INTENSITY_NAMES[i] + '（0–100）', rules.conditionLoss[i], { min: 0, max: 100 });
         inputs.desolationThreshold = numberField(form, '荒芜阈值：状况低于此值挂「荒芜」（0–100）', rules.desolationThreshold, { min: 0, max: 100 });
         inputs.plagueThreshold = numberField(form, '瘟疫阈值：状况不高于此值挂「瘟疫」（0–100）', rules.plagueThreshold, { min: 0, max: 100 });
-        inputs.plagueWarCount = numberField(form, '连续战乱次数达到即挂「瘟疫」（1–10）', rules.plagueWarCount, { min: 1, max: 10 });
+        inputs.plagueWarCount = numberField(form, '连续战乱/冲击次数达到即挂「瘟疫」（1–10）', rules.plagueWarCount, { min: 1, max: 10 });
         inputs.recoveryPerTurn = numberField(form, '休养生息每次恢复状况（0–20）', rules.recoveryPerTurn, { min: 0, max: 20 });
         const toolbar = el('div', null, 'amin-toolbar'); form.append(toolbar);
         button(toolbar, '保存参数', () => {
@@ -286,7 +291,7 @@ export function mount(target) {
         check.onchange = () => { try { api.setFollow(check.checked); say(check.checked ? '已开启增量跟随' : '已关闭增量跟随'); } catch (e) { say(e.message); check.checked = !check.checked; } };
         const danger = card('危险操作');
         const tools = el('div', null, 'amin-toolbar'); danger.append(tools);
-        button(tools, '删除当前棋局', () => { if (confirm('删除棋局「' + c.name + '」？战报一并删除。')) { api.deleteCampaign(c.id); render(); say('棋局已删除'); } });
+        button(tools, '删除当前棋局', () => { if (confirm('删除棋局「' + c.name + '」？纪事一并删除。')) { api.deleteCampaign(c.id); render(); say('棋局已删除'); } });
     }
 
     async function runAI(mode, options = {}) {
@@ -327,7 +332,7 @@ export function mount(target) {
         const c = current();
         if (!c || wizard) { tabs.hidden = true; drawWizard(); return; }
         tabs.hidden = false;
-        for (const name of ['势力榜', '地区网格', '战报时间线', '沙盘设置']) {
+        for (const name of ['势力榜', '地区网格', '动态纪事', '沙盘设置']) {
             const b = el('button', name); b.type = 'button';
             if (name === selected) b.setAttribute('aria-selected', 'true'); else b.setAttribute('aria-selected', 'false');
             b.onclick = () => { selected = name; render(); };
@@ -335,7 +340,7 @@ export function mount(target) {
         }
         if (selected === '势力榜') drawFactions(c);
         else if (selected === '地区网格') drawRegions(c);
-        else if (selected === '战报时间线') drawHistory(c);
+        else if (selected === '动态纪事') drawHistory(c);
         else drawSettings(c);
     }
 
