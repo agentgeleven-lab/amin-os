@@ -15,5 +15,14 @@ export async function waitForService(config,{signal,request=fetch,pause=delay,at
   if(h){if(h.app!==target.app)throw Error('端口被其他服务占用，请检查本机服务');if(config.provider==='mimo'&&h.rvc_model!=='DXL1.pth')throw Error('服务未配置 DXL1');if(config.provider==='mimo'||h.ready)return h;}
   await pause(1000,signal);
  }
- throw Error('尚未连接。请确认已安装 Amin 语音启动器，并允许系统打开；也可用原来的启动试听.cmd。');
+ throw Error('尚未连接。当前前端可能未放行系统启动链接。请在 Windows 上运行模型目录内的启动试听.cmd，再点击“检查配置”；手机无法用此按钮启动电脑服务。');
+}
+
+// Custom protocols must be dispatched in the active user gesture, not a new
+// WebView: desktop hosts may silently discard window.open(customScheme).
+export function dispatchLaunch(config, location=globalThis.window?.location){
+ const target=launchTarget(config);
+ if(!location||typeof location.assign!=='function')throw Error('当前前端无法打开系统启动器，请使用电脑上的启动试听.cmd。');
+ location.assign(target.uri);
+ return target;
 }

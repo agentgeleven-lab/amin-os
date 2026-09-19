@@ -1,6 +1,6 @@
 import {audioLibrary} from './library.js';
 import {EMOTIONS,speedMax} from './emotions.js';
-import {launchTarget,waitForService} from './launcher.js';
+import {launchTarget,waitForService,dispatchLaunch} from './launcher.js';
 import {isCloud,BASE_VOICE} from './cloud.js';
 import {getPlayer,scopedPlayer,settings,saveSettings,health} from './service.js';
 import {previewSections,profiles} from './dialogue.js';
@@ -30,7 +30,7 @@ export function mount(target,{readMessage=null,source='app'}={}){
  const launch=button(localBar,'启动本地服务',async()=>{try{
   const config=collect(),destination=launchTarget(config);launchController?.abort();launchController=new AbortController();const signal=launchController.signal;
   // Dispatch within the click gesture. No credentials or arbitrary commands enter the URI.
-  window.open(destination.uri,'_blank','noopener,noreferrer');launch.disabled=true;status.textContent='已请求启动，请允许系统打开启动器，正在等待连接…';
+  dispatchLaunch(config);launch.disabled=true;status.textContent='已请求启动，请允许系统打开启动器，正在等待连接…';
   const h=await waitForService(config,{signal});status.textContent=config.provider==='mimo'&&!h.key_configured?'DXL1 服务已启动；点击“打开本地配置页”填写 MiMo 密钥。':'本地服务已连接，可以播放';
  }catch(e){if(e.name!=='AbortError')status.textContent=e.message;}finally{launch.disabled=false;}});
  button(localBar,'打开本地配置页',()=>{try{window.open(launchTarget(collect()).base,'_blank','noopener,noreferrer');}catch(e){status.textContent=e.message;}});
