@@ -5,7 +5,7 @@ const executable=process.env.AMIN_BROWSER||'C:/Program Files (x86)/Microsoft/Edg
 if(!fs.existsSync(executable))throw Error('Set AMIN_BROWSER to a Chromium executable');
 const profile=fs.mkdtempSync(path.join(os.tmpdir(),'amin-org-browser-'));
 const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui/standard.css"><style>body{margin:0;font:14px sans-serif;background:#202020;color:white;--amin-card:#292929;--amin-line:#666;--amin-text:white;--amin-muted:#ccc;--amin-gap:10px;--amin-font:13px;--amin-radius:6px;--amin-control:#333;--amin-accent:#7bbad3;--amin-ink:#111}#app{width:448px;max-width:100%;box-sizing:border-box;padding:10px}button,input,select,textarea{font:inherit}textarea{width:100%}</style></head><body><div id="amin-os"><div id="app" class="amin-ui"></div></div></body></html>`;
-const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://localhost');if(url.pathname==='/'){res.setHeader('content-type','text/html');res.end(html);return;}const file=path.resolve(root,'.'+decodeURIComponent(url.pathname));if(!file.startsWith(root+path.sep)){res.statusCode=403;res.end();return;}try{res.setHeader('content-type',file.endsWith('.css')?'text/css':'text/javascript');res.end(fs.readFileSync(file));}catch{res.statusCode=404;res.end();}});
+const server=http.createServer((req,res)=>{const url=new URL(req.url,'http://localhost');if(url.pathname==='/'){res.setHeader('content-type','text/html');res.end(html);return;}if(url.pathname==='/scripts/variables.js'){res.setHeader('content-type','text/javascript');res.end("export function setLocalVariable(k,v){const c=globalThis.SillyTavern.getContext();c.chatMetadata.variables??={};c.chatMetadata.variables[k]=v;c.saveMetadataDebounced?.();}");return;}const file=path.resolve(root,'.'+decodeURIComponent(url.pathname));if(!file.startsWith(root+path.sep)){res.statusCode=403;res.end();return;}try{res.setHeader('content-type',file.endsWith('.css')?'text/css':'text/javascript');res.end(fs.readFileSync(file));}catch{res.statusCode=404;res.end();}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const child=spawn(executable,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:'ignore'});
 let socket;const errors=[];const pending=new Map();let seq=0;
@@ -52,5 +52,11 @@ try{
  const layout=await evaluate('({scroll:document.documentElement.scrollWidth,width:innerWidth})');assert.equal(layout.width,390);assert.ok(layout.scroll<=layout.width,'narrow page overflows: '+JSON.stringify(layout));
  if(process.env.AMIN_SCREENSHOT){const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.mkdirSync(path.dirname(process.env.AMIN_SCREENSHOT),{recursive:true});fs.writeFileSync(process.env.AMIN_SCREENSHOT,Buffer.from(shot.data,'base64'));}
  assert.deepEqual(errors,[]);console.log('PASS real Chromium DOM: repeated tabs/mount, draft preservation, edit/preview/confirm/cancel, locks, AI updates, private assessments, rules, historical read-only, 390px layout.');
- await evaluate('h.api.dispose()');await send('Browser.close').catch(()=>{});
+ await evaluate('h.api.dispose()');
+ for(const managed of [false,true]){
+  await send('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/?floor='+managed});
+  let loaded=false;for(let i=0;i<100;i++){try{loaded=await evaluate('location.search==="?floor='+managed+'"&&document.readyState==="complete"&&!!document.getElementById("app")');}catch{}if(loaded)break;await delay(50);}assert.ok(loaded,'floor fixture did not load');
+  console.log(await evaluate('(async()=>{const m=await import("/apps/organizations/scripts/floor-browser.mjs");return m.runFloorBrowserChecks({managed:'+managed+'});})()'));
+ }
+ assert.deepEqual(errors,[]);await send('Browser.close').catch(()=>{});
 }finally{socket?.close();child.kill();await new Promise(r=>server.close(r));}

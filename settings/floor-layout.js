@@ -5,7 +5,7 @@ export function mountFloorControl(element,id,host,button,document=globalThis.doc
  let row=rows.get(element);
  if(!row){const root=document.createElement('div'),toolbar=document.createElement('div');root.className='amin-floor';toolbar.className='amin-floor-toolbar';toolbar.setAttribute('role','group');toolbar.setAttribute('aria-label','楼层应用');root.append(toolbar);(element.querySelector('.mes_block')??element).append(root);row={root,toolbar,items:new Set(),opened:[]};rows.set(element,row);}
  host.dataset.floorApp=id;button.dataset.floorApp=id;row.toolbar.append(button);row.root.append(host);
- const item={id,button,visible:true,open:false,host};row.items.add(item);for(const i of [...row.items].sort((a,b)=>["map","status","reply","effects","information","worldbooks","tts"].indexOf(a.id)-["map","status","reply","effects","information","worldbooks","tts"].indexOf(b.id)))row.toolbar.append(i.button);
+ const item={id,button,visible:true,open:false,host};row.items.add(item);for(const i of [...row.items].sort((a,b)=>["map","status","organizations","reply","effects","information","worldbooks","tts"].indexOf(a.id)-["map","status","organizations","reply","effects","information","worldbooks","tts"].indexOf(b.id)))row.toolbar.append(i.button);
  const reorder=()=>{for(const i of [...row.opened,...[...row.items].filter(x=>!x.open)]){if(i.host.style)i.host.style.order=String(i.open?row.opened.indexOf(i)+1:row.items.size+1);row.root.append(i.host);}};
  function setOpen(value){if(value===item.open)return;item.open=value;row.opened=row.opened.filter(x=>x!==item);if(value)row.opened.push(item);reorder();}
  const reflect=()=>{

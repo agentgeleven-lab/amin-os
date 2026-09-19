@@ -1,3 +1,4 @@
+import {mount as mountOrganizations} from './organizations/view.js';
 import {readRenderedMessage} from './tts/rendered-text.js';
 import {mount as mountTTS} from './tts/view.js';
 import {mount as mountInformation} from './information/view.js';
@@ -7,7 +8,7 @@ import {mountFloorControl} from '../settings/floor-layout.js';
 
 export function installExtraFloorButtons(id){
  const getContext=()=>globalThis.SillyTavern?.getContext?.(),mounted=new Map(),owned=new Set();let queued=false;
- const apps={tts:{title:'语音朗读',icon:'▷ ',mount:mountTTS},effects:{title:'能力面板',icon:'✦ ',mount:mountEffects},information:{title:'信息面板',icon:'▤ ',mount:mountInformation},worldbooks:{title:'世界书管理',icon:'▥ ',mount:mountWorldbooks}};
+ const apps={organizations:{title:'势力概览',icon:'◎ ',mount:mountOrganizations},tts:{title:'语音朗读',icon:'▷ ',mount:mountTTS},effects:{title:'能力面板',icon:'✦ ',mount:mountEffects},information:{title:'信息面板',icon:'▤ ',mount:mountInformation},worldbooks:{title:'世界书管理',icon:'▥ ',mount:mountWorldbooks}};
  const app=apps[id];if(!app)throw Error('未知楼层应用：'+id);const titleText=app.title,mountApp=app.mount;
  const key=ctx=>JSON.stringify([ctx?.getCurrentChatId?.()??ctx?.chatId,ctx?.characterId,ctx?.groupId]);
  const node=(tag,cls,text)=>{const e=document.createElement(tag);e.className=cls;if(text)e.textContent=text;return e;};
