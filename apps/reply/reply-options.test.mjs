@@ -23,8 +23,8 @@ test('strict output count preserves direction slots and rejects missing, excess 
 test('generation uses sampled directions and rejects undersized result',async()=>{let prompt;const ctx={worldInfoSettings:{},chat:[{mes:'hi'}],generateRaw:async args=>{prompt=args.prompt;return '["A","B","C"]';}};const r=await generateOptions(ctx,{count:3,directions:'追问'});assert.deepEqual(r.map(x=>x.label),['追问','追问','追问']);assert.ok(prompt.includes('["追问","追问","追问"]'));ctx.generateRaw=async()=> '["A","B"]';await assert.rejects(generateOptions(ctx,{count:3,directions:'追问'}),/恰好 3/);});
 import { perspectiveInstruction } from './generator.js';
 test('perspective settings migrate, persist values and bound custom names',()=>{assert.equal(normalizeSettings({}).perspective,'auto');assert.equal(normalizeSettings({perspective:'bad'}).perspective,'auto');const s=normalizeSettings({perspective:'third',thirdPersonName:'  小明  '});assert.equal(s.perspective,'third');assert.equal(s.thirdPersonName,'小明');assert.equal(normalizeSettings({thirdPersonName:'x'.repeat(200)}).thirdPersonName.length,100);});
-test('perspective instructions distinguish player from partner and preserve quoted speech',()=>{assert.match(perspectiveInstruction({perspective:'first'},{userName:'玩家'}),/我停下脚步/);assert.match(perspectiveInstruction({perspective:'second'},{userName:'玩家'}),/你停下脚步/);const custom=perspectiveInstruction({perspective:'third',thirdPersonName:'林风'},{userName:'玩家'});assert.match(custom,/林风/);assert.match(custom,/不要机械替换对白/);const inferred=perspectiveInstruction({perspective:'third'},{userName:'备用名字'});assert.match(inferred,/最近上文/);assert.match(inferred,/备用名字/);assert.match(inferred,/不得误用对方/);});
-test('normal generation and draft rewrite both send selected perspective to host',async()=>{const requests=[];const ctx={worldInfoSettings:{},name1:'玩家',chat:[{is_user:true,mes:'林风走近门口。'}],generateRaw:async a=>{requests.push(a);return '["回复A","回复B"]';}};await generateOptions(ctx,{count:2,perspective:'third',thirdPersonName:'林风'});await generateOptions(ctx,{count:2,perspective:'second'},{draft:'我准备离开'});assert.ok(requests[0].prompt.includes('用户角色的指定名字为 "林风"'));assert.ok(requests[1].prompt.includes('你停下脚步'));assert.ok(requests[1].prompt.includes('我准备离开'));assert.ok(requests.every(r=>r.prompt.includes('直接引语')));});
+test('perspective instructions distinguish player from partner and preserve quoted speech',()=>{assert.match(perspectiveInstruction({perspective:'first'},{userName:'玩家'}),/我停下脚步/);assert.match(perspectiveInstruction({perspective:'second'},{userName:'玩家'}),/你停下脚步/);const custom=perspectiveInstruction({perspective:'third',thirdPersonName:'林风'},{userName:'玩家'});assert.match(custom,/林风/);assert.match(custom,/不要机械替换对白/);const inferred=perspectiveInstruction({perspective:'third'},{userName:'备用名字'});assert.match(inferred,/备用名字/);assert.match(inferred,/不替其他角色决定行动/);});
+test('normal generation and draft rewrite both send selected perspective to host',async()=>{const requests=[];const ctx={worldInfoSettings:{},name1:'玩家',chat:[{is_user:true,mes:'林风走近门口。'}],generateRaw:async a=>{requests.push(a);return '["回复A","回复B"]';}};await generateOptions(ctx,{count:2,perspective:'third',thirdPersonName:'林风'});await generateOptions(ctx,{count:2,perspective:'second'},{draft:'我准备离开'});assert.ok(requests[0].prompt.includes('回复主体："林风"'));assert.ok(requests[1].prompt.includes('你停下脚步'));assert.ok(requests[1].prompt.includes('我准备离开'));assert.ok(requests.every(r=>r.prompt.includes('直接引语')));});
 
 
 test('writing modes preserve separate requirements and migrate old settings to roleplay',()=>{
@@ -81,4 +81,16 @@ test('content styles migrate NSFW and send only selected style in either writing
   const s=normalizeSettings({...prompts,writingMode,contentMode,count:2});assert.equal(normalizeSettings(JSON.parse(JSON.stringify(s))).contentMode,contentMode);
   await generateOptions(ctx,s,{world:[]});const system=requests.at(-1).systemPrompt;assert.ok(system.includes(texts[i]));for(const other of texts.filter(t=>t!==texts[i]))assert.ok(!system.includes(other));
  }
+});
+
+
+test('any named story character is the subject for every perspective and draft generation',async()=>{
+ const requests=[];const ctx={name1:'玩家',chat:[{name:'守卫',mes:'守卫拦住旅人。'}],generateRaw:async r=>{requests.push(r);return '["A","B"]';}};
+ for(const perspective of ['auto','first','second','third'])for(const draft of ['', '转身离开'])await generateOptions(ctx,{subjectName:'守卫',perspective,count:2,style:'action'},{world:[],draft});
+ for(const r of requests){assert.match(r.systemPrompt,/回复主体："守卫"/);assert.match(r.prompt,/回复主体："守卫"/);assert.doesNotMatch(r.prompt,/用户一方|以用户的动作/);}
+ assert.equal(normalizeSettings({subjectName:'  守卫  '}).subjectName,'守卫');
+ assert.equal(normalizeSettings({subjectName:'x'.repeat(120)}).subjectName.length,100);
+ assert.equal(normalizeSettings({perspective:'third',thirdPersonName:'林风'}).subjectName,'林风');
+ assert.equal(normalizeSettings({roleplaySystemPrompt:'我的自定义提示'}).roleplaySystemPrompt,'我的自定义提示');
+ assert.match(normalizeSettings({roleplaySystemPrompt:'你是用户的回复拟稿助手。为用户本人拟写下一条消息，不替其他角色决定行动。'}).roleplaySystemPrompt,/任何角色/);
 });
