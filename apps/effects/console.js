@@ -6,7 +6,7 @@ export function reorder(skills,id,target,after=false){
  if(!from||!to||id===target)return next;
  from.ui={...appearance(from),group:appearance(to).group};const rest=next.filter(s=>s.id!==id),i=rest.findIndex(s=>s.id===target);rest.splice(i+(after?1:0),0,from);return rest;
 }
-export function renderConsole({body,api,state,say,render,manage,adjust,end}){
+export function renderConsole({body,api,state,say,render,manage,adjust,end,remove}){
  const store=api.read(),ctx=api.context(),token=api.capture();
  const effects=activeEffects(store,ctx.chat),skills=store.skills.filter(s=>s.ui?.hidden!==true);
  const button=(parent,text,action,cls='')=>{const b=el('button',text,cls);b.type='button';b.onclick=async()=>{b.disabled=true;try{await action();}catch(e){say(e.message);}finally{b.disabled=false;}};parent.append(b);return b;};
@@ -47,7 +47,7 @@ export function renderConsole({body,api,state,say,render,manage,adjust,end}){
  function refreshEffects(){effectList.replaceChildren();for(const tile of body.querySelectorAll('[data-ability]')){const count=effects.filter(e=>e.skill.id===tile.dataset.ability&&e.target===state.target&&!e.paused).length;tile.querySelector('.amin-ability-launch small').textContent=count?'生效中 · '+count:'点击发动';}
  const current=effects.filter(e=>!state.target||e.target===state.target);effectList.append(el('h3','当前效果 · '+current.length));
  if(!current.length)effectList.append(el('p','该目标还没有持续效果。'));
- for(const e of current){const c=el('section',null,'amin-card');c.append(el('h3',e.skill.name+(e.paused?' · 已暂停':'')),el('p',e.target+' · '+e.scope),el('p',e.command||'未指定指令'));const actions=el('div',null,'amin-toolbar');c.append(actions);button(actions,'调整指令',()=>adjust(e));button(actions,e.paused?'恢复':'暂停',async()=>{await api.save(token,s=>change(s,api.context().chat,'pause',{id:e.id,paused:!e.paused}));render();});button(actions,'解除',()=>end(e));effectList.append(c);}
+ for(const e of current){const c=el('section',null,'amin-card');c.append(el('h3',e.skill.name+(e.paused?' · 已暂停':'')),el('p',e.target+' · '+e.scope),el('p',e.command||'未指定指令'));const actions=el('div',null,'amin-toolbar');c.append(actions);button(actions,'调整指令',()=>adjust(e));button(actions,e.paused?'恢复':'暂停',async()=>{await api.save(token,s=>change(s,api.context().chat,'pause',{id:e.id,paused:!e.paused}));render();});button(actions,'解除',()=>end(e));button(actions,'删除生效记录',()=>remove(e));effectList.append(c);}
  }
  refreshEffects();
  function launch(skill){

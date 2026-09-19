@@ -49,3 +49,18 @@ test('regeneration never receives effects from the assistant reply being replace
  f.handlers.start('regenerate');assert.equal(f.prompts.get(PROMPT_KEY),'');
  f.handlers.start('swipe');assert.equal(f.prompts.get(PROMPT_KEY),'');
 });
+
+test('delete active effect needs no reason, stops injection, preserves library and other effects across reload',()=>{
+ const c=chat();let state=change(seed(),c,'create',data);const first=activeEffects(state,c)[0];
+ state=change(state,c,'create',{...data,target:'其他目标',command:'保持原状'});
+ const next=change(state,c,'delete',{id:first.id}),loaded=JSON.parse(JSON.stringify(next));
+ assert.equal(activeEffects(loaded,c).length,1);assert.equal(activeEffects(loaded,c)[0].target,'其他目标');
+ assert.doesNotMatch(compile(loaded,c),/黑暗/);assert.match(compile(loaded,c),/保持原状/);assert.deepEqual(loaded.skills,state.skills);assert.equal(activeEffects(state,c).length,2);
+ assert.throws(()=>change(loaded,c,'delete',{id:first.id}),/失效/);
+ const remaining=activeEffects(loaded,c)[0];assert.equal(compile(change(loaded,c,'delete',{id:remaining.id}),c),'');
+});
+test('effect deletion follows branch and floor history like other effect operations',()=>{
+ const c=chat(),state=change(seed(),c,'create',data),id=activeEffects(state,c)[0].id,later=[...c,{mes:'后续'}];
+ const removed=change(state,later,'delete',{id});assert.equal(activeEffects(removed,later).length,0);
+ assert.equal(activeEffects(removed,c).length,1);assert.equal(activeEffects(removed,[...c,{mes:'其他分支'}]).length,1);
+});

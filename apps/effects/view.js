@@ -63,6 +63,7 @@ export function mount(target){
   const command=field(c,'当前指令',effect?.command??'',true),condition=field(c,'持续或解除条件',effect?.condition??'直到主动解除或转让；其他条件按技能规则人工确认。',true);
   button(c,'确认保存',async()=>{await api.save(token,s=>change(s,api.context().chat,effect?'update':'create',{id:effect?.id,skillId:skill?.value,holder:holder.value,target:targetField.value,scope:scope.value,command:command.value,condition:condition.value}));finish('生效记录已保存');},true);button(c,'取消',render);
  }
+ function deleteEffect(effect){const token=api.capture();return api.save(token,s=>change(s,api.context().chat,'delete',{id:effect.id})).then(()=>finish('已删除此生效记录，不再发送该效果；能力库保留'));}
  function endForm(effect){const token=api.capture();body.replaceChildren();const c=card('解除：'+effect.target+' / '+effect.scope),reason=field(c,'解除依据','',true);button(c,'确认解除',async()=>{await api.save(token,s=>change(s,api.context().chat,'end',{id:effect.id,reason:reason.value}));finish('已解除此项效果');},true);button(c,'取消',render);}
  function splitForm(effect){const token=api.capture();body.replaceChildren();const c=card('分割：'+effect.target+' / '+effect.scope);c.append(node('p','每行填写“作用层面 | 持有者”。保存后原关系结束，由子记录接替；请完整列出需要保留的范围。'));
   const parts=field(c,'分割与分配','',true);button(c,'确认分割',async()=>{const rows=parts.value.split('\n').filter(x=>x.trim()).map(x=>x.split('|').map(v=>v.trim()));if(rows.length<2||rows.some(x=>x.length!==2||!x[0]||!x[1]))throw Error('至少填写两行，格式为：右手 | 持有者');await api.save(token,s=>splitEffect(s,api.context().chat,effect.id,rows.map(([scope,holder])=>({scope,holder}))));finish('已分割，子记录保留原规则快照');},true);button(c,'取消',render);
@@ -73,7 +74,7 @@ export function mount(target){
   for(const b of tabButtons){const on=b.textContent===selected;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;if(on)body.setAttribute('aria-labelledby',b.id);}
   body.replaceChildren();target.scrollTop=0;status.textContent=api.status();
   try{const store=api.read(),chat=api.context()?.chat??[];
-   if(selected==='能力面板'){renderConsole({body,api,state:consoleState,say,render,manage:()=>{selected='能力管理';render();},adjust:effectForm,end:endForm});
+   if(selected==='能力面板'){renderConsole({body,api,state:consoleState,say,render,manage:()=>{selected='能力管理';render();},adjust:effectForm,end:endForm,remove:deleteEffect});
    }else if(selected==='能力管理'){
     body.append(node('p','共享能力库 · 所有角色和聊天通用。能力原文、规则和按钮布局独立保存，原世界书停用或删除也可使用。生效记录仅属于当前聊天。'));
     body.append(node('p','打开旧聊天的能力面板时，会自动收纳其中的旧能力；不同版本保留为独立能力。'));
@@ -88,10 +89,10 @@ export function mount(target){
    }else if(selected==='生效中'){
     button(body,'建立生效记录',()=>effectForm(),true).disabled=!store.skills.length;
     const effects=activeEffects(store,chat);if(!effects.length)body.append(node('p','当前分支没有生效记录。拥有技能不等于已经发动。'));
-    for(const e of effects){const c=card(e.skill.name+' · '+e.target);c.append(node('p','持有者：'+e.holder+' ｜ 层面：'+e.scope),node('p','当前指令：'+(e.command||'未指定')),node('p','持续条件：'+e.condition));const toolbar=node('div',null,'amin-toolbar');c.append(toolbar);button(toolbar,'调整 / 转让',()=>effectForm(e));button(toolbar,'分割',()=>splitForm(e));button(toolbar,'解除',()=>endForm(e));}
+    for(const e of effects){const c=card(e.skill.name+' · '+e.target);c.append(node('p','持有者：'+e.holder+' ｜ 层面：'+e.scope),node('p','当前指令：'+(e.command||'未指定')),node('p','持续条件：'+e.condition));const toolbar=node('div',null,'amin-toolbar');c.append(toolbar);button(toolbar,'调整 / 转让',()=>effectForm(e));button(toolbar,'分割',()=>splitForm(e));button(toolbar,'解除',()=>endForm(e));button(toolbar,'删除生效记录',()=>deleteEffect(e));}
    }else if(selected==='变更记录'){
     const now=anchor(chat);if(!store.events.length)body.append(node('p','尚无变更。'));
-    for(const e of [...store.events].reverse()){const active=belongs(e,now),c=card(`${e.floor} 楼 · ${{create:'建立',update:'调整 / 转让',end:'解除',pause:e.paused?'暂停':'恢复'}[e.op]}`);c.append(node('p',active?'属于当前分支':'原分支记录 · 当前不生效'),node('p',e.at),node('pre',JSON.stringify(e.effect??e.patch??{原因:e.reason},null,2)));}
+    for(const e of [...store.events].reverse()){const active=belongs(e,now),c=card(`${e.floor} 楼 · ${{create:'建立',update:'调整 / 转让',end:'解除',delete:'删除生效记录',pause:e.paused?'暂停':'恢复'}[e.op]}`);c.append(node('p',active?'属于当前分支':'原分支记录 · 当前不生效'),node('p',e.at),node('pre',JSON.stringify(e.effect??e.patch??{原因:e.reason},null,2)));}
    }else{
     const token=api.capture();const toggle=node('label','生成时附加持续提醒'),check=node('input');check.type='checkbox';check.checked=store.enabled;toggle.append(check);body.append(toggle);
     const limit=field(body,'提醒字符上限（1000–200000）',String(store.limit));limit.type='number';limit.min=1000;limit.max=200000;

@@ -11,7 +11,7 @@ export function activeEffects(store,chat){
   if(e.op==='create')effects.set(e.effect.id,structuredClone(e.effect));
   if(e.op==='update'&&effects.has(e.id))Object.assign(effects.get(e.id),e.patch);
   if(e.op==='pause'&&effects.has(e.id))effects.get(e.id).paused=e.paused;
-  if(e.op==='end')effects.delete(e.id);
+  if(e.op==='end'||e.op==='delete')effects.delete(e.id);
  }
  return [...effects.values()];
 }
@@ -28,6 +28,7 @@ export function change(store,chat,op,data){
   if(op==='update')event.patch={holder:required(data.holder,'持有者'),command:data.command?.trim()??'',condition:required(data.condition,'持续或解除条件')};
   else if(op==='pause'){if(typeof data.paused!=='boolean')throw Error('暂停状态无效');event.paused=data.paused;}
   else if(op==='end')event.reason=required(data.reason,'解除依据');
+  else if(op==='delete')event.reason='用户删除生效记录（非剧情解除）';
   else throw Error('不支持的变更');
  }
  next.events.push(event);return next;
