@@ -1,10 +1,10 @@
 {
   "name": "amin-os",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "private": true,
   "type": "module",
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node --test apps/map/test/*.test.js apps/reply/reply-options.test.mjs apps/factions/test/*.test.js test/*.test.js"
+    "test": "node --test apps/map/test/*.test.js apps/reply/reply-options.test.mjs test/*.test.js"
   }
 }

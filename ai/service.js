@@ -11,7 +11,6 @@ export const AI_APPS = [
     {id:'reply',name:'回复选项',tasks:['回复选项']},
     {id:'effects',name:'能力面板',tasks:['持续效果 · 规则起草']},
     {id:'information',name:'信息面板',tasks:['信息面板','信息面板 · 模拟推演']},
-    {id:'factions',name:'势力沙盘',tasks:['势力沙盘']},
 ];
 const appId = app => AI_APPS.find(a=>a.id===app||a.tasks.includes(app))?.id;
 const renderMessages = messages => messages.map(m => `[${m?.role ?? '未知'}]\n${typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? m) ?? ''}`).join('\n\n');
