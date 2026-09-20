@@ -1,3 +1,5 @@
+import {mountWorldbookSources} from '../worldbook-source-ui.js';
+import {sourceSettings,saveSourceSettings} from '../worldbook-sources.js';
 import { createMapLink } from './map-link.js';
 import { checkpointState } from './state-checkpoint.js';
 import { compileRules, createRulesPage } from './rules.js';
@@ -23,12 +25,17 @@ let running = null;
 let sessionKey = '';
 let hudPanel = null;
 let hudEpoch = 0;
-let generationForm, formHome;
+let generationForm, formHome, sourceHost, sourcePicker, sourceIdentity;
 let selectedPage = 'state';
 let selectHudPage = null;
 let requestUpdate = null;
-const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096, maxSourceChars: 100000 };
-const getSettings = () => ({ ...defaults, ...context().extensionSettings[KEY] });
+const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096 };
+const getSettings = () => {const legacy={...defaults,...context().extensionSettings[KEY]};return {...legacy,...sourceSettings(context(),'status',{legacyBindings:true,includeGlobalBooks:legacy.includeGlobalBooks,extraBooks:legacy.extraBooks})};};
+function refreshSourceControls(){
+ if(!sourceHost)return;let id;try{id=identity();}catch{sourcePicker?.dispose();sourcePicker=null;sourceIdentity=null;sourceHost.textContent='请打开单角色聊天后选择世界书';return;}
+ if(sourcePicker&&sourceIdentity?.metadata===id.metadata&&sourceIdentity?.id===id.id&&sourceIdentity?.avatar===id.avatar){void sourcePicker.refresh();return;}
+ sourcePicker?.dispose();sourceHost.replaceChildren();sourceIdentity=id;sourcePicker=mountWorldbookSources(sourceHost,{context,value:getSettings()});
+}
 function node(tag, text, className) {
   const e = document.createElement(tag);
   if (text !== undefined) e.textContent = text;
@@ -118,6 +125,7 @@ async function showHud(page = selectedPage) {
   generationPage.id = 'wsh-generation-page'; generationPage.setAttribute('role', 'tabpanel');
   generationPage.setAttribute('aria-labelledby', generateTab.id);
   if (generationForm) generationPage.append(generationForm);
+  refreshSourceControls();
   const readCurrent = () => { checkIdentity(id); return parseState(id.metadata.variables?.状态栏); };
   const templatePage = createTemplatesPage({ context, settingsKey: KEY, read: readCurrent,
     write: async value => {
@@ -260,13 +268,11 @@ function mount() {
   }
   const settings = getSettings();
   const sharedSettings=document.createElement('button');sharedSettings.type='button';sharedSettings.textContent='AI 设置 · 全局 API 与预设';sharedSettings.onclick=()=>globalThis.AminOS?.openApp('ai');generationForm.append(sharedSettings);
-  field('extraBooks', '额外世界书（每行一本）', 'textarea');
+  sourceHost=node('div');generationForm.append(sourceHost);refreshSourceControls();
   field('updateNote', '当前情况补充（更新数值时使用，可留空）', 'textarea');
   field('allowTypeChange', '允许更改已有字段类型（默认关闭，仅用于 AI 更新）', 'checkbox');
   generationForm.append(node('p','未勾选时保留原类型。可在当前情况补充或状态栏要求中明确填写“把体力改为数字”，仅授权指定字段；填写“允许更改已有字段类型”可授权本次更新中的类型转换。'));
   field('instructions', '状态栏要求', 'textarea').placeholder = '例如：仅显示玩家、世界、队伍；不要数值化感情。';
-  field('maxSourceChars', '设定字符上限（超过会停止，不会截断）', 'number').min = '1000';
-  field('includeGlobalBooks', '包含已启用的全局世界书', 'checkbox');
   Object.entries(settings).forEach(([k,v]) => { if (fields[k]) fields[k].type === 'checkbox' ? fields[k].checked = v : fields[k].value = v; });
   const report = node('p', '准备就绪。', 'wsh-report'); report.setAttribute('role', 'status');
   function save() {
@@ -275,8 +281,8 @@ function mount() {
       if (k === 'apiKey') { sessionKey = input.value; continue; }
       s[k] = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value;
     }
-    if (!Number.isFinite(s.maxSourceChars) || s.maxSourceChars < 1000) throw Error('请检查设定字符上限。');
-    context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], ...s }; context().saveSettingsDebounced(); return s;
+    if(!sourcePicker)throw Error('请先打开单角色聊天');const sources=sourcePicker.getValue();saveSourceSettings(context(),'status',sources);
+    context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], ...s }; context().saveSettingsDebounced(); return {...s,...sources};
   }
   const actions = node('div', undefined, 'wsh-actions');
   function action(label, fn) {
@@ -292,7 +298,7 @@ function mount() {
     generateButton.disabled = replaceButton.disabled = saveButton.disabled = true;
     try {
       const result = await generateStatus({ api: { baseUrl: s.baseUrl, apiKey: sessionKey, model: s.model, timeoutMs: 120000, maxTokens: s.maxTokens }, mode,
-        includeGlobalBooks: s.includeGlobalBooks, extraBooks: s.extraBooks.split(/\r?\n/).map(x=>x.trim()).filter(Boolean), maxSourceChars: s.maxSourceChars,
+        includeCharacter:s.includeCharacter,readWorldbooks:s.readWorldbooks,selectedBooks:s.selectedBooks,legacyBindings:true,includeGlobalBooks:s.includeGlobalBooks,extraBooks:s.extraBooks,
         allowTypeChange:s.allowTypeChange===true, updateNote: s.updateNote || '', instructions: s.instructions || '根据世界观设计简洁实用的状态栏。', statusRules: compileRules(context(), KEY, mode === 'update' ? 'update' : 'generate') }, running.signal);
       report.textContent = result.ok ? (result.changed ? '操作完成，可打开状态栏查看。' : '没有需要修改的内容。') + ' 读取世界书：' + (result.books?.join('、') || '无') : result.message || '已有任务运行中。';
       return result;
@@ -316,5 +322,5 @@ function mount() {
     if(hudPanel){try{checkIdentity(activeIdentity);}catch{running?.abort();closeHud();}}
     syncHistory();
   }, 750);
-  if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{running?.abort();closeHud();});
+  if(events.CHAT_CHANGED)ctx.eventSource?.on(events.CHAT_CHANGED,()=>{running?.abort();closeHud();refreshSourceControls();});
 }

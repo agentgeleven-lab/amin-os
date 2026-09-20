@@ -21,7 +21,7 @@ test('fill, replace and update submit current conversation to the model',async()
  let source=await readFile(new URL('../apps/status/generator.js',import.meta.url),'utf8');
  source=source.replace(/from '(.*?)'/g,(_,path)=>`from '${new URL(path,new URL('../apps/status/generator.js',import.meta.url)).href}'`);
  const mock=code=>'data:text/javascript,'+encodeURIComponent(code);
- source=source.replace("import('/scripts/world-info.js')",`import('${mock('export const loadWorldInfo=async()=>({entries:{}});')}')`)
+ source=source.replace("import('/scripts/world-info.js')",`import('${mock('export const selected_world_info=[];export const loadWorldInfo=async()=>({entries:{}});')}')`)
  .replace("import('/scripts/variables.js')",`import('${mock('export const setLocalVariable=()=>{};')}')`)
  .replace("import('/scripts/utils.js')",`import('${mock('export const getCharaFilename=()=>"card";')}')`);
  const {generateStatus}=await import(mock(source));

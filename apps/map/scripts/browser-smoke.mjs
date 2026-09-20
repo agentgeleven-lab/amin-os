@@ -13,11 +13,12 @@ const server=http.createServer((req,res)=>{
  if(pathname==='/v1/chat/completions'){
   let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{customRequests.push({body:JSON.parse(body),authorization:req.headers.authorization});const doc=createDemoDocument();doc.maps.world.name='独立 API 测试地图';res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(doc)}}]}));});return;
  }
- if(pathname==='/scripts/world-info.js'){res.setHeader('Content-Type','text/javascript');res.end(fixtureWorld);return;}
+ if(pathname==='/api/worldinfo/get'){let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const {name}=JSON.parse(raw);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({entries:{one:{content:name+' 世界背景'}}}));});return;}
+  if(pathname==='/scripts/world-info.js'){res.setHeader('Content-Type','text/javascript');res.end(fixtureWorld);return;}
  if(pathname==='/scripts/variables.js'){res.setHeader('Content-Type','text/javascript');res.end("export function setLocalVariable(k,v){const c=globalThis.SillyTavern.getContext();c.chatMetadata.variables??={};c.chatMetadata.variables[k]=v;}");return;}
  if(pathname==='/hud/map-link.js'&&process.env.DM_HUD_PATH){res.setHeader('Content-Type','text/javascript');res.end(fs.readFileSync(path.join(process.env.DM_HUD_PATH,'map-link.js')));return;}
  const file=path.resolve(root,'.'+pathname);if(!file.startsWith(root+path.sep)){res.statusCode=403;res.end();return;}
- try{let content=fs.readFileSync(file);if(pathname==='/demo.js')content=content.toString().replace("characters: [{ avatar: 'demo.png' }]","characters: [{ avatar: 'demo.png', data:{name:'测试角色',description:'测试卡片',extensions:{world:'bound'}} }]").replace('async saveMetadata()',`async generateRaw(request){globalThis.__aiRequest=request;const {createDemoDocument}=await import('./src/core/demo.js');const doc=createDemoDocument();doc.maps.world.name='AI 测试地图';return JSON.stringify(doc);},async saveMetadata()`);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.statusCode=404;res.end();}
+ try{let content=fs.readFileSync(file);if(pathname==='/demo.js')content=content.toString().replace("characters: [{ avatar: 'demo.png' }]","characters: [{ avatar: 'demo.png', data:{name:'测试角色',description:'测试卡片',extensions:{world:'bound'}} }]").replace('async saveMetadata()',`getRequestHeaders(){return {};},async generateRaw(request){globalThis.__aiRequest=request;const {createDemoDocument}=await import('./src/core/demo.js');const doc=createDemoDocument();doc.maps.world.name='AI 测试地图';return JSON.stringify(doc);},async saveMetadata()`);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(content);}catch{res.statusCode=404;res.end();}
 }).listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
 let browser;const errors=[];
 try{
@@ -76,7 +77,7 @@ try{
  // Mock model receives actual source material. No network model call is made.
  await page.getByRole('tab',{name:'AI生成地图',exact:true}).click();await page.getByRole('button',{name:'生成地图草稿',exact:true}).click();await page.getByText('已生成草稿；请检查并保存地图。',{exact:true}).waitFor();
  let request=await page.evaluate(()=>JSON.parse(globalThis.__aiRequest.prompt));assert.equal(request.设定素材.角色卡.名称,'测试角色');assert.deepEqual(request.设定素材.世界书.map(b=>b.名称),['bound']);
- await page.getByRole('checkbox',{name:'同时读取已开启的全局世界书',exact:true}).check();await page.getByRole('button',{name:'生成地图草稿',exact:true}).click();await page.getByText('已生成草稿；请检查并保存地图。',{exact:true}).waitFor();request=await page.evaluate(()=>JSON.parse(globalThis.__aiRequest.prompt));assert.deepEqual(request.设定素材.世界书.map(b=>b.名称),['bound','enabled']);assert.ok(!(await page.evaluate(()=>globalThis.__bookReads)).includes('disabled'));
+ await page.locator('input[data-worldbook=enabled]').check();await page.getByRole('button',{name:'生成地图草稿',exact:true}).click();await page.getByText('已生成草稿；请检查并保存地图。',{exact:true}).waitFor();request=await page.evaluate(()=>JSON.parse(globalThis.__aiRequest.prompt));assert.deepEqual(request.设定素材.世界书.map(b=>b.名称),['bound','enabled']);assert.ok(!request.设定素材.世界书.some(b=>b.名称==='disabled'));
  // Reproduce a host promise that never returns, then cancel and ignore a late result.
  await page.evaluate(()=>{globalThis.__originalGetContext=globalThis.SillyTavern.getContext;globalThis.SillyTavern.getContext=()=>({...globalThis.__originalGetContext(),generateRaw:()=>new Promise(resolve=>globalThis.__resolveHung=resolve)});});
  const previousMap=await page.evaluate(()=>JSON.stringify(globalThis.SillyTavernDynamicMap.getState()));

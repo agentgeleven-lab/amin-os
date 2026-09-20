@@ -56,7 +56,7 @@ export function initialize() {
     installExtraFloorButtons('organizations');installExtraFloorButtons('effects');installExtraFloorButtons('information');installExtraFloorButtons('worldbooks');installExtraFloorButtons('tts');
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.10.3',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.10.4',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

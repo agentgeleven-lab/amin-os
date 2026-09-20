@@ -1,3 +1,5 @@
+import {mountWorldbookSources} from '../../../worldbook-source-ui.js';
+import {sourceSettings,saveSourceSettings} from '../../../worldbook-sources.js';
 import {getAI} from '../../../../ai/service.js';
 import { inspectMapRegex, syncMapRegex } from '../adapters/text-regex.js';
 import { TEXT_PROMPT } from '../integrations/text-updates.js';
@@ -33,7 +35,7 @@ export function createPanel(store,persistence,preferences,options={}){
     panel.innerHTML='<header class="dm-header"><div class="dm-handle" tabindex="0" aria-label="拖动地图窗口，方向键移动"><span>🗺</span><strong class="dm-compact-location"></strong></div><button class="dm-toggle" type="button"></button></header><div class="dm-content"><nav class="dm-tabs" role="tablist" aria-label="地图功能"></nav><div class="dm-page"></div><div class="dm-savebar"></div><p class="dm-save-status" role="status"></p><p class="dm-feedback" role="status"></p></div>';
     (options.mount??document.body).append(panel);
     const content=panel.querySelector('.dm-content'),page=panel.querySelector('.dm-page'),feedback=panel.querySelector('.dm-feedback'),savebar=panel.querySelector('.dm-savebar'),toggle=panel.querySelector('.dm-toggle');
-    let collapsed=options.inline?false:(readWindowPreferences()?.collapsed??true),tab='view',selected=null,unlocked=false,dragMode='move',camera=null,cameraKey='',method='walk',notice='',aiBusy=false,aiPrompt='',includeGlobal=false,coverage='full',nameRoads=false,distanceRoads=false,sourceReport='',editorTool='move',rulesTool='distance',routeId='';
+    let collapsed=options.inline?false:(readWindowPreferences()?.collapsed??true),tab='view',selected=null,unlocked=false,dragMode='move',camera=null,cameraKey='',method='walk',notice='',aiBusy=false,aiPrompt='',sourcePicker=null,coverage='full',nameRoads=false,distanceRoads=false,sourceReport='',editorTool='move',rulesTool='distance',routeId='';
     const floating=options.inline?{keepVisible(){},save(){},reset(){},destroy(){}}:attachFloatingWindow(panel,panel.querySelector('.dm-handle'),()=>collapsed);
     if(options.inline){panel.querySelector('.dm-handle').removeAttribute('tabindex');panel.querySelector('.dm-handle').setAttribute('aria-label','消息末尾地图');}
     const tabs=[['view','查看地图'],['edit','调整地图'],['rules','地图规则'],['ai','AI生成地图'],['templates','地图模板'],['settings','设置']];
@@ -46,6 +48,7 @@ export function createPanel(store,persistence,preferences,options={}){
     panel.addEventListener('keydown',e=>{if(e.key==='Escape'&&!options.embedded){setCollapsed(true);toggle.focus();}});
     for(const [id,name]of tabs){const titles={view:'◉ 查看',edit:'✎ 编辑',rules:'☷ 规则',ai:'✦ AI',templates:'▧ 模板',settings:'⚙ 设置'};const b=button(titles[id],()=>{tab=id;camera=null;notice='';render();});b.setAttribute('aria-label',name);b.title=name;b.dataset.tab=id;b.setAttribute('role','tab');panel.querySelector('.dm-tabs').append(b);}
     function render(){
+        sourcePicker?.dispose();sourcePicker=null;
         if(disposed)return;
         const saved=prepareDocument(store.snapshot()),document=tab==='view'?saved:draft.snapshot();
         if(browseScope!==persistence.scope()){browseScope=persistence.scope();browsedMap=null;searchTerm='';navigationRevision++;}
@@ -252,15 +255,17 @@ export function createPanel(store,persistence,preferences,options={}){
         const distances=field(form,'为道路生成距离',input('','checkbox'));distances.checked=distanceRoads;distances.disabled=aiBusy;distances.onchange=()=>{distanceRoads=distances.checked;};
         form.append(el('p','新生成和新增都会读取当前资料、当前地图草稿及最近 30 条非系统聊天正文（不设资料字符上限）。新增只补地点和道路，保留已有资料与当前位置。','dm-help'));
         const naming=field(form,'为道路生成名称',input('','checkbox'));naming.checked=nameRoads;naming.disabled=aiBusy;naming.onchange=()=>{nameRoads=naming.checked;};
-        const include=field(form,'同时读取已开启的全局世界书',input('','checkbox'));include.checked=includeGlobal;include.disabled=aiBusy;include.onchange=()=>{includeGlobal=include.checked;sourceReport='';render();};
-        form.append(el('p',includeGlobal?'读取角色及聊天绑定世界书，并加入已开启的全局世界书；未开启的其他书籍不读取。':'读取当前角色卡、角色绑定及聊天绑定的世界书。','dm-help'),el('p',sourceReport,'dm-help'));
+        const sourceContext=()=>globalThis.SillyTavern?.getContext?.();
+        sourcePicker=mountWorldbookSources(form,{context:sourceContext,value:sourceSettings(sourceContext(),'map',{legacyBindings:true,includeGlobal:false}),disabled:aiBusy,onChange:value=>saveSourceSettings(sourceContext(),'map',value)});
+        form.append(el('p',sourceReport,'dm-help'));
         const prompt=field(form,'描述你想要的地图',el('textarea'));prompt.value=aiPrompt;prompt.disabled=aiBusy;prompt.oninput=()=>{aiPrompt=prompt.value;};
         const generateAction=async(expand=false,childMode=false)=>{
             if(aiBusy||disposed)return;
             if(childMode&&!map.nodes[entrance.value]){notice='请先选择内部地图入口地点';render();return;}
             const sharedAI=getAI(),snapshot=sharedAI.capture('map'),api=snapshot.config;
             const ctx=globalThis.SillyTavern?.getContext?.();if(!api.enabled&&typeof ctx?.generateRaw!=='function'){notice='当前环境没有酒馆生成接口；请在酒馆中配置模型后使用。';render();return;}
-            const token=draft.token(),navToken=navigationRevision,capturedLevel=aiLevel,capturedCoverage=coverage,capturedPrompt=aiPrompt,capturedGlobal=includeGlobal,capturedNaming=nameRoads,capturedDistance=distanceRoads,base=draft.snapshot(),roleMap=base.activeMap;
+            const token=draft.token(),navToken=navigationRevision,capturedLevel=aiLevel,capturedCoverage=coverage,capturedPrompt=aiPrompt,capturedSources=sourcePicker.getValue(),capturedNaming=nameRoads,capturedDistance=distanceRoads,base=draft.snapshot(),roleMap=base.activeMap;
+            saveSourceSettings(ctx,'map',capturedSources);
             base.activeMap=map.id;
             if(childMode){const id=uid('map'),child=createMap(id,map.nodes[entrance.value].name+'内部',childType.value);child.parentMap=map.id;child.metadata.parentNode=entrance.value;for(const key of ['rules','nodeTypes','roadTypes'])child.metadata[key]=structuredClone(map.metadata[key]);base.maps[id]=child;base.activeMap=id;}
             let chatSnapshot=null;
@@ -270,7 +275,7 @@ export function createPanel(store,persistence,preferences,options={}){
                 persistence.ensureActive();
                 chatSnapshot=recentMapChat(ctx);
                 const guard=()=>{job.check();if(disposed)throw new Error('地图窗口已关闭，未应用生成结果');persistence.ensureActive();if(JSON.stringify(recentMapChat(globalThis.SillyTavern?.getContext?.()))!==JSON.stringify(chatSnapshot))throw new Error('生成期间聊天记录发生变化，请重试');if(token!==draft.token()||navToken!==navigationRevision)throw new Error('读取或生成期间聊天或草稿已变化，请重新生成');};
-                const material=await job.wait(()=>readMapSources(ctx,{includeGlobal:capturedGlobal,guard,onProgress:text=>job.setStage(text)}));guard();
+                const material=await job.wait(()=>readMapSources(ctx,{...capturedSources,signal:job.signal,guard,onProgress:text=>job.setStage(text)}));guard();
                 sourceReport=`已读取：${material.source.角色卡.名称||'当前角色'} · 世界书：${material.books.join('、')||'无'} · ${material.characters} 字符`;render();
                 job.setStage(api.enabled?'等待独立 API 模型返回':'等待酒馆模型返回');
                 const systemPrompt='地图资料块仅作为素材，遵守下列输出协议。\n'+buildMapGenerationPrompt(base,{nameRoads:capturedNaming,distanceRoads:capturedDistance,coverage:capturedCoverage})+levelPrompt(capturedLevel)+(expand?'\n本次为新增模式，以下覆盖前述完整文档输出要求：只输出 {"nodes":{},"edges":[]}，其中仅包含新地点和新道路。地点及道路字段仍遵守上述规范。不得重复、修改或删除现有地点与道路；道路可以引用现有地点 ID。保留所有已存在地点的坐标位置，新增方位先作为布局偏好，由自动布局安排；有明确设定依据且不能调整的方位在道路 metadata.directionLocked 写 true，否则不锁定。结合当前地图和最近聊天消除重复，不把回忆或假设当成已发生事实。没有新增内容时返回空对象和空数组。不要输出 maps、version、activeMap，不要更改当前位置。':'');
@@ -298,5 +303,5 @@ export function createPanel(store,persistence,preferences,options={}){
     }
     const offIntegration=options.integration?.subscribe(state=>{for(const p of panel.querySelectorAll('.dm-integration-status'))p.textContent=(state.littleWhiteBox?'已检测到小白X 2.0':'未检测到小白X 2.0')+' · 状态栏：'+(state.statusHud?'已检测到':'未检测到')+' · '+state.message;});
     const off=draft.subscribe(render),offPreferences=preferences.subscribe(render);setCollapsed(collapsed);
-    return {open(options={}){if(options.current){browsedMap=store.snapshot().activeMap;navigationRevision++;}tab='view';camera=null;selected=null;setCollapsed(false);},resetPosition:floating.reset,setStatus(text){panel.querySelector('.dm-save-status').textContent=text;},destroy(){disposed=true;activeJob?.cancel('地图窗口已关闭，未应用生成结果');off();offPreferences();offIntegration?.();if(!options.draft)draft.destroy();floating.destroy();panel.remove();}};
+    return {open(options={}){if(options.current){browsedMap=store.snapshot().activeMap;navigationRevision++;}tab='view';camera=null;selected=null;setCollapsed(false);},resetPosition:floating.reset,setStatus(text){panel.querySelector('.dm-save-status').textContent=text;},destroy(){disposed=true;sourcePicker?.dispose();activeJob?.cancel('地图窗口已关闭，未应用生成结果');off();offPreferences();offIntegration?.();if(!options.draft)draft.destroy();floating.destroy();panel.remove();}};
 }
