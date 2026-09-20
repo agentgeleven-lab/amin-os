@@ -29,7 +29,7 @@ let generationForm, formHome, sourceHost, sourcePicker, sourceIdentity;
 let selectedPage = 'state';
 let selectHudPage = null;
 let requestUpdate = null;
-const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096 };
+const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, includePersona: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096 };
 const getSettings = () => {const legacy={...defaults,...context().extensionSettings[KEY]};return {...legacy,...sourceSettings(context(),'status',{legacyBindings:true,includeGlobalBooks:legacy.includeGlobalBooks,extraBooks:legacy.extraBooks})};};
 function refreshSourceControls(){
  if(!sourceHost)return;let id;try{id=identity();}catch{sourcePicker?.dispose();sourcePicker=null;sourceIdentity=null;sourceHost.textContent='请打开单角色聊天后选择世界书';return;}
@@ -269,6 +269,8 @@ function mount() {
   const settings = getSettings();
   const sharedSettings=document.createElement('button');sharedSettings.type='button';sharedSettings.textContent='AI 设置 · 全局 API 与预设';sharedSettings.onclick=()=>globalThis.AminOS?.openApp('ai');generationForm.append(sharedSettings);
   sourceHost=node('div');generationForm.append(sourceHost);refreshSourceControls();
+  field('includePersona', '读取用户设定描述（Persona）', 'checkbox');
+  generationForm.append(node('p','默认不读取用户设定。勾选后每次读取当前用户名称与Persona描述，独立于角色资料和世界书；没有描述时提示补充。','wsh-note'));
   field('updateNote', '当前情况补充（更新数值时使用，可留空）', 'textarea');
   field('allowTypeChange', '允许更改已有字段类型（默认关闭，仅用于 AI 更新）', 'checkbox');
   generationForm.append(node('p','未勾选时保留原类型。可在当前情况补充或状态栏要求中明确填写“把体力改为数字”，仅授权指定字段；填写“允许更改已有字段类型”可授权本次更新中的类型转换。'));
@@ -298,7 +300,7 @@ function mount() {
     generateButton.disabled = replaceButton.disabled = saveButton.disabled = true;
     try {
       const result = await generateStatus({ api: { baseUrl: s.baseUrl, apiKey: sessionKey, model: s.model, timeoutMs: 120000, maxTokens: s.maxTokens }, mode,
-        includeCharacter:s.includeCharacter,readWorldbooks:s.readWorldbooks,selectedBooks:s.selectedBooks,legacyBindings:true,includeGlobalBooks:s.includeGlobalBooks,extraBooks:s.extraBooks,
+        includePersona:s.includePersona===true,includeCharacter:s.includeCharacter,readWorldbooks:s.readWorldbooks,selectedBooks:s.selectedBooks,legacyBindings:true,includeGlobalBooks:s.includeGlobalBooks,extraBooks:s.extraBooks,
         allowTypeChange:s.allowTypeChange===true, updateNote: s.updateNote || '', instructions: s.instructions || '根据世界观设计简洁实用的状态栏。', statusRules: compileRules(context(), KEY, mode === 'update' ? 'update' : 'generate') }, running.signal);
       report.textContent = result.ok ? (result.changed ? '操作完成，可打开状态栏查看。' : '没有需要修改的内容。') + ' 读取世界书：' + (result.books?.join('、') || '无') : result.message || '已有任务运行中。';
       return result;

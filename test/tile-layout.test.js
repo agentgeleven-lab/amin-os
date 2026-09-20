@@ -4,7 +4,7 @@ import {defaultTiles,normalizeTiles,moveTile,migrateTiles,loadTiles,saveTiles,TI
 test('corrupt or old layouts retain every application exactly once',()=>{
  assert.deepEqual(normalizeTiles(null),defaultTiles());
  const normalized=migrateTiles([{id:'reply',size:'wide'},{id:'reply',size:'small'},{id:'map',size:'huge'},{id:'unknown',size:'wide'},null]);
- assert.deepEqual(normalized.map(t=>t.id),['reply','map','status','organizations','information','effects','worldbooks','tts','ai','settings']);
+ assert.deepEqual(normalized.map(t=>t.id),['reply','map','status','organizations','stylewriter','information','effects','worldbooks','tts','ai','settings']);
  assert.equal(normalized[0].size,'wide');assert.equal(normalized[1].size,'wide');
 });
 test('drag moves before or after target, keeping sizes and source immutable',()=>{

@@ -9,6 +9,7 @@ export const AI_APPS = [
     {id:'map',name:'地图',tasks:['地图']},
     {id:'status',name:'世界状态',tasks:['世界状态']},
     {id:'reply',name:'回复选项',tasks:['回复选项']},
+    {id:'stylewriter',name:'文风转换',tasks:['文风转换']},
     {id:'effects',name:'能力面板',tasks:['持续效果 · 规则起草']},
     {id:'information',name:'信息面板',tasks:['信息面板','信息面板 · 模拟推演']},
     {id:'organizations',name:'势力概览',tasks:['势力概览']},
