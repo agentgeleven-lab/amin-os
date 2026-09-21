@@ -2,17 +2,17 @@ import {mediaURL} from './desktop-effects-model.js';
 export const TILE_KEY='amin-os.tiles.v2';
 export const LEGACY_TILE_KEY='amin-os.tiles.v1';
 export const defaultTiles=()=>[
- {id:'map',target:'map',label:'',size:'wide'},{id:'status',target:'status',label:'',size:'medium'},{id:'organizations',target:'organizations',label:'',size:'wide'},{id:'reply',target:'reply',label:'',size:'medium'},{id:'stylewriter',target:'stylewriter',label:'',size:'medium'},
+ {id:'map',target:'map',label:'',size:'wide'},{id:'status',target:'status',label:'',size:'medium'},{id:'organizations',target:'organizations',label:'',size:'wide'},{id:'reply',target:'reply',label:'',size:'medium'},
  {id:'information',target:'information',label:'',size:'wide'},{id:'effects',target:'effects',label:'',size:'wide'},{id:'worldbooks',target:'worldbooks',label:'',size:'medium'},{id:'tts',target:'tts',label:'',size:'medium'},{id:'ai',target:'ai',label:'',size:'small'},{id:'settings',target:'settings',label:'',size:'small'},
 ];
 export function normalizeTiles(value){
  if(!Array.isArray(value))return defaultTiles();
- const known=new Set(defaultTiles().map(t=>t.target)),seen=new Set();
+ const known=new Set([...defaultTiles().map(t=>t.target),'stylewriter']),seen=new Set();
  return value.flatMap(t=>{if(typeof t?.id!=='string'||!t.id||seen.has(t.id)||!known.has(t.target))return [];seen.add(t.id);let image='';try{image=mediaURL(t.image);}catch{}return [{...(image?{image}:{}),id:t.id,target:t.target,label:typeof t.label==='string'?t.label.slice(0,60):'',size:['small','medium','wide','tall'].includes(t.size)?t.size:'medium'}];});
 }
 export function migrateTiles(value){
  const defaults=defaultTiles(),seen=new Set(),result=[];
- for(const t of Array.isArray(value)?value:[]){const d=defaults.find(d=>d.id===t?.id);if(!d||seen.has(t.id))continue;seen.add(t.id);result.push({...d,size:['small','medium','wide','tall'].includes(t.size)?t.size:d.size});}
+ for(const t of Array.isArray(value)?value:[]){const d=defaults.find(d=>d.id===t?.id)??(t?.id==='stylewriter'?{id:'stylewriter',target:'stylewriter',label:'',size:'medium'}:null);if(!d||seen.has(t.id))continue;seen.add(t.id);result.push({...d,size:['small','medium','wide','tall'].includes(t.size)?t.size:d.size});}
  return result.concat(defaults.filter(t=>!seen.has(t.id)));
 }
 export function loadTiles(storage){

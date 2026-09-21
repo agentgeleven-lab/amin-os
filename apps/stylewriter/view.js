@@ -1,8 +1,10 @@
 // 文风转换 (stylewriter) pane app. Mounts once per target; every async result is guarded by
 // chat identity + content/mode/preset stamps so late results are never mis-applied.
+import { styleLibrary, contentLibrary, contentInstruction } from '../reply/writing-library.js';
+import { mountContentStyles } from '../reply/content-styles-view.js';
 import { getAI } from '../../ai/service.js';
 import { inputElement, waitForResult, rewriteText, writeToInput } from './generator.js';
-import { MODES, createStore, chatIdentity, chatContentStamp, presetStamp, buildRequest, referenceSamples, fillGuard, normalizeResult } from './model.js';
+import { MODES, chatIdentity, chatContentStamp, presetStamp, buildRequest, referenceSamples, fillGuard, normalizeResult } from './model.js';
 
 const mounted = new WeakMap();
 
@@ -91,7 +93,7 @@ export function mount(target, options = {}) {
     };
 
     let store;
-    try { store = createStore(getContext); } catch (error) { say(error.message); }
+    try { store = options.store ?? styleLibrary(getContext); } catch (error) { say(error.message); }
     let mode = store?.mode() ?? 'chat';
     let identity = '';
     let revision = 0, invalidateReason = '', controller = null, busy = false;
@@ -102,6 +104,7 @@ export function mount(target, options = {}) {
     const perChat = new Map();
     const chatState = () => { if (!perChat.has(identity)) perChat.set(identity, { source: '', result: '', meta: null }); return perChat.get(identity); };
 
+    const draftOwner = {};
     const modeButtons = new Map();
     for (const item of MODES) {
         const b = node('button', item.name);
@@ -143,6 +146,8 @@ export function mount(target, options = {}) {
     const captureDraft = () => {
         if (!editingId) return;
         drafts.set(editingId, { name: nameInput.value, description: descArea.value });
+        const current=store.get(editingId);
+        store.setDraft(draftOwner,editingId,!current||current.name!==nameInput.value||current.description!==descArea.value);
         disarmDelete();
         // Editing the preset a custom-mode run is based on invalidates that run: the late
         // result must never land while the editor content differs from what was captured.
@@ -155,10 +160,21 @@ export function mount(target, options = {}) {
     descArea.addEventListener('input', captureDraft);
     sourceArea.addEventListener('input', () => sourceChanged());
     resultArea.addEventListener('input', () => { const state = chatState(); state.result = resultArea.value; });
-    const unsubscribe = store?.subscribe(error => {
+    const unsubscribe = store?.subscribe((error,event) => {
+        if(event?.draftOwner===draftOwner)return;
+        if(controller)reset('文风设置或编辑已变化，本次转换已取消。');
         renderPresetOptions();
         renderPresetEditor();
-        if (error) {mode=store.mode();renderModes();reset('文风设置保存失败，本次转换已取消。');say(`文风预设保存失败（${error.message || error}）：已恢复到上次成功保存的预设列表；未保存的修改仍保留在编辑器中。`);}
+        if (error) {const current=store.get(editingId),draft=drafts.get(editingId);if(draft)store.setDraft(draftOwner,editingId,!current||draft.name!==current.name||draft.description!==current.description);mode=store.mode();renderModes();reset('文风设置保存失败，本次转换已取消。');say(`文风预设保存失败（${error.message || error}）：已恢复到上次成功保存的预设列表；未保存的修改仍保留在编辑器中。`);}
+    });
+
+    const contentHost=node('div');
+    sourceCard.append(contentHost);
+    const contentControls=mountContentStyles(contentHost, {
+        document:doc, library:options.contentLibrary??contentLibrary(getContext),
+        getSelection:()=>store?.contentMode()??'none',
+        setSelection:id=>store?.setContentMode(id),
+        onChange:()=>reset('内容风格已变化，本次转换已取消。'),
     });
 
     function touchDraft() { const state = chatState(); state.source = sourceArea.value; }
@@ -183,7 +199,7 @@ export function mount(target, options = {}) {
     function renderModes() {
         for (const item of MODES) modeButtons.get(item.id)?.setAttribute('aria-pressed', String(item.id === mode));
         presetCard.hidden = mode !== 'custom';
-        modeHelp.textContent = mode === 'chat'
+        modeHelp.textContent = mode === 'none' ? '不额外指定文风：保持原文表达习惯，只改善行文清晰度；不读取聊天或世界书。' : mode === 'chat'
             ? '参考模式：仅读取当前已加载聊天最近 16 条非系统正文（每条完整传递，更早消息不包含）；不读取世界书、人设或群组设定。'
             : '自定义模式：只使用你选择的文风预设；请求中不包含任何聊天内容。';
     }
@@ -216,6 +232,7 @@ export function mount(target, options = {}) {
         const draft = { name: nameInput.value, description: descArea.value };
         const preset = store.save(draft, editingId !== 'new' && store.get(editingId) ? editingId : undefined);
         drafts.delete(editingId);
+        store.setDraft(draftOwner,editingId,false);
         editingId = preset.id;
         // keep a clean copy: if the host later rejects the save and the list rolls back,
         // the editor still holds exactly what the user saved
@@ -231,6 +248,7 @@ export function mount(target, options = {}) {
         const draft = { name: nameInput.value, description: descArea.value };
         const preset = store.save(draft);
         drafts.delete(editingId);
+        store.setDraft(draftOwner,editingId,false);
         editingId = preset.id;
         drafts.set(preset.id, { name: preset.name, description: preset.description });
         renderPresetOptions();
@@ -241,6 +259,7 @@ export function mount(target, options = {}) {
     }
     function discardPreset() {
         drafts.delete(editingId);
+        store.setDraft(draftOwner,editingId,false);
         editingId = store.selectedId() || 'new';
         renderPresetOptions();
         renderPresetEditor();
@@ -269,9 +288,11 @@ export function mount(target, options = {}) {
             return;
         }
         disarmDelete();
-        undoToken = store.remove(editingId);
-        undoToken.draft = drafts.get(editingId) ?? null; // unsaved edits survive delete + undo
-        drafts.delete(editingId);
+        const deletedId=editingId, deletedDraft=drafts.get(editingId)??null;
+        undoToken = store.remove(deletedId);
+        undoToken.draft = deletedDraft;
+        drafts.delete(deletedId);
+        store.setDraft(draftOwner,deletedId,false);
         editingId = store.selectedId() || 'new';
         renderPresetOptions();
         renderPresetEditor();
@@ -284,7 +305,7 @@ export function mount(target, options = {}) {
         if (!undoToken) { say('没有可撤销的删除。'); return; }
         const token = undoToken;
         try { store.restore(token); } catch (error) { say(error.message); return; }
-        if (token.draft) drafts.set(token.preset.id, token.draft);
+        if (token.draft) {drafts.set(token.preset.id, token.draft);store.setDraft(draftOwner,token.preset.id,token.draft.name!==token.preset.name||token.draft.description!==token.preset.description);}
         editingId = token.preset.id;
         undoToken = null;
         undoRow.hidden = true;
@@ -323,13 +344,19 @@ export function mount(target, options = {}) {
         try { snapshot = service.capture('stylewriter'); } catch (error) { say(error.message); return; }
         let request;
         try {
+            contentControls.assertSaved();
             if (mode === 'custom') {
                 if (!store) throw Error('预设存储不可用：请刷新页面后重试。');
                 const preset=store.get(presetSelect.value);
+                if(store.hasDraft(preset?.id))throw Error('请先保存或放弃所选文风预设的修改。');
                 if(editingId==='new'||(!store.get(editingId)&&drafts.has(editingId))||(editingId===preset?.id&&(nameInput.value!==preset.name||descArea.value!==preset.description)))throw Error('请先保存文风预设或放弃未保存的修改，再开始转换；不会静默使用旧文风。');
                 request = buildRequest({ mode, source: sourceArea.value, preset });
             }
-            else request = buildRequest({ mode, source: sourceArea.value, samples: referenceSamples(ctx ?? {}) });
+            else request = buildRequest({ mode, source: sourceArea.value, samples: mode==='chat'?referenceSamples(ctx ?? {}):undefined });
+            const theme=contentControls.selection();
+            request.systemPrompt += contentInstruction(theme,true);
+            request.meta.contentStyle=theme.name;
+            if(theme.id!=='none')request.meta.label+=` · 内容风格「${theme.name}」`;
         } catch (error) { say(error.message); retryButton.hidden = false; return; }
         let input = null;
         try { const inputNode = inputElement(doc); input = { node: inputNode, value: inputNode.value }; } catch { input = null; }
@@ -464,12 +491,21 @@ export function mount(target, options = {}) {
 
     const controller_ = {
         open() { syncChat(); },
+        acceptSource(text, expectedIdentity) {
+            syncChat();
+            if(expectedIdentity && expectedIdentity!==identity)throw Error('聊天已变化，不能转交旧候选。');
+            if(sourceArea.value.trim() && sourceArea.value!==text)throw Error('改写页已有原文草稿；请先保留或清空，再转交候选。');
+            reset('已转入候选，请主动点击转换。');
+            sourceArea.value=String(text);touchDraft();running=null;const state=chatState();state.result='';state.meta=null;setResultState(state);say('候选已转入原文，尚未请求 AI，也未发送。');
+        },
         convert, fillBack, setMode,
         dispose() {
             revision++;
             controller?.abort(new Error('面板已关闭，转换取消。'));
             for (const remove of removers) remove();
             unsubscribe?.();
+            contentControls.dispose();
+            store?.clearDrafts(draftOwner);
             clearTimeout(armTimer);
             root.remove();
             mounted.delete(target);

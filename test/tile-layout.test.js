@@ -4,7 +4,7 @@ import {defaultTiles,normalizeTiles,moveTile,migrateTiles,loadTiles,saveTiles,TI
 test('corrupt or old layouts retain every application exactly once',()=>{
  assert.deepEqual(normalizeTiles(null),defaultTiles());
  const normalized=migrateTiles([{id:'reply',size:'wide'},{id:'reply',size:'small'},{id:'map',size:'huge'},{id:'unknown',size:'wide'},null]);
- assert.deepEqual(normalized.map(t=>t.id),['reply','map','status','organizations','stylewriter','information','effects','worldbooks','tts','ai','settings']);
+ assert.deepEqual(normalized.map(t=>t.id),['reply','map','status','organizations','information','effects','worldbooks','tts','ai','settings']);
  assert.equal(normalized[0].size,'wide');assert.equal(normalized[1].size,'wide');
 });
 test('drag moves before or after target, keeping sizes and source immutable',()=>{
@@ -37,4 +37,15 @@ test('portrait tiles retain footprint through persistence, copies and reordering
  const layout=[{id:'long',target:'map',label:'竖向地图',size:'tall'},...defaultTiles()];
  assert.equal(normalizeTiles(layout)[0].size,'tall');assert.equal(moveTile(layout,'long','settings',true).at(-1).size,'tall');
  const data=new Map(),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};saveTiles(storage,layout);assert.deepEqual(loadTiles(storage),layout);
+});
+
+
+test('merged writing app has one default tile but preserves old rewrite aliases and labels',()=>{
+ assert.equal(defaultTiles().some(t=>t.target==='stylewriter'),false);
+ const old=[{id:'my-rewrite',target:'stylewriter',label:'我的润色',size:'tall'}];
+ assert.deepEqual(normalizeTiles(old),old);
+ const data=new Map(),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
+ saveTiles(storage,old);assert.deepEqual(loadTiles(storage),old);
+ const migrated=migrateTiles([{id:'stylewriter',size:'wide'}]);
+ assert.equal(migrated[0].target,'stylewriter');assert.equal(migrated[0].size,'wide');
 });

@@ -25,3 +25,10 @@
 .ro-panel .ro-direction-list {margin:12px 0;}
 .ro-panel .ro-direction-item {display:flex;align-items:center;gap:8px;margin:8px 0;}
 .ro-panel .ro-direction-item input:not([type=checkbox]) {flex:1;min-width:0;}
+
+.amin-writing-workspace [hidden] { display:none!important; }
+.amin-content-styles label {display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.amin-content-styles select,.amin-content-styles input,.amin-content-styles textarea {box-sizing:border-box;max-width:100%;min-width:0;color:inherit;font:inherit;}
+.amin-content-styles textarea,.amin-content-styles details>input,.amin-content-styles details>select {display:block;width:100%;margin:8px 0;}
+.ro-candidate {display:flex;flex-wrap:wrap;gap:6px;}
+.ro-candidate .ro-card {flex:1 0 100%;}

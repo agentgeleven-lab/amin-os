@@ -68,7 +68,7 @@ test('preset store seeds once, persists CRUD to extensionSettings and keeps only
     const saved = host.extensionSettings[STORE_KEY];
     assert.equal(saved.presets.length, 3);
     assert.equal(saved.selectedId, created.id);
-    assert.deepEqual(Object.keys(saved).sort(), ['mode', 'presets', 'selectedId']);
+    assert.deepEqual(Object.keys(saved).sort(), ['contentMode', 'mode', 'presets', 'selectedId']);
     assert.ok(!JSON.stringify(saved).includes('apiKey'));
     assert.throws(() => store.save({ name: '测试文风', description: 'x' }), /同名/);
     const updated = store.save({ name: '测试文风2', description: '改' }, created.id);
@@ -190,7 +190,7 @@ test('requests keep the source verbatim, separate both modes and refuse empty in
     assert.equal(whole.meta.sourceChars, 20000);
     const truncatedLabel = buildRequest({ mode: 'chat', source: 'x', samples: { ...samples, truncated: true } }).meta.label;
     assert.match(truncatedLabel, /更早消息未包含/);
-    assert.equal(MODES.length, 2);
+    assert.equal(MODES.length, 3);
     assert.equal(normalizeResult('  <think>x</think> 改写后\n'), '改写后');
     assert.equal(normalizeResult('ok'), 'ok');
     assert.throws(() => normalizeResult('   '), /未返回/);

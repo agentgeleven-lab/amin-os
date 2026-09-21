@@ -12,7 +12,7 @@ const root = path.resolve(process.env.AMIN_REPO || path.resolve(path.dirname(fil
 const executable = process.env.AMIN_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 if (!fs.existsSync(executable)) throw Error('Set AMIN_BROWSER to a Chromium executable');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'amin-stylewriter-'));
-const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui/standard.css"><style>body{margin:0;font:14px sans-serif;background:#202020;color:#fff;--amin-card:#292929;--amin-line:#666;--amin-text:#fff;--amin-muted:#ccc;--amin-gap:10px;--amin-font:13px;--amin-radius:6px;--amin-control:#333;--amin-accent:#7bbad3;--amin-ink:#111}*{box-sizing:border-box}#app{width:448px;max-width:100%;padding:10px}button,input,select,textarea{font:inherit}textarea,input,select{width:100%}</style></head><body><div id="amin-os"><div id="app" class="amin-ui"></div></div><form id="send_form"><textarea id="send_textarea" placeholder="发送消息…"></textarea></form></body></html>`;
+const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui/standard.css"><link rel="stylesheet" href="/apps/reply/style.css"><style>body{margin:0;font:14px sans-serif;background:#202020;color:#fff;--amin-card:#292929;--amin-line:#666;--amin-text:#fff;--amin-muted:#ccc;--amin-gap:10px;--amin-font:13px;--amin-radius:6px;--amin-control:#333;--amin-accent:#7bbad3;--amin-ink:#111}*{box-sizing:border-box}#app{width:448px;max-width:100%;padding:10px}button,input,select,textarea{font:inherit}textarea,input,select{width:100%}</style></head><body><div id="amin-os"><div id="app" class="amin-ui"></div></div><form id="send_form"><textarea id="send_textarea" placeholder="发送消息…"></textarea></form></body></html>`;
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/') { res.setHeader('content-type', 'text/html'); res.end(html); return; }
@@ -164,7 +164,57 @@ try {
 
     assert.deepEqual(errors, []);
     console.log('PASS real Chromium DOM: stylewriter mount-once, preset CRUD + undo, custom/reference isolation, gated conversion, guarded fill-back, per-chat privacy, 390px layout.');
-    await evaluate('window.__view.dispose()');
+    // The merged workspace uses real DOM with both production views and fake transports.
+    await evaluate(`(async()=>{
+        __view.dispose();
+        window.SillyTavern={getContext:()=>__ctx};
+        __ctx.extensionSettings.reply_options_mvp={count:2,character:false,persona:false,world:false};
+        window.__candidateRequests=[];
+        __ctx.generateRaw=async request=>{__candidateRequests.push(request);return JSON.stringify({options:[{text:'候选甲'},{text:'候选乙'}]});};
+        const {mount}=await import('/apps/reply/workspace.js');
+        window.__workspace=mount(document.getElementById('app'),{rewriteOptions:{getContext:()=>__ctx,ai:()=>__ai,generate:__generate}});
+        window.__workspaceMount=mount;
+        window.__reply=()=>document.getElementById('reply-options-panel');
+        window.__replyLabel=label=>__reply().querySelector('[aria-label="'+label+'"]');
+        window.__workClick=async (root,text)=>{const b=[...root.querySelectorAll('button')].find(b=>b.textContent===text);if(!b)throw Error('missing '+text);b.click();await new Promise(r=>setTimeout(r,50));};
+        const {contentLibrary,styleLibrary}=await import('/apps/reply/writing-library.js');
+        window.__contents=contentLibrary(()=>__ctx);window.__styles=styleLibrary(()=>__ctx);
+        window.__mystyle=__contents.save({name:'浏览器悬疑',description:'BROWSER-THEME'});
+        __set(__replyLabel('内容风格'),__mystyle.id);
+        __set(__replyLabel('候选文风'),'custom');
+        __set(__replyLabel('候选文风预设'),__styles.list()[0].id);
+        return true;
+    })()`);
+    assert.equal(await evaluate('__workspaceMount(document.getElementById("app"))===__workspace'),true);
+    await evaluate('__workClick(__reply(),"生成选项")');
+    assert.equal(await evaluate('__candidateRequests.length'),1);
+    assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/BROWSER-THEME/);
+    assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/目标文风/);
+    const rewritesBefore=await evaluate('__requests.length');
+    await evaluate('__workClick(__reply(),"继续改写")');
+    assert.equal(await evaluate('__label("原文").value'),'候选甲');
+    assert.equal(await evaluate('__requests.length'),rewritesBefore);
+    assert.equal(await evaluate('__label("内容风格").value'),'none');
+    assert.equal(await evaluate('__reply().parentElement.hidden'),true);
+    await evaluate(`__click('不额外指定文风'); __click('转换文风')`);
+    assert.equal(await evaluate('__requests.length'),rewritesBefore+1);
+    assert.equal(await evaluate('__requests.at(-1).request.systemPrompt.includes("BROWSER-THEME")'),false);
+    await evaluate('__gate.resolve("合并后的改写结果")');await delay(80);
+    assert.equal(await evaluate('__label("转换结果").value'),'合并后的改写结果');
+    // Other page edits invalidate an in-flight conversion using that style.
+    await evaluate(`__set(__label('内容风格'),__mystyle.id); __click('转换文风')`);
+    await evaluate(`__contents.save({name:'浏览器悬疑',description:'BROWSER-CHANGED'},__mystyle.id); __gate.resolve('不能覆盖的迟到结果')`);await delay(80);
+    assert.equal(await evaluate('__label("转换结果").value'),'合并后的改写结果');
+    // Tab switches keep the source draft and preset editor mounted, not reconstructed.
+    await evaluate(`(async()=>{__workspace.open('candidates');await __workClick(__reply(),'生成 / 换一批');await __workClick(__reply(),'继续改写');})()`);
+    assert.equal(await evaluate('__label("原文").value'),'候选甲');
+    assert.equal(await evaluate('__submits'),0);
+    const mergedLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
+    assert.ok(mergedLayout.scroll<=Math.max(mergedLayout.client,390),'merged narrow page overflows');
+    assert.deepEqual(errors,[]);
+    console.log('PASS merged writing workspace: mount-once, single candidate call with theme/style, transfer without AI, independent choices, stale rewrite rejection, no auto-send, 390px layout.');
+    await evaluate('__workspace.dispose()');
+
     await send('Browser.close').catch(() => {});
 } finally {
     socket?.close();

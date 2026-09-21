@@ -36,7 +36,7 @@ export function installAppearance(document){
  function style(element,id){if(!element)return;const config=ai.resolve(id);element.dataset.aminSurface=id||'os';element.dataset.aminTheme=config.theme;element.dataset.aminDensity=config.density;element.style.colorScheme=PALETTES[config.theme].scheme;for(const [name,value]of Object.entries(themeVariables(config)))element.style.setProperty(name,value);}
  function apply(){
   const os=document.getElementById('amin-os');style(os);if(os)os.dataset.desktopStyle=ai.snapshot().desktop.style;
-  for(const e of document.querySelectorAll('#amin-os .amin-app-pane'))style(e,e.dataset.app==='settings'?'':e.dataset.app);
+  for(const e of document.querySelectorAll('#amin-os .amin-app-pane, #amin-os .amin-writing-page'))style(e,e.dataset.app==='settings'?'':e.dataset.app);
   for(const e of document.querySelectorAll('.dynamic-map-panel'))style(e,'map');
   const floor=ai.snapshot().floor;
   for(const e of document.querySelectorAll('.amin-floor')){style(e,'');e.dataset.alignment=floor.alignment;e.dataset.sizeMode=floor.sizeMode;}

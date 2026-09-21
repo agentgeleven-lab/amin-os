@@ -458,3 +458,44 @@ test('failed mode persistence keeps visible mode and store mode in sync',async()
 test('source value comparison rejects unannounced editor replacement during a run',async()=>{
  const f=fixture(),source=byLabel(f.root,'原文','textarea');source.value='第一份';fire(source,'input');await click(f.root,'转换文风');source.value='第二份';await f.respond('旧改写');assert.equal(byLabel(f.root,'转换结果','textarea').value,'');assert.match(statusOf(f.root),/原文.*修改/);f.view.dispose();
 });
+
+// Merged-workspace regressions: source transfer and shared content-style editing.
+test('candidate handoff never generates or overwrites existing rewrite drafts and checks chat identity', async () => {
+    const f=fixture();
+    const {chatIdentity}=await import('../apps/stylewriter/model.js');
+    const identity=chatIdentity(f.ctx);
+    f.view.acceptSource('候选草稿',identity);
+    assert.equal(byLabel(f.root,'原文','textarea').value,'候选草稿');assert.equal(f.calls.length,0);
+    assert.throws(()=>f.view.acceptSource('另一候选',identity),/已有原文草稿/);
+    assert.equal(byLabel(f.root,'原文','textarea').value,'候选草稿');
+    f.ctx.getCurrentChatId=()=> 'changed';
+    assert.throws(()=>f.view.acceptSource('旧候选',identity),/聊天已变化/);
+    assert.equal(byLabel(f.root,'原文','textarea').value,'');
+    f.view.dispose();
+});
+test('content style UI supports create copy delete undo and keeps generation/rewrite choices separate',async()=>{
+    const f=fixture({extensionSettings:{reply_options_mvp:{contentMode:'violence',violencePrompt:'原暴力要求'}}});
+    const name=byLabel(f.root,'内容风格名称','input'),prompt=byLabel(f.root,'内容风格提示词','textarea');
+    assert.equal(byLabel(f.root,'内容风格','select').value,'none');
+    name.value='悬疑';fire(name,'input');prompt.value='信息差与线索';fire(prompt,'input');await click(f.root,'保存风格');
+    const store=f.ctx.extensionSettings.amin_os_content_styles_v1,preset=store.presets.find(p=>p.name==='悬疑');assert.ok(preset);
+    assert.equal(f.ctx.extensionSettings.reply_options_mvp.contentMode,'violence');
+    assert.equal(f.ctx.extensionSettings.amin_os_stylewriter_v1.contentMode,preset.id);
+    await click(f.root,'复制风格');assert.equal(store.presets.length+1,f.ctx.extensionSettings.amin_os_content_styles_v1.presets.length);
+    await click(f.root,'删除风格');await click(f.root,'确认删除');
+    assert.equal(byLabel(f.root,'内容风格','select').value,'none');
+    await click(f.root,'恢复已删除风格（撤销）');assert.notEqual(byLabel(f.root,'内容风格','select').value,'none');
+    f.view.dispose();
+});
+test('editing selected shared content cancels an in-flight rewrite and blocks reuse until saved',async()=>{
+    const f=fixture();await click(f.root,'不额外指定文风');
+    const name=byLabel(f.root,'内容风格名称','input'),prompt=byLabel(f.root,'内容风格提示词','textarea');
+    name.value='日常';fire(name,'input');prompt.value='原来的日常重点';fire(prompt,'input');await click(f.root,'保存风格');
+    const source=byLabel(f.root,'原文','textarea');source.value='原文事实';fire(source,'input');await click(f.root,'转换文风');
+    assert.equal(f.calls.length,1);assert.match(f.calls[0].request.systemPrompt,/原来的日常重点/);
+    prompt.value='编辑但尚未保存';fire(prompt,'input');await f.respond('过期结果');
+    assert.equal(byLabel(f.root,'转换结果','textarea').value,'');
+    await click(f.root,'转换文风');assert.equal(f.calls.length,1);assert.match(statusOf(f.root),/先保存或放弃/);
+    await click(f.root,'保存风格');await click(f.root,'转换文风');assert.equal(f.calls.length,2);assert.match(f.calls[1].request.systemPrompt,/编辑但尚未保存/);
+    await f.respond('新结果');f.view.dispose();
+});

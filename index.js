@@ -39,8 +39,8 @@ export function initialize() {
         ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
         map:()=>import('./apps/map/index.js').then(m=>m.initialize({mount:shell.panes.map,onOpen:()=>shell.showApp('map')})),
         status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.home()})),
-        reply:()=>import('./apps/reply/index.js').then(m=>{m.mount({target:shell.panes.reply});return {open(){if(!shell.panes.reply.querySelector('#reply-options-panel'))m.mount({target:shell.panes.reply});if(!shell.panes.reply.querySelector('#reply-options-panel'))throw Error('请等待聊天输入框加载完成后重试。');}};}),
-        stylewriter:()=>import('./apps/stylewriter/view.js').then(m=>m.mount(shell.panes.stylewriter)),
+        reply:()=>import('./apps/reply/workspace.js').then(m=>m.mount(shell.panes.reply)),
+        stylewriter:()=>import('./apps/reply/workspace.js').then(m=>({open:()=>m.mount(shell.panes.reply).open('rewrite')})),
     };
     const ready={};
     for(const id of Object.keys(apps)){
@@ -57,7 +57,7 @@ export function initialize() {
     installExtraFloorButtons('organizations');installExtraFloorButtons('effects');installExtraFloorButtons('information');installExtraFloorButtons('worldbooks');installExtraFloorButtons('tts');
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.11.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.11.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 
