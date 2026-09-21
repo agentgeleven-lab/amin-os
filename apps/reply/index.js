@@ -6,16 +6,17 @@ import { CONTENT_MODES, normalizeSettings, chatStamp, collectContext, generateOp
 const KEY='reply_options_mvp';
 const context=()=>globalThis.SillyTavern?.getContext?.();
 const node=(tag,text,cls)=>{const n=document.createElement(tag); if(text)n.textContent=text;if(cls)n.className=cls;return n;};
-export function mount({target,instanceId='reply-options-panel',contextProvider,headingText,onRewrite,onManageStyle} = {}) {
-    const context=()=>{const ctx=globalThis.SillyTavern?.getContext?.();return contextProvider&&ctx?contextProvider(ctx):ctx;};
+export function mount({target,instanceId='reply-options-panel',contextProvider,headingText,onRewrite,onManageStyle,getContext} = {}) {
+    const hostContext=getContext??(()=>globalThis.SillyTavern?.getContext?.());
+    const context=()=>{const ctx=hostContext();return contextProvider?contextProvider(ctx??{}):ctx;};
     onRewrite ??= globalThis.AminOS?.openRewrite;
     const settingsId=instanceId==='reply-options-panel'?'reply-options-settings':instanceId+'-settings';
     const removers=[];
     if(document.getElementById(instanceId))return;
     const ctx=context(), form=document.querySelector('#send_form');if(!ctx||!form)return;
     let settings=normalizeSettings(ctx.extensionSettings?.[KEY]), revision=0, controller=null;
-    const draft=new DraftSelection();
-    const styles=styleLibrary(context),contents=contentLibrary(context);
+    const draft=new DraftSelection();let draftIdentity=null;
+    const styles=styleLibrary(hostContext),contents=contentLibrary(hostContext);
     const panel=node('details');panel.id=instanceId;panel.className='ro-panel';panel.open=target ? true : settings.expanded;
     panel.append(node('summary','回复选项'));
     const controls=node('div',null,'ro-controls'), cards=node('div',null,'ro-options'), status=node('div','点击生成，选择后填入，由你发送。','ro-status');
@@ -23,10 +24,10 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     const button=(label,fn,parent=controls)=>{const b=node('button',label,'menu_button');b.type='button';b.addEventListener('click',fn);parent.append(b);return b;};
     const generate=button('生成选项',()=>run(false)), expand=button('根据草稿扩写',()=>run(true));
     const cancel=button('停止等待',()=>controller?.abort());cancel.hidden=true;
-    const undo=button('撤销填入',()=>{try{draft.undo(inputElement());status.textContent='已还原原草稿。';updateSelection();}catch(e){status.textContent=e.message;}});
+    const undo=button('撤销填入',()=>{try{if(chatIdentity(context())!==draftIdentity)throw Error('聊天已变化，不能撤销旧候选。');draft.undo(inputElement());status.textContent='已还原原草稿。';updateSelection();}catch(e){status.textContent=e.message;}});
     button('保留编辑',()=>{draft.reset();updateSelection();status.textContent='已保留输入框现有内容；下次选择将以它为原草稿。';});
     const settingsBox=node('div');settingsBox.id=settingsId;settingsBox.className='ro-settings';settingsBox.hidden=true;
-    function save(){const c=context();if(c?.extensionSettings){c.extensionSettings[KEY]={...settings};c.saveSettingsDebounced?.();}}
+    function save(){const c=hostContext();if(c?.extensionSettings){c.extensionSettings[KEY]={...settings};c.saveSettingsDebounced?.();}}
     function invalidate(message='上下文已更新，请重新生成。',reset=false){revision++;controller?.abort();cards.replaceChildren();if(reset)draft.reset();updateSelection();status.textContent=message;}
     const fieldRows=new Map();
     function field(key,label,type,options){
@@ -87,7 +88,9 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     styleMode.addEventListener('change',()=>{settings.writingStyleMode=styleMode.value;save();reflectContent();invalidate('文风已变化，请重新生成。');});
     styleSelect.addEventListener('change',()=>{settings.writingStyleId=styleSelect.value;save();invalidate('文风已变化，请重新生成。');});
     button('管理文风预设',()=>onManageStyle?onManageStyle():globalThis.AminOS?.openApp('stylewriter'),contentRow);
-    const unsubscribeStyles=styles.subscribe(()=>{reflectContent();invalidate('文风预设或编辑已变化，请重新生成。');});
+    const selectedStyleStamp=()=>settings.writingStyleMode==='custom'?JSON.stringify([settings.writingStyleId,styles.get(settings.writingStyleId),styles.hasDraft(settings.writingStyleId)]):settings.writingStyleMode;
+    let styleMark=selectedStyleStamp();
+    const unsubscribeStyles=styles.subscribe(()=>{reflectContent();const mark=selectedStyleStamp();if(mark!==styleMark){styleMark=mark;invalidate('文风预设或编辑已变化，请重新生成。');}});
     reflectContent();
 
     panel.append(modeRow,contentRow,modeHelp,controls,settingsBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
@@ -98,7 +101,7 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     async function run(fromDraft){
         if(controller)return;
         let initial, stamp, identity, config, ticket, original, contentStyle,writingStyle;
-        try{initial=context();settings=normalizeSettings(initial?.extensionSettings?.[KEY]);stamp=chatStamp(initial);identity=chatIdentity(initial);config={...settings};contentControls.assertSaved();contentStyle=contentControls.selection();if(styles.hasDraft(config.writingStyleId)&&config.writingStyleMode==='custom')throw Error('请先保存或放弃所选文风预设的修改。');writingStyle={mode:config.writingStyleMode,preset:styles.get(config.writingStyleId),samples:config.writingStyleMode==='chat'?referenceSamples(initial):undefined};reflectMode();reflectContent();original=inputElement().value;if(fromDraft&&!original.trim())throw new Error(settings.writingMode==='author'?'先在输入框写下剧情构想或推进要求。':'先在输入框写下草稿或回复意图。');}catch(e){status.textContent=e.message;return;}
+        try{initial=context();stamp=chatStamp(initial);identity=chatIdentity(initial);config={...settings};contentControls.assertSaved();contentStyle=contentControls.selection();if(styles.hasDraft(config.writingStyleId)&&config.writingStyleMode==='custom')throw Error('请先保存或放弃所选文风预设的修改。');writingStyle={mode:config.writingStyleMode,preset:styles.get(config.writingStyleId),samples:config.writingStyleMode==='chat'?referenceSamples(initial):undefined};reflectMode();reflectContent();styleMark=selectedStyleStamp();original=inputElement().value;if(fromDraft&&!original.trim())throw new Error(settings.writingMode==='author'?'先在输入框写下剧情构想或推进要求。':'先在输入框写下草稿或回复意图。');}catch(e){status.textContent=e.message;return;}
         if(fromDraft)draft.reset();updateSelection();cards.replaceChildren();ticket=++revision;const current=new AbortController();controller=current;setBusy(true);
         let sources='正在读取世界书…';
         status.textContent=sources;
@@ -106,14 +109,14 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
             const options=await waitForResult(generateOptions(initial,config,{draft:fromDraft?original:'',contentStyle,writingStyle,signal:current.signal,isCurrent:()=>!current.signal.aborted && ticket===revision && stamp===chatStamp(context()) && identity===chatIdentity(context()),onContext:(info,lore)=>{sources=`人设：${info.persona?'已读取':'未使用/为空'}；角色：${info.characters.length}；世界书：${lore.books.length} 本 / ${info.world.length} 条`;status.textContent=`生成中… ${sources}`;}}),(getAI()?.capture('reply').config.timeoutSeconds??config.timeout)*1000,current.signal);
             if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))throw new Error('聊天已变化，本次结果已丢弃。');
             for(const option of options){const card=node('button',null,'ro-card');card.type='button';card.setAttribute('aria-pressed','false');card.append(node('strong',option.label),node('span',option.text));card.addEventListener('click',()=>{
-                if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))return invalidate();
-                try{const input=inputElement();if(fromDraft&&draft.base===null&&input.value!==original)throw new Error('扩写期间草稿已改变，请重新扩写或使用普通生成。');draft.choose(input,option.text,fromDraft?'replace':config.mode);updateSelection();card.setAttribute('aria-pressed','true');status.textContent='已填入，尚未发送。可切换候选或撤销。';}catch(e){status.textContent=e.message;}
+                try{if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))return invalidate();
+                const input=inputElement();if(fromDraft&&draft.base===null&&input.value!==original)throw new Error('扩写期间草稿已改变，请重新扩写或使用普通生成。');draft.choose(input,option.text,fromDraft?'replace':config.mode);draftIdentity=identity;updateSelection();card.setAttribute('aria-pressed','true');status.textContent='已填入，尚未发送。可切换候选或撤销。';}catch(e){status.textContent=e.message;}
             });
                 const row=node('div',null,'ro-candidate');row.append(card);
                 button('复制',async()=>{try{await navigator.clipboard.writeText(option.text);status.textContent='候选已复制。';}catch{status.textContent='剪贴板不可用，请选择候选文字手动复制。';}},row);
                 if(onRewrite)button('继续改写',async()=>{
-                    if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))return invalidate();
-                    try{await onRewrite(option.text,identity);status.textContent='已转入改写页，尚未调用 AI。';}catch(e){status.textContent=e.message;}
+                    try{if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))return invalidate();
+                    await onRewrite(option.text,identity);status.textContent='已转入改写页，尚未调用 AI。';}catch(e){status.textContent=e.message;}
                 },row);
                 cards.append(row);
             }

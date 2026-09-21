@@ -499,3 +499,102 @@ test('editing selected shared content cancels an in-flight rewrite and blocks re
     await click(f.root,'保存风格');await click(f.root,'转换文风');assert.equal(f.calls.length,2);assert.match(f.calls[1].request.systemPrompt,/编辑但尚未保存/);
     await f.respond('新结果');f.view.dispose();
 });
+
+import {mount as mountWorkspace} from '../apps/reply/workspace.js';
+import {floorContext} from '../apps/reply/floor-ui.js';
+import {chatIdentity} from '../apps/stylewriter/model.js';
+import {styleLibrary} from '../apps/reply/writing-library.js';
+
+function floorFixture(f,index,id='floor-'+index){
+ const target=new FakeNode('div'),calls=[];
+ const message=f.ctx.chat[index],identity=chatIdentity(f.ctx);
+ let resolve,replyOptions,disposals=0;
+ const contextProvider=ctx=>{if(chatIdentity(ctx)!==identity)throw Error('聊天已切换，请重新打开窗口。');return floorContext(ctx,index,message);};
+ const options={document:f.doc,getContext:()=>f.ctx,contextProvider,instanceId:id,
+  mountReply:opts=>{replyOptions=opts;return {dispose(){disposals++;}};},
+  rewriteOptions:{ai:()=>f.ai,generate:(ctx,request,opts)=>new Promise(r=>{resolve=r;calls.push({ctx,request,opts});})},
+ };
+ const view=mountWorkspace(target,options);
+ const root=descendants(target).find(n=>n.id===id+'-rewrite');
+ return {view,target,root,options,calls,get replyOptions(){return replyOptions;},get disposals(){return disposals;},respond:async text=>{resolve(text);await wait();}};
+}
+
+test('floor workspaces use unique IDs, transfer locally without AI, and preserve source across tab switches',async t=>{
+ const f=fixture();t.after(()=>f.view.dispose());
+ const a=floorFixture(f,0);t.after(()=>a.view.dispose());
+ assert.equal(mountWorkspace(a.target,a.options),a.view);
+ assert.equal(a.replyOptions.instanceId,'floor-0');
+ assert.equal(a.replyOptions.contextProvider(f.ctx).chat.length,1);
+ assert.equal(a.replyOptions.getContext(),f.ctx);
+ a.replyOptions.onRewrite('楼层候选',chatIdentity(f.ctx));
+ assert.equal(byLabel(a.root,'原文','textarea').value,'楼层候选');
+ assert.equal(byLabel(f.root,'原文','textarea').value,'');assert.equal(a.calls.length,0);
+ a.view.open('candidates');a.view.open('rewrite');
+ assert.equal(byLabel(a.root,'原文','textarea').value,'楼层候选');
+ assert.throws(()=>a.replyOptions.onRewrite('另一候选',chatIdentity(f.ctx)),/已有原文草稿/);
+ a.view.dispose();a.view.dispose();assert.equal(a.disposals,1);assert.equal(a.target.children.length,0);
+ assert.throws(()=>a.view.open(),/窗口已关闭/);
+});
+
+test('two floor rewrites use only their bounded history and keep independent results',async t=>{
+ const f=fixture();t.after(()=>f.view.dispose());f.ctx.chat.push({name:'未来',mes:'FUTURE-SECRET'});
+ const a=floorFixture(f,0),b=floorFixture(f,1);t.after(()=>{a.view.dispose();b.view.dispose();});
+ a.view.acceptSource('甲原文',chatIdentity(f.ctx));b.view.acceptSource('乙原文',chatIdentity(f.ctx));
+ await click(a.root,'转换文风');await click(b.root,'转换文风');
+ assert.equal(a.calls[0].ctx.chat.length,1);assert.equal(b.calls[0].ctx.chat.length,2);
+ assert.equal(JSON.stringify(a.calls[0].request).includes('我抬头看她。'),false);
+ assert.equal(JSON.stringify(b.calls[0].request).includes('FUTURE-SECRET'),false);
+ assert.equal(a.calls[0].opts.signal.aborted,false);
+ await a.respond('甲结果');await b.respond('乙结果');
+ assert.equal(byLabel(a.root,'转换结果','textarea').value,'甲结果');
+ assert.equal(byLabel(b.root,'转换结果','textarea').value,'乙结果');
+ assert.equal(byLabel(f.root,'转换结果','textarea').value,'');
+});
+
+test('unrelated window settings, new styles and closing a floor do not cancel another custom rewrite',async t=>{
+ const f=fixture();t.after(()=>f.view.dispose());f.view.setMode('custom');
+ const original=byLabel(f.root,'文风预设','select').value;
+ const styles=styleLibrary(()=>f.ctx);const other=styles.save({name:'楼层独立选择',description:'另一个表达方式'});
+ assert.equal(byLabel(f.root,'文风预设','select').value,original);
+ const a=floorFixture(f,0);t.after(()=>a.view.dispose());
+ assert.equal(byLabel(a.root,'文风预设','select').value,other.id);
+ f.view.acceptSource('主窗口原文',chatIdentity(f.ctx));await click(f.root,'转换文风');
+ const desc=byLabel(a.root,'文风说明','textarea');desc.value='未保存的另一预设';fire(desc,'input');
+ await click(a.root,'不额外指定文风');
+ a.view.acceptSource('楼层原文',chatIdentity(f.ctx));await click(a.root,'转换文风');
+ a.view.dispose();
+ assert.equal(a.calls[0].opts.signal.aborted,true);
+ assert.equal(f.calls[0].opts.signal.aborted,false);
+ await f.respond('主窗口有效结果');assert.equal(byLabel(f.root,'转换结果','textarea').value,'主窗口有效结果');
+});
+
+test('editing a shared selected preset in another window cancels the affected rewrite',async t=>{
+ const f=fixture();t.after(()=>f.view.dispose());f.view.setMode('custom');
+ const a=floorFixture(f,0);t.after(()=>a.view.dispose());
+ f.view.acceptSource('主窗口原文',chatIdentity(f.ctx));await click(f.root,'转换文风');
+ const desc=byLabel(a.root,'文风说明','textarea');desc.value='同一预设的未保存修改';fire(desc,'input');
+ assert.equal(f.calls[0].opts.signal.aborted,true);await f.respond('不可应用');
+ assert.equal(byLabel(f.root,'转换结果','textarea').value,'');
+});
+
+test('floor reference ignores later messages but rejects edits within its sampled history',async t=>{
+ const f=fixture();t.after(()=>f.view.dispose());const a=floorFixture(f,1);t.after(()=>a.view.dispose());
+ a.view.acceptSource('原文',chatIdentity(f.ctx));await click(a.root,'转换文风');
+ f.ctx.chat.push({mes:'新增的后续消息',name:'未来'});await a.respond('合法结果');
+ assert.equal(byLabel(a.root,'转换结果','textarea').value,'合法结果');
+ await click(a.root,'转换文风');f.ctx.chat[0].mes='前文已修改';await a.respond('过时结果');
+ assert.equal(byLabel(a.root,'转换结果','textarea').value,'合法结果');assert.match(statusOf(a.root),/内容已更新/);
+});
+
+test('invalid floor or replaced chat metadata blocks generation and fill, and event handlers are cleaned up',async t=>{
+ const f=fixture();t.after(()=>f.view.dispose());const a=floorFixture(f,0);t.after(()=>a.view.dispose());
+ a.view.acceptSource('原文',chatIdentity(f.ctx));await click(a.root,'不额外指定文风');await click(a.root,'转换文风');await a.respond('转换结果');
+ f.ctx.chat[0]={mes:'替换后的楼层'};
+ await click(a.root,'填回聊天输入框');assert.equal(f.input.value,'');assert.match(statusOf(a.root),/楼层内容已变化/);
+ await click(a.root,'转换文风');assert.equal(a.calls.length,1);
+ f.ctx.chatMetadata={};assert.doesNotThrow(()=>f.eventSource.emit('chat_changed'));
+ assert.equal(byLabel(a.root,'原文','textarea').value,'');assert.equal(byLabel(a.root,'转换结果','textarea').value,'');
+ a.view.dispose();assert.doesNotThrow(()=>f.eventSource.emit('chat_changed'));
+ // A stale floor getter must never become the shared library's persistence provider.
+ assert.doesNotThrow(()=>styleLibrary(()=>f.ctx).save({name:'关闭楼层之后',description:'仍可保存'}));
+});

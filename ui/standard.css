@@ -1,12 +1,12 @@
 /* Amin UI v1. Shared across app panes and the isolated status document.
    Important declarations intentionally bridge legacy plugin/host control rules. */
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) {
   --amin-ui-family: 'Segoe UI','Microsoft YaHei',sans-serif;
   font: var(--amin-font)/1.6 var(--amin-ui-family);
   color:var(--amin-text); scrollbar-width:thin;
   scrollbar-color:var(--amin-line) transparent;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea) {
   box-sizing:border-box; font:var(--amin-font)/1.5 var(--amin-ui-family)!important; letter-spacing:normal;
   min-height:36px; max-width:100%; padding:calc(var(--amin-gap) * .6) calc(var(--amin-gap) * .85);
   border:1px solid var(--amin-line)!important;
@@ -14,45 +14,45 @@
   background:var(--amin-control)!important; color:var(--amin-text)!important;
   box-shadow:none!important; text-shadow:none!important; color-scheme:inherit;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(input[type=checkbox],input[type=radio]) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(input[type=checkbox],input[type=radio]) {
   min-height:0; width:auto; accent-color:var(--amin-accent-text,var(--amin-accent));
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button {cursor:pointer;line-height:1.5!important}
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button:disabled {opacity:.5!important;cursor:default}
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button:hover:not(:disabled) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button {cursor:pointer;line-height:1.5!important}
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button:disabled {opacity:.5!important;cursor:default}
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button:hover:not(:disabled) {
   border-color:var(--amin-accent)!important;
   background:color-mix(in srgb,var(--amin-control) 85%,var(--amin-accent))!important;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea):focus-visible {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button,input,select,textarea):focus-visible {
   outline:2px solid var(--amin-accent)!important;outline-offset:2px;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child) {
   background:var(--amin-accent)!important;color:var(--amin-ink)!important;border-color:var(--amin-accent)!important;font-weight:600!important;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child):hover:not(:disabled) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-primary,.dm-primary,button.primary,.ro-controls button:first-child):hover:not(:disabled) {
   background:var(--amin-accent)!important;color:var(--amin-ink)!important;filter:brightness(1.08);
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-page {padding:var(--amin-gap);min-width:0}
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-scroll {flex:1;min-height:0;overflow:auto}
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-savebar {display:flex;flex-wrap:wrap;gap:8px;padding:var(--amin-gap);border-top:1px solid var(--amin-line);background:var(--amin-card)}
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-toolbar,.ro-controls,.wsh-actions,.toolbar) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-page {padding:var(--amin-gap);min-width:0}
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-scroll {flex:1;min-height:0;overflow:auto}
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) .amin-savebar {display:flex;flex-wrap:wrap;gap:8px;padding:var(--amin-gap);border-top:1px solid var(--amin-line);background:var(--amin-card)}
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-toolbar,.ro-controls,.wsh-actions,.toolbar) {
   display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 var(--amin-gap);
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) {
   display:flex;flex-wrap:wrap;gap:6px;padding:var(--amin-gap) 0;
   border-bottom:1px solid var(--amin-line);margin:0 0 var(--amin-gap);
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) button {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-tabs,[role=tablist],.dm-tabs) button {
   background:transparent!important;border-color:transparent!important;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button[aria-selected=true],button[aria-pressed=true]) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(button[aria-selected=true],button[aria-pressed=true]) {
   background:var(--amin-card)!important;color:var(--amin-accent-text,var(--amin-accent))!important;border-color:var(--amin-accent)!important;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-notice,.ro-status,.dm-feedback,.wsh-report,#status):not(:empty) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-notice,.ro-status,.dm-feedback,.wsh-report,#status):not(:empty) {
   color:var(--amin-muted)!important;background:var(--amin-card)!important;
   font:inherit!important;padding:10px 12px!important;border:1px solid var(--amin-line);border-radius:var(--amin-radius);margin:var(--amin-gap) 0;
 }
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-card,.ro-card,.card) {
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) :is(.amin-card,.ro-card,.card) {
   background:var(--amin-card)!important;color:var(--amin-text)!important;border:1px solid var(--amin-line)!important;border-radius:var(--amin-radius)!important;padding:var(--amin-gap);
 }
 /* Shell and legacy adapters. New apps use the semantic classes above. */
@@ -79,7 +79,7 @@
 html[data-wsh-frame][data-amin-surface] :is(body,.hud) {font-family:var(--amin-ui-family)!important}
 html[data-wsh-frame][data-amin-surface] header {padding:0;border:0}
 html[data-wsh-frame][data-amin-surface] header :is(.eyebrow,h1,.sub) {display:none}
-:is(:is(#amin-os,.amin-extra-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button.project-toggle {background:transparent!important;border:0!important;text-align:left;padding:0;min-height:30px}
+:is(:is(#amin-os,.amin-extra-floor-window,.amin-reply-floor-window) .amin-ui,html[data-wsh-frame][data-amin-surface]) button.project-toggle {background:transparent!important;border:0!important;text-align:left;padding:0;min-height:30px}
 html[data-wsh-frame][data-amin-surface] :is(body,.hud) {scrollbar-width:thin;scrollbar-color:var(--amin-line) transparent}
 html[data-wsh-frame][data-amin-surface] #scene {margin:var(--amin-gap) 0}
 html[data-wsh-frame][data-amin-surface] .row {border-color:var(--amin-line)}

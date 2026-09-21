@@ -12,7 +12,7 @@ const root = path.resolve(process.env.AMIN_REPO || path.resolve(path.dirname(fil
 const executable = process.env.AMIN_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 if (!fs.existsSync(executable)) throw Error('Set AMIN_BROWSER to a Chromium executable');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'amin-stylewriter-'));
-const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui/standard.css"><link rel="stylesheet" href="/apps/reply/style.css"><style>body{margin:0;font:14px sans-serif;background:#202020;color:#fff;--amin-card:#292929;--amin-line:#666;--amin-text:#fff;--amin-muted:#ccc;--amin-gap:10px;--amin-font:13px;--amin-radius:6px;--amin-control:#333;--amin-accent:#7bbad3;--amin-ink:#111}*{box-sizing:border-box}#app{width:448px;max-width:100%;padding:10px}button,input,select,textarea{font:inherit}textarea,input,select{width:100%}</style></head><body><div id="amin-os"><div id="app" class="amin-ui"></div></div><form id="send_form"><textarea id="send_textarea" placeholder="发送消息…"></textarea></form></body></html>`;
+const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui/standard.css"><link rel="stylesheet" href="/apps/reply/style.css"><link rel="stylesheet" href="/settings/appearance.css"><style>body{margin:0;font:14px sans-serif;background:#202020;color:#fff;--amin-card:#292929;--amin-line:#666;--amin-text:#fff;--amin-muted:#ccc;--amin-gap:10px;--amin-font:13px;--amin-radius:6px;--amin-control:#333;--amin-accent:#7bbad3;--amin-ink:#111}*{box-sizing:border-box}#app{width:448px;max-width:100%;padding:10px}button,input,select,textarea{font:inherit}textarea,input,select{width:100%}</style></head><body><div id="amin-os"><div id="app" class="amin-ui"></div></div><form id="send_form"><textarea id="send_textarea" placeholder="发送消息…"></textarea></form></body></html>`;
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/') { res.setHeader('content-type', 'text/html'); res.end(html); return; }
@@ -53,8 +53,8 @@ try {
 
     // Isolated fixture context + gated fake AI (no real model, no real chat storage).
     await evaluate(`(async () => {
-        const handlers = new Map();
-        const eventSource = { on(type, fn) { if (!handlers.has(type)) handlers.set(type, new Set()); handlers.get(type).add(fn); }, emit(type) { for (const fn of [...(handlers.get(type) ?? [])]) fn(); } };
+        const handlers = new Map();window.__handlers=handlers;
+        const eventSource = { on(type, fn) { if (!handlers.has(type)) handlers.set(type, new Set()); handlers.get(type).add(fn); }, off(type,fn){handlers.get(type)?.delete(fn);}, emit(type) { for (const fn of [...(handlers.get(type) ?? [])]) fn(); } };
         window.__ctx = {
             getCurrentChatId: () => window.__chatId,
             characterId: 0, groupId: null, name1: '测试用户', name2: '临溪',
@@ -213,7 +213,107 @@ try {
     assert.ok(mergedLayout.scroll<=Math.max(mergedLayout.client,390),'merged narrow page overflows');
     assert.deepEqual(errors,[]);
     console.log('PASS merged writing workspace: mount-once, single candidate call with theme/style, transfer without AI, independent choices, stale rewrite rejection, no auto-send, 390px layout.');
+    // Production floor controls with two real workspace instances alongside the main pane.
+    await evaluate(`(async()=>{
+        __ctx.chat=[{name:'甲',mes:'FLOOR-ONE-SAMPLE'},{name:'乙',mes:'FLOOR-TWO-SAMPLE'},{name:'丙',mes:'FUTURE-FLOOR-SECRET'}];
+        __ctx.extensionSettings.reply_options_mvp={count:2,character:false,persona:false,world:false,writingStyleMode:'chat',contentMode:'none'};
+        __styles.setMode('chat');__styles.setContentMode('none');
+        const chat=document.createElement('div');chat.id='chat';
+        for(let i=0;i<3;i++){const e=document.createElement('div');e.className='mes';e.setAttribute('mesid',i);e.innerHTML='<div class="mes_block"></div>';chat.append(e);}
+        document.getElementById('send_form').before(chat);
+        window.__floorCalls=[];
+        window.__floorGenerate=(ctx,request,opts)=>new Promise(resolve=>__floorCalls.push({ctx,request,signal:opts.signal,resolve}));
+        window.__floor=idx=>document.querySelector('[mesid="'+idx+'"] .amin-reply-floor-window');
+        window.__floorLabel=(idx,label)=>__floor(idx).querySelector('.amin-stylewriter [aria-label="'+label+'"]');
+        window.__openFloor=idx=>document.querySelector('[mesid="'+idx+'"] .amin-floor-toolbar>button[data-floor-app="reply"]').click();
+        window.__floorHandlerBaseline=__handlers.get('chat_changed').size;
+        const {installReplyFloorButtons}=await import('/apps/reply/floor-ui.js');
+        window.__floorInstaller=installReplyFloorButtons({rewriteOptions:{ai:()=>__ai,generate:__floorGenerate}});
+        __openFloor(0);__openFloor(1);
+        return true;
+    })()`);
+    assert.equal(await evaluate('document.querySelectorAll(".amin-writing-workspace").length'),3);
+    assert.equal(await evaluate('(()=>{const ids=[...document.querySelectorAll("[id]")].map(n=>n.id);return new Set(ids).size===ids.length;})()'),true);
+    // Another floor's saved defaults must not replace the choices visible in this window.
+    await evaluate(`__set(__floor(1).querySelector('.ro-panel [aria-label="内容风格"]'),'violence')`);
+    assert.equal(await evaluate(`__floor(0).querySelector('.ro-panel [aria-label="内容风格"]').value`),'none');
+    const floorCandidatesBefore=await evaluate('__candidateRequests.length');
+    await evaluate('__workClick(__floor(0),"生成选项")');
+    assert.equal(await evaluate('__candidateRequests.length'),floorCandidatesBefore+1);
+    assert.match(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/FLOOR-ONE-SAMPLE/);
+    assert.doesNotMatch(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/FLOOR-TWO-SAMPLE|FUTURE-FLOOR-SECRET|突出动作冲突/);
+    await evaluate('__workClick(__floor(0),"继续改写")');
+    assert.equal(await evaluate('__floorLabel(0,"原文").value'),'候选甲');
+    assert.equal(await evaluate('__label("原文").value'),'候选甲');
+    assert.equal(await evaluate('__floorCalls.length'),0);
+    assert.equal(await evaluate('__floor(0).querySelector(".ro-panel").parentElement.hidden'),true);
+    await evaluate('__workClick(__floor(1),"管理文风预设")');
+    assert.equal(await evaluate('__floor(1).querySelector(".ro-panel").parentElement.hidden'),true);
+    await evaluate(`(async()=>{await __workClick(__floor(1),'参考当前聊天文风');__set(__floorLabel(1,'原文'),'第二楼原文');__set(document.getElementById('send_textarea'),'共享输入草稿');await __workClick(__floor(0),'转换文风');await __workClick(__floor(1),'转换文风');})()`);
+    assert.deepEqual(await evaluate('__floorCalls.map(x=>x.ctx.chat.length)'),[1,2]);
+    assert.doesNotMatch(await evaluate('JSON.stringify(__floorCalls[1].request)'),/FUTURE-FLOOR-SECRET/);
+    await evaluate('__workClick(__floor(0),"收起")');
+    assert.equal(await evaluate('__floorCalls[0].signal.aborted'),true);
+    assert.equal(await evaluate('__floorCalls[1].signal.aborted'),false);
+    await evaluate('__floorCalls[0].resolve("关闭后迟到");__floorCalls[1].resolve("第二楼有效结果")');await delay(80);
+    assert.equal(await evaluate('__floorLabel(1,"转换结果").value'),'第二楼有效结果');
+    const openFloorLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,bodies:[...document.querySelectorAll(".amin-reply-floor-body")].map(n=>({scroll:n.scrollWidth,client:n.clientWidth}))})');
+    assert.ok(openFloorLayout.scroll<=Math.max(openFloorLayout.client,390),'open floor overflows viewport');
+    assert.ok(openFloorLayout.bodies.every(n=>n.scroll<=n.client+1),'floor content overflows its window: '+JSON.stringify(openFloorLayout));
+    await evaluate(`__set(document.getElementById('send_textarea'),'用户新草稿');__workClick(__floor(1),'填回聊天输入框')`);
+    assert.equal(await evaluate('document.getElementById("send_textarea").value'),'用户新草稿');
+    await evaluate(`__set(document.getElementById('send_textarea'),'共享输入草稿');__workClick(__floor(1),'填回聊天输入框')`);
+    assert.equal(await evaluate('document.getElementById("send_textarea").value'),'第二楼有效结果');
+    assert.equal(await evaluate('__submits'),0);
+    await evaluate('__openFloor(0)');
+    assert.equal(await evaluate('__floorLabel(0,"原文").value'),'');
+    assert.equal(await evaluate('__floorLabel(0,"转换结果").value'),'');
+    // A replaced floor cannot accept its old pending result or retain the previous UI.
+    await evaluate('__workClick(__floor(1),"转换文风")');
+    await evaluate('__ctx.chat[1]={name:"新楼层",mes:"替换内容"};__floorInstaller.refresh()');
+    assert.equal(await evaluate('__floorCalls.at(-1).signal.aborted'),true);
+    await evaluate('__floorCalls.at(-1).resolve("替换后迟到")');await delay(60);
+    assert.equal(await evaluate('__floor(1)'),null);
+    // Metadata replacement closes every old floor and releases its per-window listeners.
+    await evaluate('__ctx.chatMetadata={replaced:true};__ctx.eventSource.emit("chat_changed")');await delay(80);
+    assert.equal(await evaluate('document.querySelectorAll(".amin-reply-floor-window").length'),0);
+    assert.equal(await evaluate('__handlers.get("chat_changed").size'),await evaluate('__floorHandlerBaseline+1'));
+    await evaluate('(async()=>{for(let i=0;i<3;i++){__openFloor(0);await __workClick(__floor(0),"收起");}})()');
+    assert.equal(await evaluate('__handlers.get("chat_changed").size'),await evaluate('__floorHandlerBaseline+1'));
+    const floorLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
+    assert.ok(floorLayout.scroll<=Math.max(floorLayout.client,390),'floor narrow page overflows');
+    assert.deepEqual(errors,[]);
+    console.log('PASS floor writing workspaces: local handoff, bounded samples, unique IDs, independent tasks/results, guarded fill, deletion/metadata cleanup, listener cleanup and 390px layout.');
     await evaluate('__workspace.dispose()');
+
+    // Fresh page: managed ownership must mount only the host-owned message node.
+    await send('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});
+    for(let i=0;i<100;i++){if(await evaluate('!!document.getElementById("app") && !window.__ctx'))break;await delay(50);}
+    await evaluate(`(async()=>{
+        window.__managedCalls=[];window.__managedHandlers=new Map();
+        const eventSource={on(t,f){if(!__managedHandlers.has(t))__managedHandlers.set(t,new Set());__managedHandlers.get(t).add(f);},off(t,f){__managedHandlers.get(t)?.delete(f);}};
+        window.__ctx={chatId:'managed-chat',characterId:0,chatMetadata:{},name1:'我',name2:'角色',chat:[{name:'甲',mes:'托管楼层'},{name:'乙',mes:'非托管楼层'}],extensionSettings:{reply_options_mvp:{count:2,character:false,persona:false,world:false}},saveSettingsDebounced(){},eventTypes:{CHAT_CHANGED:'chat_changed'},eventSource};
+        window.SillyTavern={getContext:()=>__ctx};
+        window.__TAURITAVERN__={api:{chatSurface:{protocolVersion:1,isManagedOwnershipRequired:()=>true,registerParticipant(p){window.__participant=p;}}}};
+        const chat=document.createElement('div');chat.id='chat';chat.innerHTML='<div class="mes" mesid="0"><div class="mes_block"></div></div><div class="mes" mesid="1"><div class="mes_block"></div></div>';document.body.append(chat);
+        const {installReplyFloorButtons}=await import('/apps/reply/floor-ui.js');
+        installReplyFloorButtons({rewriteOptions:{ai:()=>({capture:()=>({config:{timeoutSeconds:5}})}),generate:(ctx,request,opts)=>new Promise(resolve=>__managedCalls.push({signal:opts.signal,resolve}))}});
+        window.__managedClick=text=>{const b=[...document.querySelectorAll('.amin-reply-floor-window button')].find(b=>b.textContent===text);if(!b)throw Error('missing '+text);b.click();};
+        return true;
+    })()`);
+    assert.equal(await evaluate('document.querySelectorAll(".amin-floor-toolbar button").length'),0);
+    await evaluate('__release=__participant.didMount({element:document.querySelector("[mesid=\\"0\\"]")});document.querySelector(".amin-floor-toolbar button").click();__managedClick("改写草稿")');
+    assert.equal(await evaluate('document.querySelectorAll(".amin-writing-workspace").length'),1);
+    assert.equal(await evaluate('document.querySelector("[mesid=\\"1\\"] .amin-floor")'),null);
+    await evaluate(`(()=>{const source=document.querySelector('.amin-stylewriter [aria-label="原文"]');source.value='托管原文';source.dispatchEvent(new Event('input'));__managedClick('转换文风');})()`);await delay(50);
+    assert.equal(await evaluate('__managedCalls.length'),1);
+    await evaluate('__release();__managedCalls[0].resolve("卸载后迟到")');await delay(50);
+    assert.equal(await evaluate('__managedCalls[0].signal.aborted'),true);
+    assert.equal(await evaluate('document.querySelectorAll(".amin-writing-workspace").length'),0);
+    assert.equal(await evaluate('__managedHandlers.get("chat_changed").size'),1);
+    assert.deepEqual(errors,[]);
+    console.log('PASS managed floor ownership: no unowned mounts, inline rewrite, unmount aborts and releases listeners.');
+
 
     await send('Browser.close').catch(() => {});
 } finally {

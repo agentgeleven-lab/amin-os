@@ -15,7 +15,10 @@ export function mountContentStyles(target, {library, getSelection, setSelection,
     root.append(row,editor);target.append(root);
     let editing='',armed=null,undo=null,disposed=false;
     const drafts=new Map(),owner={};
-    const choose=id=>{setSelection(id);onChange();};
+    const selectionStamp=()=>JSON.stringify([contentSelection(library,getSelection()),library.hasDraft(getSelection())]);
+    let selectionMark=selectionStamp();
+    const changedSelection=()=>{const mark=selectionStamp();if(mark!==selectionMark){selectionMark=mark;onChange();}};
+    const choose=id=>{setSelection(id);changedSelection();};
     const button=(label,fn)=>{const b=make('button',label);b.type='button';b.addEventListener('click',()=>{try{fn();}catch(e){note.textContent=e.message;}});toolbar.append(b);return b;};
     function disarm(){armed=null;remove.textContent='删除风格';}
     function render(){
@@ -54,12 +57,12 @@ export function mountContentStyles(target, {library, getSelection, setSelection,
         if(token.draft){drafts.set(editing,token.draft);library.setDraft(owner,editing,JSON.stringify(token.draft)!==JSON.stringify({name:token.preset.name,description:token.preset.description}));}
         undo=null;choose(editing);disarm();render();note.textContent='已恢复风格及未保存的编辑。';
     });
-    button('放弃修改',()=>{drafts.delete(editing);library.setDraft(owner,editing,false);disarm();render();note.textContent='已放弃该风格的未保存修改。';});
+    button('放弃修改',()=>{drafts.delete(editing);library.setDraft(owner,editing,false);disarm();render();changedSelection();note.textContent='已放弃该风格的未保存修改。';});
     select.addEventListener('change',()=>{try{choose(select.value);}catch(error){note.textContent=error.message;}disarm();render();});
     list.addEventListener('change',()=>{editing=list.value;disarm();render();});
-    const changed=()=>{const value={name:name.value,description:prompt.value};drafts.set(editing,value);const p=library.get(editing);library.setDraft(owner,editing,!p||p.name!==value.name||p.description!==value.description);disarm();onChange();note.textContent='有未保存修改；请保存或放弃后再使用该风格。';};
+    const changed=()=>{const value={name:name.value,description:prompt.value};drafts.set(editing,value);const p=library.get(editing);library.setDraft(owner,editing,!p||p.name!==value.name||p.description!==value.description);disarm();changedSelection();note.textContent='有未保存修改；请保存或放弃后再使用该风格。';};
     name.addEventListener('input',changed);prompt.addEventListener('input',changed);
-    const unsubscribe=library.subscribe((error,event)=>{if(event?.draftOwner===owner)return;render();onChange();if(error){const p=library.get(editing),d=drafts.get(editing);if(d)library.setDraft(owner,editing,!p||p.name!==d.name||p.description!==d.description);note.textContent=`保存失败：${error.message}。已回滚，编辑内容仍保留。`;}});
-    render();
+    const unsubscribe=library.subscribe((error,event)=>{if(event?.draftOwner===owner)return;render();changedSelection();if(error){const p=library.get(editing),d=drafts.get(editing);if(d)library.setDraft(owner,editing,!p||p.name!==d.name||p.description!==d.description);note.textContent=`保存失败：${error.message}。已回滚，编辑内容仍保留。`;}});
+    render();selectionMark=selectionStamp();
     return {selection:()=>contentSelection(library,getSelection()),assertSaved(){if(library.hasDraft(getSelection()))throw Error('请先保存或放弃所选内容风格的修改。');},dispose(){disposed=true;unsubscribe();library.clearDrafts(owner);root.remove();}};
 }

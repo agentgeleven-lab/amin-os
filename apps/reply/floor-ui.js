@@ -1,19 +1,20 @@
-import {mount} from './index.js';
+import {mount} from './workspace.js';
+import {chatIdentity} from '../stylewriter/model.js';
 import {mountFloorControl} from '../../settings/floor-layout.js';
 
 export function floorContext(ctx,index,message){
  if(!Number.isInteger(index)||index<0||ctx.chat?.[index]!==message)throw Error('楼层内容已变化，请重新打开此窗口。');
  return {...ctx,chat:ctx.chat.slice(0,index+1)};
 }
-export function installReplyFloorButtons(){
+export function installReplyFloorButtons({rewriteOptions}={}){
  const getContext=()=>globalThis.SillyTavern?.getContext?.(),mounted=new Map(),owned=new Set();let serial=0,queued=false;
- const key=ctx=>JSON.stringify([ctx?.getCurrentChatId?.()??ctx?.chatId,ctx?.characterId,ctx?.groupId]);
+ const key=ctx=>chatIdentity(ctx??{});
  const node=(tag,cls,text)=>{const e=document.createElement(tag);e.className=cls;if(text)e.textContent=text;return e;};
  function attach(element){
   if(mounted.has(element))return mounted.get(element).dispose;
   const ctx=getContext(),index=Number(element.getAttribute('mesid')),message=ctx?.chat?.[index],chatKey=key(ctx);
   if(!message||message.is_system)return;
-  const host=node('div','amin-reply-floor'),button=node('button','','✧ 回复选项');button.type='button';button.setAttribute('aria-expanded','false');button.title='参考至这一楼生成候选，填入当前输入框';
+  const host=node('div','amin-reply-floor'),button=node('button','','✧ 回复选项');button.type='button';button.setAttribute('aria-expanded','false');button.title='参考至这一楼生成候选或改写草稿，仅填入当前输入框';
   let view=null,windowElement=null;
   const dock=mountFloorControl(element,'reply',host,button);
   function close(){view?.dispose();view=null;windowElement?.remove();windowElement=null;button.setAttribute('aria-expanded','false');dock.setOpen(false);}
@@ -21,10 +22,10 @@ export function installReplyFloorButtons(){
    if(windowElement){close();return;}
    windowElement=node('section','amin-reply-floor-window');windowElement.setAttribute('aria-label','第 '+(index+1)+' 楼回复选项');
    const bar=node('header','amin-reply-floor-header'),title=node('strong','','回复选项 · 第 '+(index+1)+' 楼'),collapse=node('button','','收起');collapse.type='button';collapse.onclick=close;bar.append(title,collapse);
-   const body=node('div','amin-reply-floor-body');windowElement.append(bar,body);host.append(windowElement);
-   body.append(node('p','amin-reply-floor-note','参考到这一楼为止的聊天；候选填入当前输入框，由你决定是否发送。'));
-   try{view=mount({target:body,instanceId:'amin-floor-reply-'+(++serial),headingText:'下一句怎么说',contextProvider:current=>{if(key(current)!==chatKey)throw Error('聊天已切换，请重新打开窗口。');return floorContext(current,index,message);}});if(!view)body.append(node('p','','请等待聊天输入框加载后重新打开。'));}
-   catch(error){body.append(node('p','',error.message));}
+   const body=node('div','amin-reply-floor-body amin-ui');windowElement.append(bar,body);host.append(windowElement);
+   body.append(node('p','amin-reply-floor-note','候选与参考文风只读取到这一楼；可在本窗口改写草稿，仅填入当前输入框，不会自动发送。'));
+   try{view=mount(body,{rewriteOptions,instanceId:'amin-floor-reply-'+(++serial),headingText:'下一句怎么说',contextProvider:current=>{if(key(current)!==chatKey)throw Error('聊天已切换，请重新打开窗口。');return floorContext(current,index,message);}});if(!view)body.append(node('p','','请等待聊天输入框加载后重新打开。'));}
+   catch(error){view?.dispose();view=null;body.append(node('p','',error.message));}
    button.setAttribute('aria-expanded','true');dock.setOpen(true);
   };
   const dispose=()=>{close();dock.dispose();mounted.delete(element);};mounted.set(element,{dispose,index,message,chatKey});return dispose;
