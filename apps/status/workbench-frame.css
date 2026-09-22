@@ -1,0 +1,29 @@
+/* Keep the editor readable inside both narrow floor windows and the empty-chat fallback. */
+html[data-wsh-frame]{overflow-x:hidden}
+html[data-wsh-frame] body{min-width:0;max-width:100%;overflow-wrap:anywhere}
+html[data-wsh-frame] .hud{max-width:none}
+html[data-wsh-frame] .hud header{padding:12px 8px}
+html[data-wsh-frame] h1{font-size:18px;letter-spacing:0}
+html[data-wsh-frame] .hud .eyebrow{letter-spacing:1px}
+html[data-wsh-frame] .hud #cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));padding:8px;gap:10px}
+html[data-wsh-frame] .hud #cards[data-layout=compact],html[data-wsh-frame] .hud #cards[data-layout=profile]{grid-template-columns:1fr}
+html[data-wsh-frame] .hud .card{min-width:0;padding:12px}
+html[data-wsh-frame] .hud #status{margin:8px;padding:8px}
+html[data-wsh-frame] .hud #editor{margin:8px;padding:12px}
+html[data-wsh-frame] .hud .inline-editor-slot #editor{margin:8px 0 0}
+html[data-wsh-frame] .hud #scene{margin:8px;padding:10px}
+html[data-wsh-frame] .hud footer{padding:10px 8px}
+html[data-wsh-frame] .hud :is(button,input,select,textarea){max-width:100%}
+html[data-wsh-frame] .hud .toolbar select{min-width:0;flex:1 1 120px}
+html[data-wsh-frame] .hud #editor .actions{position:static}
+@media(max-width:640px){
+ html[data-wsh-frame] body{padding:0}
+ html[data-wsh-frame] .hud :is(button,input,select,textarea){min-height:44px}
+ html[data-wsh-frame] .hud .toolbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ html[data-wsh-frame] .hud .toolbar select{width:100%}
+ html[data-wsh-frame] .hud #cards,html[data-wsh-frame] .hud #cards[data-layout=profile] .card-body{grid-template-columns:1fr}
+ html[data-wsh-frame] .hud #editor .actions{display:grid;grid-template-columns:1fr}
+ html[data-wsh-frame] .hud .row .actions{gap:6px}
+ html[data-wsh-frame] .hud .value{font-size:14px}
+ html[data-wsh-frame] .hud .project-toggle{font-size:16px}
+}

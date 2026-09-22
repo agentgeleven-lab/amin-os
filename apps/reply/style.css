@@ -1,34 +1,81 @@
-#reply-options-panel { flex:0 0 auto; box-sizing:border-box; width:100%; padding:6px 10px; color:var(--SmartThemeBodyColor,#eee); background:var(--SmartThemeBlurTintColor,#25252a); border:1px solid var(--SmartThemeBorderColor,#555); border-radius:10px; }
-#reply-options-panel summary,#reply-options-settings summary { cursor:pointer; font-weight:600; }
-#reply-options-panel .ro-controls { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
-#reply-options-panel .ro-status { font-size:12px; opacity:.85; margin:7px 0; overflow-wrap:anywhere; }
-#reply-options-panel .ro-options { display:grid; gap:6px; max-height:min(38vh,320px); overflow:auto; }
-#reply-options-panel .ro-card { width:100%; text-align:left; font:inherit; font-size:14px; line-height:1.5; color:inherit; background:transparent; border:1px solid var(--SmartThemeBorderColor,#666); border-radius:8px; padding:9px 12px; cursor:pointer; white-space:pre-wrap; overflow-wrap:anywhere; }
-#reply-options-panel .ro-card strong { display:block; font-size:12px; color:var(--SmartThemeQuoteColor,#8cc8af); margin-bottom:4px; }
-#reply-options-panel .ro-card span { display:block; }
-#reply-options-panel .ro-card:hover,#reply-options-panel .ro-card[aria-pressed=true] { background:rgba(128,128,128,.18); border-color:var(--SmartThemeQuoteColor,#8cc8af); }
-#reply-options-panel button:focus-visible { outline:2px solid var(--SmartThemeQuoteColor,#8cc8af); }
-#reply-options-panel button:disabled { opacity:.5; cursor:wait; }
-#reply-options-panel [hidden] { display:none!important; }
-#reply-options-settings { color:var(--SmartThemeBodyColor,#eee); padding:10px; }
-#reply-options-settings label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:10px 0; }
-#reply-options-settings input,#reply-options-settings select,#reply-options-settings textarea { color:inherit; background:var(--SmartThemeBlurTintColor,#25252a); border:1px solid var(--SmartThemeBorderColor,#666); border-radius:5px; padding:5px; }
-#reply-options-settings textarea { width:100%; min-height:90px; resize:vertical; }
-#reply-options-settings input[type=number] { width:75px; }
-#reply-options-settings p { font-size:12px; opacity:.8; }
-
-#reply-options-panel #reply-options-settings:not([hidden]) { max-height:40vh; overflow-y:auto; margin-top:6px; border-top:1px solid var(--SmartThemeBorderColor,#555); }
-
-.ro-panel .ro-writing-mode {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 6px;}
-.ro-panel .ro-writing-mode select {flex:1;min-width:0;max-width:100%;font:inherit;color:inherit;}
-
-.ro-panel .ro-direction-list {margin:12px 0;}
-.ro-panel .ro-direction-item {display:flex;align-items:center;gap:8px;margin:8px 0;}
-.ro-panel .ro-direction-item input:not([type=checkbox]) {flex:1;min-width:0;}
-
-.amin-writing-workspace [hidden] { display:none!important; }
-.amin-content-styles label {display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.amin-content-styles select,.amin-content-styles input,.amin-content-styles textarea {box-sizing:border-box;max-width:100%;min-width:0;color:inherit;font:inherit;}
-.amin-content-styles textarea,.amin-content-styles details>input,.amin-content-styles details>select {display:block;width:100%;margin:8px 0;}
-.ro-candidate {display:flex;flex-wrap:wrap;gap:6px;}
-.ro-candidate .ro-card {flex:1 0 100%;}
+/* Writing surfaces share the application's theme and layout vocabulary. Class
+   selectors cover every independently mounted message-floor workspace. */
+.ro-panel {
+  box-sizing:border-box;width:100%;min-width:0;padding:var(--amin-gap,10px);
+  color:var(--amin-text,var(--SmartThemeBodyColor,#eee));
+  background:var(--amin-bg,var(--SmartThemeBlurTintColor,#25252a));
+  border:1px solid var(--amin-line,var(--SmartThemeBorderColor,#555));
+  border-radius:var(--amin-radius,10px);
+}
+.ro-panel>summary,.ro-panel details>summary,.amin-stylewriter details>summary {cursor:pointer;font-weight:600;overflow-wrap:anywhere}
+.ro-panel.amin-reply-embedded {border:0;background:transparent;padding:0}
+.ro-panel.amin-reply-embedded>summary {display:none}
+.ro-panel [hidden],.amin-writing-workspace [hidden],.amin-stylewriter [hidden] {display:none!important}
+.ro-panel .ro-controls {display:flex;flex-wrap:wrap;gap:8px;margin:var(--amin-gap,10px) 0}
+.ro-panel .ro-status {font-size:inherit;overflow-wrap:anywhere}
+.ro-panel .ro-options {display:grid;gap:var(--amin-gap,10px);min-width:0}
+.ro-panel:not(.amin-reply-embedded) .ro-options {max-height:min(38vh,320px);overflow:auto}
+.ro-panel .ro-card {
+  width:100%;min-width:0;text-align:left;font:inherit;line-height:1.65;color:inherit;
+  background:var(--amin-card,transparent);border:1px solid var(--amin-line,var(--SmartThemeBorderColor,#666));
+  border-radius:var(--amin-radius,10px);padding:var(--amin-gap,12px);cursor:pointer;
+  white-space:pre-wrap;overflow-wrap:anywhere;
+}
+.ro-panel .ro-card strong {display:block;color:var(--amin-accent-text,var(--amin-accent,var(--SmartThemeQuoteColor,#8cc8af)));margin-bottom:6px}
+.ro-panel .ro-card span {display:block}
+.ro-panel .ro-card:hover,.ro-panel .ro-card[aria-pressed=true] {border-color:var(--amin-accent,var(--SmartThemeQuoteColor,#8cc8af));background:var(--amin-control,rgba(128,128,128,.18))}
+.ro-panel button:focus-visible {outline:2px solid var(--amin-accent,var(--SmartThemeQuoteColor,#8cc8af));outline-offset:2px}
+.ro-panel button:disabled {opacity:.5;cursor:default}
+.ro-panel :is(input,select,textarea) {
+  box-sizing:border-box;min-width:0;max-width:100%;font:inherit;color:inherit;
+  background:var(--amin-control,var(--SmartThemeBlurTintColor,#25252a));
+  border:1px solid var(--amin-line,var(--SmartThemeBorderColor,#666));
+  border-radius:var(--amin-radius,8px);padding:8px;
+}
+.ro-panel .ro-settings {margin:var(--amin-gap,10px) 0}
+.ro-panel .ro-settings:not([hidden]) {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--amin-gap,10px)}
+.ro-panel:not(.amin-reply-embedded) .ro-settings:not([hidden]) {max-height:40vh;overflow-y:auto}
+.ro-panel .ro-settings .amin-field,.ro-panel .ro-writing-mode {display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:0;min-width:0}
+.ro-panel .ro-settings :is(textarea,input:not([type=checkbox]),select),.ro-panel .ro-writing-mode select {width:100%;max-width:100%}
+.ro-panel .ro-settings textarea {min-height:110px;resize:vertical}
+.ro-panel .ro-settings .amin-check {display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0}
+.ro-panel .ro-settings .amin-check input {flex:0 0 auto;width:auto}
+.ro-panel .amin-span-full {grid-column:1/-1}
+.ro-panel .ro-direction-list {margin:0;min-width:0}
+.ro-panel .ro-direction-item {display:flex;align-items:center;gap:8px;margin:0;min-width:0}
+.ro-panel .ro-direction-item input:not([type=checkbox]) {flex:1;width:0;min-width:0}
+.ro-panel .ro-direction-item input[type=checkbox] {flex:0 0 auto}
+.ro-panel .ro-direction-item button {flex:0 0 auto}
+.ro-panel .ro-candidate {display:grid;gap:6px;min-width:0}
+.ro-panel .ro-candidate-actions {margin:0;display:flex;flex-wrap:wrap;gap:6px}
+.ro-panel .ro-configuration {align-items:start}
+.ro-panel .ro-content-settings {margin:var(--amin-gap,10px) 0}
+.amin-writing-workspace,.amin-writing-page,.amin-stylewriter,.amin-writing-content {min-width:0;max-width:100%}
+.amin-writing-workspace {padding:var(--amin-gap,10px)}
+.amin-writing-page>.amin-stylewriter-embedded {padding:0}
+.amin-writing-columns {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));align-items:start;gap:var(--amin-gap,10px);min-width:0}
+.amin-stylewriter .amin-field {display:flex;flex-direction:column;gap:6px;min-width:0}
+.amin-stylewriter textarea {box-sizing:border-box;width:100%;min-width:0;resize:vertical}
+.amin-stylewriter .amin-style-preset-editor {border-top:1px solid var(--amin-line);padding-top:var(--amin-gap,10px)}
+.amin-stylewriter .amin-style-preset-editor>summary {margin-bottom:var(--amin-gap,10px)}
+.amin-stylewriter .amin-style-preset-editor>.amin-field {margin-bottom:var(--amin-gap,10px)}
+.amin-content-styles label {display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0}
+.amin-content-styles select,.amin-content-styles input,.amin-content-styles textarea {box-sizing:border-box;width:100%;max-width:100%;min-width:0;color:inherit;font:inherit}
+.amin-content-styles textarea,.amin-content-styles details>input,.amin-content-styles details>select {display:block;width:100%;margin:8px 0}
+.amin-content-styles details {margin-top:var(--amin-gap,10px)}
+.amin-content-styles details>summary {cursor:pointer;overflow-wrap:anywhere}
+.amin-content-styles p,.amin-stylewriter p {overflow-wrap:anywhere}
+.amin-reply-floor-header>strong {min-width:0;overflow-wrap:anywhere}
+.amin-reply-floor-header>button {flex-shrink:0}
+.amin-reply-floor-body>.amin-writing-workspace.amin-app-page {padding:0!important}
+.amin-reply-floor-window .ro-panel>.amin-reply-heading {display:none}
+@media(max-width:600px) {
+  .ro-panel .ro-settings:not([hidden]) {grid-template-columns:minmax(0,1fr)}
+  .ro-panel .ro-controls>button,.ro-panel .ro-candidate-actions>button {flex:1 1 auto;min-height:44px;white-space:normal}
+  .ro-panel .ro-writing-mode select,.ro-panel .ro-direction-item input {min-height:44px}
+  .ro-panel .ro-direction-item {flex-wrap:wrap}
+  .ro-panel .ro-direction-item button {min-height:44px}
+  .amin-writing-columns {grid-template-columns:minmax(0,1fr)}
+  .amin-stylewriter .amin-toolbar>button {flex:1 1 auto;min-height:44px;white-space:normal}
+  .amin-writing-workspace>.amin-tabs>button {flex:1 1 0;min-width:0;white-space:normal}
+}

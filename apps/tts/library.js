@@ -6,6 +6,7 @@ export function createLibrary({persistent=false}={}){
  return {
   async put(record){memory.set(record.id,record);let error;try{if(persistent)await transaction('readwrite',s=>s.put(record));}catch{error='音频仅保留在本次运行中：本机存储不可用或空间不足';}for(const fn of listeners)fn(record.source);return error;},
   async list(source){let saved=[];if(persistent){try{saved=await transaction('readonly',s=>s.index('source').getAll(source));}catch{}}const merged=new Map(saved.map(x=>[x.id,x]));for(const r of memory.values())if(r.source===source)merged.set(r.id,r);return [...merged.values()].sort((a,b)=>a.sectionNumber-b.sectionNumber||a.updatedAt-b.updatedAt);},
+  async listAll(){let saved=[];if(persistent){try{saved=await transaction('readonly',s=>s.getAll());}catch{}}const merged=new Map(saved.map(x=>[x.id,x]));for(const r of memory.values())merged.set(r.id,r);return [...merged.values()].sort((a,b)=>b.updatedAt-a.updatedAt||a.sectionNumber-b.sectionNumber);},
   async remove(id,source){if(persistent)await transaction('readwrite',s=>s.delete(id));memory.delete(id);for(const fn of listeners)fn(source);},
   subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn);}
  };

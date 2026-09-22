@@ -11,12 +11,18 @@ test('launcher and drawer stay visible after moving from a large screen to mobil
 test('invalid persisted coordinates do not result in invisible controls',()=>{
   assert.deepEqual(clampPosition({x:NaN,y:'bad'},390,844),{x:8,y:8});
 });
-test('moving the launcher near the top or bottom never covers application controls',()=>{
+test('desktop drawer follows launcher while phone sheet remains usable independently of it',()=>{
   for(const y of [8,150,400,650,784]){
-    const p=clampPosition({x:250,y},390,844),r=drawerPlacement(p,390,844);
+    const p=clampPosition({x:800,y},1200,844),r=drawerPlacement(p,1200,844);
     assert.ok(r.y+r.height<=p.y-12||r.y>=p.y+64);
     assert.ok(r.height>0&&r.y>=8&&r.y+r.height<=836);
+    assert.deepEqual(drawerPlacement(p,390,844),{x:8,y:8,width:374,height:828});
   }
+});
+
+test('phone keyboard-sized viewport retains usable full-width content regardless saved height',()=>{
+ assert.deepEqual(drawerPlacement({x:220,y:350},390,360,{width:800,height:1000}),{x:8,y:8,width:374,height:344});
+ assert.deepEqual(drawerPlacement({x:0,y:0},320,220,{height:720}),{x:8,y:8,width:304,height:204});
 });
 
 test('vertical resizing follows the free edge and stays within usable screen height',()=>{

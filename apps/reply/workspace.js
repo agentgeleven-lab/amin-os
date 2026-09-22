@@ -13,11 +13,12 @@ export function mount(target, options={}) {
     };
     context(); // Validate floor ownership before creating DOM or listeners.
     const node=(tag,text)=>{const n=doc.createElement(tag);if(text)n.textContent=text;return n;};
-    const root=node('section');root.className='amin-writing-workspace';
+    const root=node('section');root.className='amin-writing-workspace amin-app-page';
     const nav=node('nav');nav.className='amin-tabs';nav.setAttribute('aria-label','写作工作页');
-    const notice=node('p');notice.setAttribute('role','status');notice.hidden=true;
+    const notice=node('p');notice.className='amin-notice';notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.hidden=true;
     const candidates=node('div'),rewritePane=node('div');
-    rewritePane.className='amin-writing-page';rewritePane.dataset.app='stylewriter';
+    candidates.className='amin-writing-page';candidates.setAttribute('aria-label','生成回复候选');
+    rewritePane.className='amin-writing-page';rewritePane.dataset.app='stylewriter';rewritePane.setAttribute('aria-label','改写草稿');
     const buttons=new Map();let active='candidates',reply,rewrite,disposed=false;
     for(const [id,label] of [['candidates','生成候选'],['rewrite','改写草稿']]){
         const b=node('button',label);b.type='button';
@@ -54,6 +55,7 @@ export function mount(target, options={}) {
     try{
         rewrite=(options.mountRewrite??mountRewrite)(rewritePane,{
             ...options.rewriteOptions,document:doc,getContext:context,settingsContext:hostContext,
+            embedded:true,
             instanceId:options.instanceId?options.instanceId+'-rewrite':undefined,
         });
         show('candidates');mounted.set(target,api);return api;

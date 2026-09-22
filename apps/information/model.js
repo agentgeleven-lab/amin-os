@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 export const KEY='amin_os_information_v1';
 export const empty=()=>({version:1,history:[],enabled:true,limit:40000});
 export function read(ctx){const s=ctx?.chatMetadata?.[KEY];if(s&&s.version!==1)throw Error('信息面板数据版本不兼容');return structuredClone(s??empty());}
@@ -20,7 +21,7 @@ export function apply(store,chat,record,reason='应用改写'){
  const baseline=snapshot.baselineFields??before?.baselineFields??before?.fields??[];snapshot.baselineFields=structuredClone(baseline);
  const original=new Map(baseline.map(f=>[fieldKey(f),f]));snapshot.modifiedFields=snapshot.fields.filter(f=>!original.has(fieldKey(f))||original.get(fieldKey(f)).value!==f.value).map(fieldKey);
  for(const f of baseline)if(!now.has(fieldKey(f)))removed.set(fieldKey(f),{category:f.category,label:f.label});snapshot.removed=[...removed.values()];
- const next=structuredClone(store);next.history.push({id:crypto.randomUUID(),recordId:snapshot.id,path:path(chat),at:new Date().toISOString(),reason,before:structuredClone(before??{...snapshot,fields:baseline}),snapshot,changes:diff(before??{...snapshot,fields:baseline},snapshot)});return next;
+ const next=structuredClone(store);next.history.push({id:uuid(),recordId:snapshot.id,path:path(chat),at:new Date().toISOString(),reason,before:structuredClone(before??{...snapshot,fields:baseline}),snapshot,changes:diff(before??{...snapshot,fields:baseline},snapshot)});return next;
 }
 export function modificationHistory(store,chat){
  const prefix=path(chat),events=[],previous=new Map();
@@ -35,7 +36,7 @@ export function resetRecord(store,chat,id){
  const first=modificationHistory(store,chat).find(e=>e.recordId===id);
  const snapshot=structuredClone(first?.before??{...latest,fields:latest.baselineFields??latest.fields});
  snapshot.id=id;snapshot.baselineFields=structuredClone(snapshot.fields);snapshot.modifiedFields=[];snapshot.removed=[];
- const next=structuredClone(store);next.history.push({id:crypto.randomUUID(),recordId:id,path:path(chat),at:new Date().toISOString(),reason:'一键重置修改',action:'reset',before:structuredClone(latest),snapshot,changes:diff(latest,snapshot)});return next;
+ const next=structuredClone(store);next.history.push({id:uuid(),recordId:id,path:path(chat),at:new Date().toISOString(),reason:'一键重置修改',action:'reset',before:structuredClone(latest),snapshot,changes:diff(latest,snapshot)});return next;
 }
 export function compile(store,chat){
  if(!store.enabled)return '';

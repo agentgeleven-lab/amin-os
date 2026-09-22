@@ -4,6 +4,9 @@ import {getAppearance} from './settings/appearance.js';
 import { clampPosition, drawerPlacement, resizedHeight } from './window-state.js';
 
 const APPS=[
+    {id:'scene',name:'场景与时间',sub:'游戏时钟、在场人物与场景快照',icon:'◷',color:'mint'},
+    {id:'journal',name:'剧情档案',sub:'伏笔追踪、编年史与确认引用',icon:'▤',color:'peach'},
+    {id:'dice',name:'骰子',sub:'通用掷骰、D20 判定与 CoC 检定',icon:'⚄',color:'lavender'},
     {id:'tts',name:'语音朗读',sub:'东雪莲本地语音',icon:'▷',color:'mint'},
     {id:'worldbooks',name:'世界书管理',sub:'角色全局组合与条目开关',icon:'▥',color:'mint'},
     {id:'information',name:'信息面板',sub:'检索资料与编辑人物、事物和世界',icon:'▤',color:'mint'},
@@ -19,10 +22,11 @@ const APPS=[
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
 
 function icon(id){
-    const paths={tts:'M3 9h4l5-5v16l-5-5H3z M16 8q5 4 0 8 M19 4q9 8 0 16',worldbooks:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16',information:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',effects:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z',map:'M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5z M9 3v16 M15 5v16',status:'M4 5h16v14H4z M8 9h3 M8 13h8 M15 9h1',organizations:'M4 20V9h6v11 M14 20V4h6v16 M2 20h20 M6 12h2 M16 7h2 M16 11h2',reply:'M4 4h16v12H9l-5 4V4z M8 8h8 M8 12h5',stylewriter:'M12 19l7-7 3 3-7 7-3-3z M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z M2 2l7.6 7.6',ai:'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};
+    const paths={scene:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',journal:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',tts:'M3 9h4l5-5v16l-5-5H3z M16 8q5 4 0 8 M19 4q9 8 0 16',worldbooks:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16',information:'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',effects:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z',map:'M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5z M9 3v16 M15 5v16',status:'M4 5h16v14H4z M8 9h3 M8 13h8 M15 9h1',organizations:'M4 20V9h6v11 M14 20V4h6v16 M2 20h20 M6 12h2 M16 7h2 M16 11h2',reply:'M4 4h16v12H9l-5 4V4z M8 8h8 M8 12h5',stylewriter:'M12 19l7-7 3 3-7 7-3-3z M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z M2 2l7.6 7.6',ai:'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8'};
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
     for(const [key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
     if(id==='settings')paths.settings='M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6';
+    if(id==='dice')paths.dice='M5 3h14l2 2v14l-2 2H5l-2-2V5z M8 8h.01 M16 8h.01 M12 12h.01 M8 16h.01 M16 16h.01';
     const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',paths[id]);svg.append(path);return svg;
 }
 const STORE='amin-os.window.v1';
@@ -48,19 +52,20 @@ export function createShell(){
     const resizeGrip=el('div','amin-height-grip');resizeGrip.tabIndex=0;resizeGrip.setAttribute('role','slider');resizeGrip.setAttribute('aria-label','调整窗口高度');resizeGrip.setAttribute('aria-orientation','vertical');resizeGrip.title='上下拖动调整高度 · 双击恢复自动高度';drawer.append(resizeGrip);
     root.append(drawer,launcher);document.body.append(root);
     let saved;try{saved=JSON.parse(localStorage.getItem(STORE));}catch{}
-    const viewport=()=>({width:document.documentElement.clientWidth||innerWidth,height:window.visualViewport?.height||innerHeight});
+    const viewport=()=>({width:Math.min(document.documentElement.clientWidth||innerWidth,window.visualViewport?.width||innerWidth),height:window.visualViewport?.height||innerHeight,x:window.visualViewport?.offsetLeft||0,y:window.visualViewport?.offsetTop||0});
     const initial=viewport();let manualHeight=Number.isFinite(saved?.height)&&saved.height>0?saved.height:null,resizing=null;let configuredHeight=getAppearance()?.snapshot().window.height;
     let position=clampPosition(saved??{x:initial.width-142,y:initial.height-78},initial.width,initial.height);
     function place(){
-        const {width,height}=viewport();
-        position=clampPosition(position,width,height);launcher.style.left=position.x+'px';launcher.style.top=position.y+'px';
+        const {width,height,x,y}=viewport();
+        root.dataset.mobile=String(width<=640);root.dataset.open=String(opened);resizeGrip.hidden=width<=640;
+        position=clampPosition(position,width,height);launcher.style.left=(position.x+x)+'px';launcher.style.top=(position.y+y)+'px';
         const options=getAppearance()?.snapshot().window;
         let rect=drawerPlacement(position,width,height,{...options,...(manualHeight===null?{}:{height:manualHeight})});
-        Object.assign(drawer.style,{left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:rect.height+'px'});
-        if(opened&&active==='home'&&manualHeight===null){
+        Object.assign(drawer.style,{left:(rect.x+x)+'px',top:(rect.y+y)+'px',width:rect.width+'px',height:rect.height+'px'});
+        if(width>640&&opened&&active==='home'&&manualHeight===null){
             const contentHeight=Math.ceil(head.getBoundingClientRect().height+nav.getBoundingClientRect().height+home.scrollHeight+4);
             rect=drawerPlacement(position,width,height,{...options,height:Math.min(rect.height,contentHeight)});
-            Object.assign(drawer.style,{top:rect.y+'px',height:rect.height+'px'});
+            Object.assign(drawer.style,{top:(rect.y+y)+'px',height:rect.height+'px'});
         }
         syncGrip();
     }
@@ -75,7 +80,7 @@ export function createShell(){
     resizeGrip.addEventListener('keydown',e=>{if(e.key==='Escape'&&resizing){e.preventDefault();e.stopPropagation();endResize(true);return;}if(!['ArrowUp','ArrowDown','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const {edge,available}=resizeLimits();manualHeight=e.key==='Home'?Math.min(220,available):e.key==='End'?available:resizedHeight(drawer.getBoundingClientRect().height,(e.key==='ArrowUp'?-1:1)*(e.shiftKey?40:10),edge,available);place();save();});
     window.addEventListener('blur',()=>endResize(true));
     function open(){opened=true;drawer.hidden=false;launcher.setAttribute('aria-expanded','true');launcher.setAttribute('aria-label','收起 Amin os');place();}
-    function close(){endResize(true);tileDesktop?.leave();opened=false;drawer.hidden=true;launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
+    function close(){endResize(true);tileDesktop?.leave();opened=false;drawer.hidden=true;root.dataset.open='false';launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
     function select(id){active=id;nav.hidden=id==='home';appHeading.textContent=APPS.find(a=>a.id===id)?.name??'';home.hidden=id!=='home';for(const [key,pane]of Object.entries(panes)){pane.hidden=key!==id;tabs[key].setAttribute('aria-current',key===id?'page':'false');}homeButton.setAttribute('aria-current',id==='home'?'page':'false');notice.hidden=true;}
     function showHome(){epoch++;select('home');open();if(blocked){message.textContent=blocked;retry.hidden=true;notice.hidden=false;}}
     async function showApp(id){
@@ -95,7 +100,7 @@ export function createShell(){
     const stop=e=>{if(drag?.id!==e.pointerId)return;suppressClick=drag.moved;drag=null;save();};
     for(const name of ['pointerup','pointercancel','lostpointercapture'])launcher.addEventListener(name,stop);
     getAppearance()?.subscribe(()=>{const next=getAppearance().snapshot().window.height;if(next!==configuredHeight){configuredHeight=next;manualHeight=null;save();}place();});
-    window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);place();select('home');
+    window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);window.visualViewport?.addEventListener('scroll',place);place();select('home');
     tileDesktop=createTileDesktop({home,cards,apps:APPS,createIcon:icon,openApp:showApp,onLayout:place});
     return {panes,open:resume,close,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};
 }

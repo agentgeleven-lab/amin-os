@@ -1,3 +1,4 @@
+import { uuid } from '../../../../uuid.js';
 import { createNode, createEdge, validateDocument } from '../core/protocol.js';
 import { prepareDocument } from '../core/spatial.js';
 import { autoLayout } from '../core/auto-layout.js';
@@ -53,7 +54,7 @@ export function createMapTools({store,draft,persistence,getContext}){
     function query(args={},mode=false){
         ready(mode);exact(args,['mapId']);if(args.mapId!==undefined)text(args.mapId);
         const doc=draft.snapshot(),mapId=args.mapId??doc.activeMap,m=Object.hasOwn(doc.maps,mapId)?doc.maps[mapId]:null;if(!m)throw Error('地图不存在');
-        lease={id:crypto.randomUUID(),mapId,base:token(),metadata:getContext().chatMetadata};
+        lease={id:uuid(),mapId,base:token(),metadata:getContext().chatMetadata};
         const nodes=Object.values(m.nodes).filter(visible);
         return {token:lease.id,draft:draft.status().dirty,activeMap:doc.activeMap,maps:Object.values(doc.maps).map(x=>({id:x.id,name:x.name,type:x.type,parentMap:x.parentMap,parentNode:x.metadata.parentNode??null})),map:{id:m.id,type:m.type,currentLocation:m.currentLocation,nodeTypes:m.metadata.nodeTypes,roadTypes:m.metadata.roadTypes,rules:m.metadata.rules,nodes:nodes.map(n=>({id:n.id,name:n.name,type:n.type,description:n.description})),edges:m.edges.filter(e=>e.discovered&&visible(m.nodes[e.from])&&visible(m.nodes[e.to])).map(e=>({id:e.id,from:e.from,to:e.to,name:e.name,type:e.type,direction:e.direction,distance:e.distance,bidirectional:e.bidirectional}))},instructions:'按剧情事实更新。先查询目标地图，复制 token 与类型 ID。更新默认进入草稿，未保存不代表生效。move 只记录已发生的移动，不计算路程时间。'};
     }

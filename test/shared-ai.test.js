@@ -59,7 +59,7 @@ test('independent API uses shared endpoint, key and limits without falling back 
  globalThis.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({choices:[{message:{content:'ok'},finish_reason:'stop'}]})};};
  try {for(const app of ['map','status','reply'])assert.equal(await ai.generate(app,{mockGenerate(){throw Error('wrong route');}},request),'ok');}
  finally {globalThis.fetch=original;}
- for(const {url,options}of calls){assert.equal(url,'https://example.test/v1/chat/completions');assert.equal(options.headers.Authorization,'Bearer test-key');assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');const body=JSON.parse(options.body);assert.equal(body.max_tokens,4567);assert.equal(body.model,'test-model');assert.equal(body.messages.at(-1).content,'JSON contract');}
+ for(const {url,options}of calls){assert.equal(url,'https://example.test/v1/chat/completions');assert.equal(options.headers.Authorization,'Bearer test-key');assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');const body=JSON.parse(options.body);assert.equal(body.max_tokens,4567);assert.equal(body.model,'test-model');assert.equal(body.messages[0].content,'JSON contract');assert.equal(body.messages.filter(m=>m.content==='JSON contract').length,1);}
 });
 test('global preset cannot silently omit application request',async()=>{
  const ai=createAI(storage(),'invalid'),snapshot=ai.capture();snapshot.preset.blocks=[];

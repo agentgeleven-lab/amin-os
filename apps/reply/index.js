@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 import {styleLibrary,contentLibrary} from './writing-library.js';
 import {mountContentStyles} from './content-styles-view.js';
 import {referenceSamples,chatIdentity} from '../stylewriter/model.js';
@@ -15,23 +16,26 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     if(document.getElementById(instanceId))return;
     const ctx=context(), form=document.querySelector('#send_form');if(!ctx||!form)return;
     let settings=normalizeSettings(ctx.extensionSettings?.[KEY]), revision=0, controller=null;
-    const draft=new DraftSelection();let draftIdentity=null;
+    const draft=new DraftSelection(hostContext);let draftIdentity=null;
     const styles=styleLibrary(hostContext),contents=contentLibrary(hostContext);
-    const panel=node('details');panel.id=instanceId;panel.className='ro-panel';panel.open=target ? true : settings.expanded;
+    const panel=node('details');panel.id=instanceId;panel.className='ro-panel amin-stack';panel.open=target ? true : settings.expanded;
     panel.append(node('summary','回复选项'));
-    const controls=node('div',null,'ro-controls'), cards=node('div',null,'ro-options'), status=node('div','点击生成，选择后填入，由你发送。','ro-status');
+    const controls=node('div',null,'ro-controls amin-toolbar'), cards=node('div',null,'ro-options'), status=node('div','点击生成，选择后填入，由你发送。','ro-status');
+    controls.setAttribute('aria-label','候选操作');cards.setAttribute('aria-label','回复候选');
     status.setAttribute('role','status');status.setAttribute('aria-live','polite');
     const button=(label,fn,parent=controls)=>{const b=node('button',label,'menu_button');b.type='button';b.addEventListener('click',fn);parent.append(b);return b;};
     const generate=button('生成选项',()=>run(false)), expand=button('根据草稿扩写',()=>run(true));
+    generate.className='menu_button amin-primary';
     const cancel=button('停止等待',()=>controller?.abort());cancel.hidden=true;
     const undo=button('撤销填入',()=>{try{if(chatIdentity(context())!==draftIdentity)throw Error('聊天已变化，不能撤销旧候选。');draft.undo(inputElement());status.textContent='已还原原草稿。';updateSelection();}catch(e){status.textContent=e.message;}});
     button('保留编辑',()=>{draft.reset();updateSelection();status.textContent='已保留输入框现有内容；下次选择将以它为原草稿。';});
-    const settingsBox=node('div');settingsBox.id=settingsId;settingsBox.className='ro-settings';settingsBox.hidden=true;
+    const settingsBox=node('section');settingsBox.id=settingsId;settingsBox.className='ro-settings amin-card amin-form-grid';settingsBox.hidden=true;
+    settingsBox.append(node('h3','生成设置','amin-section-heading amin-span-full'));
     function save(){const c=hostContext();if(c?.extensionSettings){c.extensionSettings[KEY]={...settings};c.saveSettingsDebounced?.();}}
     function invalidate(message='上下文已更新，请重新生成。',reset=false){revision++;controller?.abort();cards.replaceChildren();if(reset)draft.reset();updateSelection();status.textContent=message;}
     const fieldRows=new Map();
     function field(key,label,type,options){
-        const row=node('label'), title=node('span',label);row.append(title);fieldRows.set(key,row);
+        const row=node('label',null,type==='checkbox'?'amin-check':type==='textarea'?'amin-field amin-span-full':'amin-field'), title=node('span',label);row.append(title);fieldRows.set(key,row);
         const el=node(type==='textarea'?'textarea':options?'select':'input');el.setAttribute('aria-label',label);
         if(options)for(const [value,text] of options){const o=node('option',text);o.value=value;el.append(o);}
         if(type==='checkbox'){el.type='checkbox';el.checked=settings[key];}else {if(type==='number'){el.type='number';el.min=key==='count'?2:key==='timeout'?15:1;el.max=key==='count'?6:key==='timeout'?300:40;}el.value=settings[key];}
@@ -40,15 +44,15 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
         el.addEventListener('change',()=>{settings=normalizeSettings({...settings,[key]:type==='checkbox'?el.checked:el.value});if(type!=='checkbox')el.value=settings[key];save();invalidate('设置已保存，请重新生成。');});row.append(el);settingsBox.append(row);
     }
     function directionsEditor(key,rowKey,title){
-        const box=node('section',null,'ro-direction-list');fieldRows.set(rowKey,box);settingsBox.append(box);
+        const box=node('section',null,'ro-direction-list amin-stack amin-span-full');fieldRows.set(rowKey,box);settingsBox.append(box);
         const persist=()=>{settings=normalizeSettings({...settings,[key]:settings[key]});save();invalidate('方向已保存，请重新生成。');};
-        function draw(){box.replaceChildren();box.append(node('strong',title));for(const item of settings[key]){
+        function draw(){box.replaceChildren();box.append(node('h4',title,'amin-section-heading'));for(const item of settings[key]){
             const row=node('div',null,'ro-direction-item'),toggle=node('input'),text=node('input');toggle.type='checkbox';toggle.checked=item.enabled;toggle.setAttribute('aria-label','启用'+title+'：'+(item.text||'未命名'));text.value=item.text;text.maxLength=600;text.setAttribute('aria-label',title+'内容');
             toggle.addEventListener('change',()=>{settings[key].find(v=>v.id===item.id).enabled=toggle.checked;persist();draw();});text.addEventListener('change',()=>{settings[key].find(v=>v.id===item.id).text=text.value;persist();draw();});row.append(toggle,text);button('删除',()=>{settings[key]=settings[key].filter(v=>v.id!==item.id);persist();draw();},row);box.append(row);
-        }button('添加'+title,()=>{settings[key].push({id:crypto.randomUUID(),text:'',enabled:true});persist();draw();},box);box.append(node('p','仅抽取启用且非空的方向；全部禁用时不会请求模型。'));}
+        }button('添加'+title,()=>{settings[key].push({id:uuid(),text:'',enabled:true});persist();draw();},box);box.append(node('p','仅抽取启用且非空的方向；全部禁用时不会请求模型。','amin-meta'));}
         draw();
     }
-    if(getAI())button('AI 设置 · 全局 API 与预设',()=>globalThis.AminOS?.openApp('ai'),settingsBox);
+    if(getAI())button('AI 设置 · 全局 API 与预设',()=>globalThis.AminOS?.openApp('ai'),settingsBox).className='menu_button amin-span-full';
     field('count','选项数量','number');field('depth','最近聊天条数','number');
     field('length','选项长度','select',[['short','短：约 1 句'],['medium','中：1–3 句'],['long','长：3–6 句']]);
     field('style','回复形式','select',[['mixed','对白与动作'],['dialogue','仅对白'],['action','动作描写为主']]);
@@ -60,24 +64,25 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     directionsEditor('directionItems','directions','选项方向');field('prompt','自定义生成要求','textarea');
     directionsEditor('authorDirectionItems','authorDirections','剧情方向');
     field('authorSystemPrompt','剧情模式提示词（作者 / 编剧定位）','textarea');field('authorPrompt','作者要求（节奏、冲突、伏笔、希望避免的走向等）','textarea');
-    const roleHelp=node('p','回复主体可填写任意剧情角色的名字，不限于玩家或当前角色卡。留空使用当前用户角色；旧第三人称名字会迁移为主体。对白中的人称按语义保留。方向少于选项数量时允许重复抽取；方向足够时不重复抽取。重复方向仍生成不同回复。草稿扩写会用候选替换原草稿，可撤销。角色设定包含绑定世界书；全体世界书包含当前全局启用及角色、聊天、人设绑定的书。读取全部未禁用的非空条目，不要求关键词触发。');settingsBox.append(roleHelp);
+    const roleHelp=node('p','回复主体可填写任意剧情角色的名字，不限于玩家或当前角色卡。留空使用当前用户角色；旧第三人称名字会迁移为主体。对白中的人称按语义保留。方向少于选项数量时允许重复抽取；方向足够时不重复抽取。重复方向仍生成不同回复。草稿扩写会用候选替换原草稿，可撤销。角色设定包含绑定世界书；全体世界书包含当前全局启用及角色、聊天、人设绑定的书。读取全部未禁用的非空条目，不要求关键词触发。','amin-meta amin-span-full');settingsBox.append(roleHelp);
     const settingsButton=button('设置',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
     settingsButton.setAttribute('aria-controls',settingsId);
     settingsButton.setAttribute('aria-expanded','false');
-    if(target){const heading=node('header',null,'amin-reply-heading');heading.append(node('h2',headingText||'下一句，由你决定'),node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
-    const modeRow=node('label',null,'ro-writing-mode'),modeSelect=node('select'),modeHelp=node('p',null,'ro-status');modeRow.append(node('span','创作模式'));modeSelect.setAttribute('aria-label','创作模式');for(const [value,label]of [['roleplay','角色扮演 · 拟写角色回复'],['author','创意写作 · 规划剧情走向']]){const option=node('option',label);option.value=value;modeSelect.append(option);}modeRow.append(modeSelect);
+    if(target){const heading=node('header',null,'amin-reply-heading amin-context');heading.append(node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
+    const modeRow=node('label',null,'ro-writing-mode amin-field'),modeSelect=node('select'),modeHelp=node('p',null,'amin-meta');modeRow.append(node('span','创作模式'));modeSelect.setAttribute('aria-label','创作模式');for(const [value,label]of [['roleplay','角色扮演 · 拟写角色回复'],['author','创意写作 · 规划剧情走向']]){const option=node('option',label);option.value=value;modeSelect.append(option);}modeRow.append(modeSelect);
     function reflectMode(){const author=settings.writingMode==='author';roleHelp.hidden=author;modeSelect.value=settings.writingMode;for(const key of ['style','perspective','subjectName','directions','prompt','roleplaySystemPrompt'])fieldRows.get(key).hidden=author;for(const key of ['authorDirections','authorPrompt','authorSystemPrompt'])fieldRows.get(key).hidden=!author;expand.textContent=author?'展开作者构想':'根据草稿扩写';modeHelp.textContent=author?'以作者 / 编剧视角选择下一步事件、冲突与转折。选中后填入作者指令，不自动发送。':'以指定剧情角色为主体生成对白与行动。选中后填入输入框，不自动发送。';const heading=panel.querySelector('.amin-reply-heading h2');if(heading)heading.textContent=author?'接下来，故事怎么走':headingText||'下一句，由你决定';}
     modeSelect.onchange=()=>{settings=normalizeSettings({...settings,writingMode:modeSelect.value});save();invalidate('模式已切换，请重新生成。');reflectMode();};
-    const contentRow=node('div');
+    const contentRow=node('div',null,'ro-content-settings amin-stack');
     const contentControls=mountContentStyles(contentRow,{library:contents,
         getSelection:()=>settings.contentMode,
         setSelection:id=>{settings.contentMode=id;save();},
         onChange:()=>invalidate('内容风格已变化，请重新生成。'),
     });
-    const styleRow=node('label',null,'ro-writing-mode'),styleMode=node('select'),styleSelect=node('select');
+    const styleRow=node('div',null,'ro-writing-mode amin-field'),styleMode=node('select'),styleSelect=node('select');
     styleMode.setAttribute('aria-label','候选文风');styleSelect.setAttribute('aria-label','候选文风预设');
     for(const [value,text] of [['none','不额外指定文风'],['chat','参考当前聊天文风'],['custom','自定义文风']]){const o=node('option',text);o.value=value;styleMode.append(o);}
-    styleRow.append(node('span','文风'),styleMode,styleSelect);contentRow.append(styleRow);
+    const styleLabel=node('label',null,'amin-field');styleLabel.append(node('span','文风'),styleMode);styleRow.append(styleLabel,styleSelect);
+    const configGrid=node('div',null,'amin-form-grid ro-configuration');configGrid.append(modeRow,styleRow);
     function reflectContent(){
         styleMode.value=settings.writingStyleMode;styleSelect.hidden=settings.writingStyleMode!=='custom';
         styleSelect.replaceChildren();const empty=node('option','请选择文风预设');empty.value='';styleSelect.append(empty);
@@ -87,17 +92,17 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     }
     styleMode.addEventListener('change',()=>{settings.writingStyleMode=styleMode.value;save();reflectContent();invalidate('文风已变化，请重新生成。');});
     styleSelect.addEventListener('change',()=>{settings.writingStyleId=styleSelect.value;save();invalidate('文风已变化，请重新生成。');});
-    button('管理文风预设',()=>onManageStyle?onManageStyle():globalThis.AminOS?.openApp('stylewriter'),contentRow);
+    button('管理文风预设',()=>onManageStyle?onManageStyle():globalThis.AminOS?.openApp('stylewriter'),styleRow);
     const selectedStyleStamp=()=>settings.writingStyleMode==='custom'?JSON.stringify([settings.writingStyleId,styles.get(settings.writingStyleId),styles.hasDraft(settings.writingStyleId)]):settings.writingStyleMode;
     let styleMark=selectedStyleStamp();
     const unsubscribeStyles=styles.subscribe(()=>{reflectContent();const mark=selectedStyleStamp();if(mark!==styleMark){styleMark=mark;invalidate('文风预设或编辑已变化，请重新生成。');}});
     reflectContent();
 
-    panel.append(modeRow,contentRow,modeHelp,controls,settingsBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
+    panel.append(configGrid,modeHelp,contentRow,controls,settingsBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});
     function updateSelection(){undo.disabled=draft.base===null;for(const b of cards.querySelectorAll('.ro-card'))b.setAttribute('aria-pressed','false');}
     updateSelection();
-    function setBusy(value){generate.disabled=value;expand.disabled=value;cancel.hidden=!value;generate.textContent=value?'生成中…':'生成 / 换一批';}
+    function setBusy(value){generate.disabled=value;expand.disabled=value;cancel.hidden=!value;generate.textContent=value?'生成中…':'生成 / 换一批';cards.setAttribute('aria-busy',String(value));}
     async function run(fromDraft){
         if(controller)return;
         let initial, stamp, identity, config, ticket, original, contentStyle,writingStyle;
@@ -112,12 +117,12 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
                 try{if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))return invalidate();
                 const input=inputElement();if(fromDraft&&draft.base===null&&input.value!==original)throw new Error('扩写期间草稿已改变，请重新扩写或使用普通生成。');draft.choose(input,option.text,fromDraft?'replace':config.mode);draftIdentity=identity;updateSelection();card.setAttribute('aria-pressed','true');status.textContent='已填入，尚未发送。可切换候选或撤销。';}catch(e){status.textContent=e.message;}
             });
-                const row=node('div',null,'ro-candidate');row.append(card);
-                button('复制',async()=>{try{await navigator.clipboard.writeText(option.text);status.textContent='候选已复制。';}catch{status.textContent='剪贴板不可用，请选择候选文字手动复制。';}},row);
+                const row=node('div',null,'ro-candidate amin-stack'),actions=node('div',null,'amin-toolbar ro-candidate-actions');row.append(card,actions);
+                button('复制',async()=>{try{await navigator.clipboard.writeText(option.text);status.textContent='候选已复制。';}catch{status.textContent='剪贴板不可用，请选择候选文字手动复制。';}},actions);
                 if(onRewrite)button('继续改写',async()=>{
                     try{if(ticket!==revision||stamp!==chatStamp(context())||identity!==chatIdentity(context()))return invalidate();
                     await onRewrite(option.text,identity);status.textContent='已转入改写页，尚未调用 AI。';}catch(e){status.textContent=e.message;}
-                },row);
+                },actions);
                 cards.append(row);
             }
             status.textContent=`${options.length} 个选项 · ${sources}`;

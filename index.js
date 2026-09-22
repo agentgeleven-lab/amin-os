@@ -1,3 +1,4 @@
+import { uuid } from './uuid.js';
 import {cleanupRetiredData} from './retired-data.js';
 import {installExtraFloorButtons} from './apps/extra-floor-ui.js';
 import {installReplyFloorButtons} from './apps/reply/floor-ui.js';
@@ -26,10 +27,13 @@ export function initialize() {
         shell.setBlocked(`检测到旧插件：${existing.join('、')}。请在扩展管理中停用这三个旧插件，然后刷新页面，再使用 Amin os。已有数据会保留。`);
         return shell;
     }
-    ctx.extensionSettings.dynamicMapNamespace ||= crypto.randomUUID();
+    ctx.extensionSettings.dynamicMapNamespace ||= uuid();
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const apps={
+        scene:()=>import('./apps/scene/view.js').then(m=>m.mount(shell.panes.scene)),
+        journal:()=>import('./apps/journal/view.js').then(m=>m.mount(shell.panes.journal)),
+        dice:()=>import('./apps/dice/view.js').then(m=>m.mount(shell.panes.dice)),
         tts:()=>import('./apps/tts/view.js').then(m=>m.mount(shell.panes.tts)),
         worldbooks:()=>import('./apps/worldbooks/view.js').then(m=>m.mount(shell.panes.worldbooks)),
         information:()=>import('./apps/information/view.js').then(m=>m.mount(shell.panes.information)),
@@ -38,7 +42,7 @@ export function initialize() {
         settings:()=>import('./settings/view.js').then(m=>m.mount(shell.panes.settings)),
         ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
         map:()=>import('./apps/map/index.js').then(m=>m.initialize({mount:shell.panes.map,onOpen:()=>shell.showApp('map')})),
-        status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.home()})),
+        status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.close()})),
         reply:()=>import('./apps/reply/workspace.js').then(m=>m.mount(shell.panes.reply)),
         stylewriter:()=>import('./apps/reply/workspace.js').then(m=>({open:()=>m.mount(shell.panes.reply).open('rewrite')})),
     };
@@ -54,10 +58,10 @@ export function initialize() {
         });
     }
     installReplyFloorButtons();
-    installExtraFloorButtons('organizations');installExtraFloorButtons('effects');installExtraFloorButtons('information');installExtraFloorButtons('worldbooks');installExtraFloorButtons('tts');
+    for(const id of ['dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.11.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.12.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 

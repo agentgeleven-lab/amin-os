@@ -4,7 +4,7 @@ import path from 'node:path';
 const root=path.resolve(import.meta.dirname,'..');
 const fixtures={
  '/scripts/variables.js':`export function setLocalVariable(k,v){const ctx=globalThis.SillyTavern.getContext();ctx.chatMetadata.variables??={};ctx.chatMetadata.variables[k]=v;}`,
- '/scripts/world-info.js':`export const selected_world_info=[];export const world_info={};export async function loadWorldInfo(){return {entries:{}};}export function getWorldInfoSettings(){return {world_info:{globalSelect:[]}};}`,
+ '/scripts/world-info.js':`export const world_names=['演示技能'];export const selected_world_info=[];export const world_info={};export async function loadWorldInfo(){return globalThis.SillyTavern.getContext().loadWorldInfo();}export function getWorldInfoSettings(){return {world_info:{globalSelect:selected_world_info}};}`,
  '/scripts/utils.js':`export function uuidv4(){return crypto.randomUUID();}`,
 };
 const server=http.createServer((req,res)=>{let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://127.0.0.1').pathname);}catch{res.writeHead(400).end();return;}

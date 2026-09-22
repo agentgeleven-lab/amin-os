@@ -5,6 +5,7 @@ import { mountContentStyles } from '../reply/content-styles-view.js';
 import { getAI } from '../../ai/service.js';
 import { inputElement, waitForResult, rewriteText, writeToInput } from './generator.js';
 import { MODES, chatIdentity, presetStamp, buildRequest, referenceSamples, fillGuard, normalizeResult } from './model.js';
+import { splitDiceDraft } from '../dice/draft.js';
 
 const mounted = new WeakMap();
 
@@ -19,47 +20,47 @@ export function mount(target, options = {}) {
     const make = options.makeElement ?? (tag => doc.createElement(tag));
     const node = (tag, text, cls) => { const n = make(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 
-    const root = node('div', null, 'amin-page amin-stylewriter');
+    const root = node('div', null, `amin-stylewriter${options.embedded ? ' amin-stack amin-stylewriter-embedded' : ' amin-app-page amin-page'}`);
     root.id = options.instanceId ?? 'stylewriter-app';
     const intro = node('div', null, 'amin-context');
-    intro.append(node('h2', '文风转换'), node('p', '把输入框里的原文改写成目标文风：可参考当前聊天的文风，或使用保存的自定义文风预设。默认只改表达，不改事实、指代、意图与视角，不替你续写或代替其他角色行动。'));
-    const identityNote = node('p');
+    intro.append(node('p', '将原文改写成目标文风，可参考当前聊天或选择自定义预设。保持事实、指代、意图与视角，结果由你确认后填回。'));
+    const identityNote = node('p', null, 'amin-meta');
     intro.append(identityNote);
 
     const modeTabs = node('nav', null, 'amin-tabs');
     modeTabs.setAttribute('aria-label', '文风模式');
-    const modeHelp = node('p');
-    const presetCard = node('section', null, 'amin-card');
-    const presetRow = node('label');
+    const modeHelp = node('p', null, 'amin-meta');
+    const presetCard = node('section', null, 'amin-card amin-stack');
+    const presetRow = node('label', null, 'amin-field');
     presetRow.append(node('span', '文风预设'));
     const presetSelect = node('select');
     presetSelect.setAttribute('aria-label', '文风预设');
     presetRow.append(presetSelect);
     const presetToolbar = node('div', null, 'amin-toolbar');
-    const editor = node('details', null, 'amin-card');
+    const editor = node('details', null, 'amin-style-preset-editor');
     editor.append(node('summary', '编辑预设'));
-    const nameRow = node('label');
+    const nameRow = node('label', null, 'amin-field');
     nameRow.append(node('span', '预设名称（必填，40 字内）'));
     const nameInput = node('input');
     nameInput.maxLength = 40;
     nameInput.setAttribute('aria-label', '预设名称');
     nameRow.append(nameInput);
-    const descRow = node('label');
-    descRow.append(node('span', '文风说明（必填；描述用词、句式、节奏与排版，不要填写 API 密钥，不限长度）'));
+    const descRow = node('label', null, 'amin-field');
+    descRow.append(node('span', '文风说明（必填，描述用词、句式、节奏与排版）'));
     const descArea = node('textarea');
     descArea.rows = 5;
     descArea.setAttribute('aria-label', '文风说明');
     descRow.append(descArea);
-    const editorNote = node('p');
+    const editorNote = node('p', null, 'amin-meta');
     const editorToolbar = node('div', null, 'amin-toolbar');
     const undoRow = node('div', null, 'amin-toolbar');
     undoRow.hidden = true;
     editor.append(nameRow, descRow, editorToolbar, editorNote, undoRow);
     presetCard.append(presetRow, presetToolbar, editor);
 
-    const sourceCard = node('section', null, 'amin-card');
-    const sourceRow = node('label');
-    sourceRow.append(node('span', '原文（可编辑；不会自动发送，也不会硬截断）'));
+    const sourceCard = node('section', null, 'amin-card amin-stack amin-writing-source');
+    const sourceRow = node('label', null, 'amin-field');
+    sourceRow.append(node('span', '原文（可编辑）'));
     const sourceArea = node('textarea');
     sourceArea.rows = 6;
     sourceArea.setAttribute('aria-label', '原文');
@@ -72,17 +73,21 @@ export function mount(target, options = {}) {
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
 
-    const resultCard = node('section', null, 'amin-card');
+    const resultCard = node('section', null, 'amin-card amin-stack amin-result');
     resultCard.hidden = true;
-    resultCard.append(node('h3', '转换结果（可编辑）'));
-    const resultMeta = node('p');
+    resultCard.append(node('h3', '转换结果（可编辑）', 'amin-section-heading'));
+    const resultMeta = node('p', null, 'amin-meta');
     const resultArea = node('textarea');
     resultArea.rows = 8;
     resultArea.setAttribute('aria-label', '转换结果');
     const resultToolbar = node('div', null, 'amin-toolbar');
     resultCard.append(resultMeta, resultArea, resultToolbar);
 
-    root.append(intro, modeTabs, modeHelp, presetCard, sourceCard, actions, status, resultCard);
+    const contentHost=node('div', null, 'amin-writing-content');
+    const workbench=node('div', null, 'amin-writing-columns');
+    sourceCard.append(actions);
+    workbench.append(sourceCard,resultCard);
+    root.append(intro, modeTabs, modeHelp, presetCard, contentHost, workbench, status);
     target.append(root);
 
     const say = text => { status.textContent = text; };
@@ -172,8 +177,6 @@ export function mount(target, options = {}) {
         if (error) {const current=store.get(editingId),draft=drafts.get(editingId);if(draft)store.setDraft(draftOwner,editingId,!current||draft.name!==current.name||draft.description!==current.description);mode=store.mode();selectedId=store.selectedId();contentMode=store.contentMode();renderPresetOptions();renderModes();reset('文风设置保存失败，本次转换已取消。');say(`文风预设保存失败（${error.message || error}）：已恢复到上次成功保存的预设列表；未保存的修改仍保留在编辑器中。`);}
     });
 
-    const contentHost=node('div');
-    sourceCard.append(contentHost);
     const contentControls=mountContentStyles(contentHost, {
         document:doc, library:options.contentLibrary??contentLibrary(settingsContext),
         getSelection:()=>contentMode,
@@ -322,8 +325,9 @@ export function mount(target, options = {}) {
     function readInput() {
         syncChat(); // a context switch without CHAT_CHANGED must not write into the old chat's draft
         const input = inputElement(doc);
-        sourceArea.value = input.value;
-        sourceChanged(input.value.trim() ? '已读取聊天输入框内容到原文。' : '聊天输入框当前为空。');
+        const source = splitDiceDraft(input.value, getContext());
+        sourceArea.value = source.body;
+        sourceChanged(source.blocks.length ? '已读取行动正文；固定骰点会在填回时原样保留。' : input.value.trim() ? '已读取聊天输入框内容到原文。' : '聊天输入框当前为空。');
     }
     async function copyResult() {
         const text = resultArea.value;
@@ -347,24 +351,31 @@ export function mount(target, options = {}) {
         if (!service) { say('文风转换依赖共享 AI 设置：请先在“AI 设置”中配置并启用渠道。'); return; }
         let snapshot;
         try { snapshot = service.capture('stylewriter'); } catch (error) { say(error.message); return; }
-        let request;
+        let request, sourceDraft;
         try {
             contentControls.assertSaved();
+            // Exact registered dice blocks can also be pasted into the source editor.
+            // Keep those fixed records outside the model's rewriting input.
+            sourceDraft = splitDiceDraft(sourceArea.value, ctx);
             if (mode === 'custom') {
                 if (!store) throw Error('预设存储不可用：请刷新页面后重试。');
                 const preset=store.get(presetSelect.value);
                 if(store.hasDraft(preset?.id))throw Error('请先保存或放弃所选文风预设的修改。');
                 if(editingId==='new'||(!store.get(editingId)&&drafts.has(editingId))||(editingId===preset?.id&&(nameInput.value!==preset.name||descArea.value!==preset.description)))throw Error('请先保存文风预设或放弃未保存的修改，再开始转换；不会静默使用旧文风。');
-                request = buildRequest({ mode, source: sourceArea.value, preset });
+                request = buildRequest({ mode, source: sourceDraft.body, preset });
             }
-            else request = buildRequest({ mode, source: sourceArea.value, samples: mode==='chat'?referenceSamples(ctx ?? {}):undefined });
+            else request = buildRequest({ mode, source: sourceDraft.body, samples: mode==='chat'?referenceSamples(ctx ?? {}):undefined });
             const theme=contentControls.selection();
             request.systemPrompt += contentInstruction(theme,true);
             request.meta.contentStyle=theme.name;
             if(theme.id!=='none')request.meta.label+=` · 内容风格「${theme.name}」`;
         } catch (error) { say(error.message); retryButton.hidden = false; return; }
         let input = null;
-        try { const inputNode = inputElement(doc); input = { node: inputNode, value: inputNode.value }; } catch { input = null; }
+        try {
+            const inputNode = inputElement(doc), inputDraft = splitDiceDraft(inputNode.value, ctx);
+            const blocks = [...inputDraft.blocks, ...sourceDraft.blocks].filter((block, index, all) => all.findIndex(item => item.text === block.text) === index);
+            input = { node: inputNode, value: inputNode.value, diceDraft: { blocks } };
+        } catch { input = null; }
         touchDraft();
         const ticket = ++revision;
         invalidateReason = '';
@@ -417,7 +428,7 @@ export function mount(target, options = {}) {
         resultArea.value = state?.result ?? '';
         resultMeta.textContent = state?.meta ? `本次转换：${state.meta.label} · 原文 ${state.meta.sourceChars} 字。` : '';
         resultCard.hidden = !state?.result;
-        fillBase = running?.input ? { node: running.input.node, identity: running.identity, value: running.input.value } : null;
+        fillBase = running?.input ? { node: running.input.node, identity: running.identity, value: running.input.value, diceDraft: running.input.diceDraft } : null;
         undoFillState = null;
         undoFillButton.hidden = true;
     }
@@ -437,11 +448,11 @@ export function mount(target, options = {}) {
             return;
         }
         const previous = input.value;
-        writeToInput(input, text);
-        fillBase = { node: input, identity: fillBase.identity, value: text };
-        undoFillState = { node: input, identity: fillBase.identity, base: previous, written: text };
+        const written = writeToInput(input, text, { diceDraft: fillBase.diceDraft });
+        fillBase = { ...fillBase, node: input, value: written };
+        undoFillState = { node: input, identity: fillBase.identity, base: previous, written, diceDraft: fillBase.diceDraft };
         undoFillButton.hidden = false;
-        say('已填回聊天输入框：仅写入草稿并触发 input 事件，不会发送。');
+        say(fillBase.diceDraft?.blocks.length ? '已填回行动正文并原样保留固定骰点，不会自动发送。' : '已填回聊天输入框：仅写入草稿并触发 input 事件，不会发送。');
     }
     function undoFill() {
         if(disposed)return;
@@ -453,7 +464,7 @@ export function mount(target, options = {}) {
         const guard = fillGuard({ node: input, expectedNode: record.node, value: input.value, expectedValue: record.written, identity: chatIdentity(getContext() ?? {}), expectedIdentity: record.identity });
         if (!guard.ok) { say(`${guard.message}已阻止自动撤销；可手动编辑输入框。`); return; }
         writeToInput(input, record.base);
-        fillBase = { node: input, identity: record.identity, value: record.base };
+        fillBase = { node: input, identity: record.identity, value: record.base, diceDraft: record.diceDraft };
         undoFillState = null;
         undoFillButton.hidden = true;
         say('已还原填回前的输入框草稿。');

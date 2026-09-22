@@ -1,22 +1,31 @@
-/* Shared typography and rhythm inside the isolated status document. */
-html[data-wsh-frame][data-wsh-theme=nexus]{--wsh-bg:#12191d;--wsh-card:#1b252b;--wsh-control:#202d33;--wsh-line:#adc7be24;--wsh-text:#edf3ef;--wsh-muted:#a2b2b7;--wsh-accent:#b9dfce;--wsh-gold:#e5c99f;--wsh-glow:transparent;--wsh-radius:14px;--wsh-font:Inter,'Segoe UI','Microsoft YaHei',sans-serif}
-html[data-wsh-frame] body{padding:0;font-size:13px;line-height:1.65;scrollbar-width:thin;scrollbar-color:#657d7470 transparent}
-html[data-wsh-frame] .hud{border:0;border-radius:0;box-shadow:none}
-html[data-wsh-frame] header{padding:16px 2px;border-bottom:1px solid var(--wsh-line)}
-html[data-wsh-frame] h1{font-size:20px;letter-spacing:.3px;margin:6px 0;font-weight:600}
-html[data-wsh-frame] .eyebrow{font-size:9px;letter-spacing:1.6px;font-weight:500}
-html[data-wsh-frame] button{min-height:34px;border-radius:9px;font-size:12px;padding:8px 11px}
-html[data-wsh-frame] .toolbar{gap:6px;margin-top:12px}
-html[data-wsh-frame] #cards{padding:8px 0 14px;gap:12px}
-html[data-wsh-frame] .card{padding:15px;border-radius:14px}
-html[data-wsh-frame] .card>.heading{border-left:2px solid var(--wsh-accent);padding-left:10px}
-html[data-wsh-frame] .project-toggle{font-size:15px;font-weight:600;min-height:26px}
-html[data-wsh-frame] .row{padding:10px 0}
-html[data-wsh-frame] .value{font-size:14px;line-height:1.7}
-html[data-wsh-frame] .number{font-size:22px;font-weight:500}
-html[data-wsh-frame] .chip{border-radius:7px;font-size:11px;padding:3px 8px}
-html[data-wsh-frame] #scene{margin:12px 0;padding:10px 12px;border-radius:10px;font-size:12px}
-html[data-wsh-frame] #status{padding:10px 2px;font-size:11px}
-html[data-wsh-frame] #editor{margin:12px 0;padding:14px;border-radius:12px}
-html[data-wsh-frame] :is(input,textarea,select){border-radius:9px;font-size:13px;min-height:38px}
-html[data-wsh-frame] footer{padding:12px 2px;font-size:10px;letter-spacing:.5px}
+/* Isolated status document rhythm. Its theme owns the colors and radius. */
+html[data-wsh-frame] body {padding:0;font-size:13px;line-height:1.65;scrollbar-width:thin;scrollbar-color:var(--wsh-line) transparent;overflow-wrap:anywhere}
+html[data-wsh-frame] *,html[data-wsh-frame] *::before,html[data-wsh-frame] *::after {box-sizing:border-box}
+html[data-wsh-frame] .hud {min-width:0;border:0;border-radius:0;box-shadow:none}
+html[data-wsh-frame] header {padding:16px 2px;border-bottom:1px solid var(--wsh-line)}
+html[data-wsh-frame] h1 {font-size:20px;line-height:1.4;letter-spacing:.02em;margin:6px 0;font-weight:600}
+html[data-wsh-frame] .eyebrow {font-size:11px;letter-spacing:.12em;font-weight:500}
+html[data-wsh-frame] button {min-height:36px;max-width:100%;border-radius:var(--wsh-radius);font-size:13px;padding:8px 11px;white-space:normal}
+html[data-wsh-frame] .toolbar {display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+html[data-wsh-frame] #cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));padding:8px 0 14px;gap:14px}
+html[data-wsh-frame] .card {min-width:0;padding:14px;border-radius:var(--wsh-radius)}
+html[data-wsh-frame] .card>.heading {border-inline-start:2px solid var(--wsh-accent);padding-inline-start:10px}
+html[data-wsh-frame] .project-toggle {font-size:15px;font-weight:600;min-height:36px;text-align:start}
+html[data-wsh-frame] .row {padding:10px 0;gap:12px}
+html[data-wsh-frame] .row>* {min-width:0;max-width:100%}
+html[data-wsh-frame] .value {font-size:14px;line-height:1.7;overflow-wrap:anywhere}
+html[data-wsh-frame] .number {font-size:22px;font-weight:500}
+html[data-wsh-frame] .chip {border-radius:var(--wsh-radius);font-size:12px;padding:3px 8px;max-width:100%}
+html[data-wsh-frame] #scene {margin:14px 0;padding:12px;border-radius:var(--wsh-radius);font-size:13px}
+html[data-wsh-frame] #status {padding:10px 2px;font-size:12px}
+html[data-wsh-frame] #editor {margin:14px 0;padding:14px;border-radius:var(--wsh-radius)}
+html[data-wsh-frame] :is(input,textarea,select) {min-width:0;max-width:100%;border-radius:var(--wsh-radius);font-size:13px;min-height:38px}
+html[data-wsh-frame] :is(input[type=checkbox],input[type=radio]) {min-height:0}
+html[data-wsh-frame] footer {padding:12px 2px;font-size:11px}
+@media(max-width:600px),(pointer:coarse) {
+  html[data-wsh-frame] #cards {grid-template-columns:minmax(0,1fr)}
+  html[data-wsh-frame] :is(button,select,input:not([type=checkbox]):not([type=radio])) {min-height:44px;font-size:16px}
+  html[data-wsh-frame] textarea {font-size:16px}
+  html[data-wsh-frame] .project-toggle {min-height:44px}
+  html[data-wsh-frame] .row {flex-wrap:wrap}
+}

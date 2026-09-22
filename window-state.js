@@ -4,6 +4,9 @@ export function clampPosition(p,width,height){
     return {x:clamp(p?.x,8,width-134),y:clamp(p?.y,8,height-60)};
 }
 export function drawerPlacement(p,width,height,options={}){
+    // Small screens use the visible viewport so the keyboard or a moved launcher
+    // cannot reduce the application to a tiny strip above/below the button.
+    if(width<=640)return {width:Math.max(0,width-16),height:Math.max(0,height-16),x:8,y:8};
     const w=Math.max(0,Math.min(options.width??448,width-16)),above=Math.max(0,p.y-20),below=Math.max(0,height-p.y-72);
     const upwards=above>=260||above>=below;
     const h=Math.min(options.height??720,upwards?above:below);

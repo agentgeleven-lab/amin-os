@@ -3,6 +3,7 @@
 import { getAI } from '../../ai/service.js';
 import { inputElement, waitForResult } from '../reply/generator.js';
 import { normalizeResult } from './model.js';
+import { mergeDiceDraft } from '../dice/draft.js';
 
 export { inputElement, waitForResult };
 export const APP_TASK = '文风转换';
@@ -29,9 +30,11 @@ export async function rewriteText(ctx, request, { signal, snapshot, service } = 
 }
 
 /** Writes a draft into the host input with an input event only — never sends. */
-export function writeToInput(node, text) {
-    node.value = text;
+export function writeToInput(node, text, { diceDraft } = {}) {
+    const written = diceDraft ? mergeDiceDraft(text, diceDraft) : text;
+    node.value = written;
     node.dispatchEvent(new Event('input', { bubbles: true }));
     node.focus?.();
-    try { node.setSelectionRange(text.length, text.length); } catch { /* non-text inputs */ }
+    try { node.setSelectionRange(written.length, written.length); } catch { /* non-text inputs */ }
+    return written;
 }

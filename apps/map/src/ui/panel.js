@@ -1,3 +1,4 @@
+import { uuid } from '../../../../uuid.js';
 import {mountWorldbookSources} from '../../../worldbook-source-ui.js';
 import {sourceSettings,saveSourceSettings} from '../../../worldbook-sources.js';
 import {getAI} from '../../../../ai/service.js';
@@ -20,22 +21,50 @@ import { DIRECTIONS, prepareDocument, layoutMap, validateRules, applyPlacement, 
 import { readMapSources } from '../adapters/sources.js';
 import { renderMap, fitCamera } from './graph.js';
 import { attachFloatingWindow, readWindowPreferences } from './floating.js';
-const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
+const layoutClasses={
+    'dm-form':'amin-card amin-form-grid',
+    'dm-route':'amin-card amin-form-grid amin-span-full',
+    'dm-actions':'amin-toolbar amin-span-full',
+    'dm-toolbar':'amin-toolbar',
+    'dm-help':'amin-meta',
+    'dm-detail-card':'amin-card',
+    'dm-change-preview':'amin-card',
+    'dm-settings-categories':'amin-tabs',
+};
+const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=[cls,...cls.split(' ').map(name=>layoutClasses[name]??'')].filter(Boolean).join(' ');return e;};
 const mapTypes=[{id:'graph',name:'节点连线'},{id:'hex',name:'六边形'},{id:'grid',name:'方格'}];
-const uid=prefix=>`${prefix}_${crypto.randomUUID().replaceAll('-','')}`;
+const uid=prefix=>`${prefix}_${uuid().replaceAll('-','')}`;
 const button=(text,fn)=>{const e=el('button',text);e.type='button';if(/^(保存|生成地图草稿|一键写入)/.test(text))e.classList.add('dm-primary');if(/^(删除|断开)/.test(text))e.classList.add('dm-danger');e.addEventListener('click',fn);return e;};
 const input=(value='',type='text')=>{const e=el('input');e.type=type;e.value=value;return e;};
 const select=(items,value)=>{const e=el('select');for(const item of items){const o=el('option',item.name??item.label);o.value=item.id;e.append(o);}e.value=value;return e;};
-const field=(host,name,control)=>{const label=el('label',name);label.append(control);host.append(label);return control;};
+const field=(host,name,control)=>{
+    const check=control.type==='checkbox',label=el('label',undefined,check?'amin-check amin-span-full':'amin-field');
+    const caption=el('span',name);
+    if(check)label.append(control,caption);else label.append(caption,control);
+    if(control.tagName==='TEXTAREA'||control.type==='file')label.classList.add('amin-span-full');
+    host.append(label);return control;
+};
+// Keep action groups together when a form wraps into one column on a phone.
+function arrangeFormActions(root){
+    for(const form of root.querySelectorAll('.dm-form,.dm-route')){
+        let actions=null;
+        for(const child of [...form.children]){
+            if(child.tagName==='BUTTON'){
+                if(!actions){actions=el('div',undefined,'dm-actions');form.insertBefore(actions,child);}
+                actions.append(child);
+            }else actions=null;
+        }
+    }
+}
 const download=(data)=>{const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='dynamic-map.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 
 export function createPanel(store,persistence,preferences,options={}){
     const kit={el,field,input,select,button,uid};let selectedCells=[],brushCells=false,browsedMap=null,browseScope=null,navigationRevision=0,aiLevel='world',aiMapKey='',searchTerm='',settingsCategory='appearance';
-    const draft=options.draft??createDraftSession(store,persistence), panel=el('section');let disposed=false,activeJob=null,generationStatus='';panel.id=options.inline?uid('dynamic-map-inline'):'dynamic-map-panel';panel.className='dynamic-map-panel'+(options.inline?' dm-inline':'')+(options.embedded?' amin-map-embedded':'');panel.setAttribute('aria-label',options.inline?'消息末尾地图窗口':'动态地图悬浮窗');
-    panel.innerHTML='<header class="dm-header"><div class="dm-handle" tabindex="0" aria-label="拖动地图窗口，方向键移动"><span>🗺</span><strong class="dm-compact-location"></strong></div><button class="dm-toggle" type="button"></button></header><div class="dm-content"><nav class="dm-tabs" role="tablist" aria-label="地图功能"></nav><div class="dm-page"></div><div class="dm-savebar"></div><p class="dm-save-status" role="status"></p><p class="dm-feedback" role="status"></p></div>';
+    const draft=options.draft??createDraftSession(store,persistence), panel=el('section');let disposed=false,activeJob=null,generationStatus='';panel.id=options.inline?uid('dynamic-map-inline'):'dynamic-map-panel';panel.className='dynamic-map-panel amin-ui'+(options.inline?' dm-inline':'')+(options.embedded?' amin-map-embedded':'');panel.setAttribute('aria-label',options.inline?'消息末尾地图窗口':'动态地图悬浮窗');
+    panel.innerHTML='<header class="dm-header"><div class="dm-handle" tabindex="0" aria-label="拖动地图窗口，方向键移动"><span aria-hidden="true">🗺</span><strong class="dm-compact-location"></strong></div><button class="dm-toggle" type="button"></button></header><div class="dm-content"><nav class="dm-tabs amin-tabs" role="tablist" aria-label="地图功能"></nav><div class="dm-page amin-app-page" role="tabpanel"></div><div class="dm-savebar amin-toolbar"></div><p class="dm-save-status" role="status"></p><p class="dm-feedback" role="status" aria-live="polite"></p></div>';
     (options.mount??document.body).append(panel);
     const content=panel.querySelector('.dm-content'),page=panel.querySelector('.dm-page'),feedback=panel.querySelector('.dm-feedback'),savebar=panel.querySelector('.dm-savebar'),toggle=panel.querySelector('.dm-toggle');
-    let collapsed=options.inline?false:(readWindowPreferences()?.collapsed??true),tab='view',selected=null,unlocked=false,dragMode='move',camera=null,cameraKey='',method='walk',notice='',aiBusy=false,aiPrompt='',sourcePicker=null,coverage='full',nameRoads=false,distanceRoads=false,sourceReport='',editorTool='move',rulesTool='distance',routeId='';
+    let collapsed=options.inline?false:(readWindowPreferences()?.collapsed??true),tab='view',selected=null,unlocked=false,dragMode='move',camera=null,cameraKey='',method='walk',notice='',aiBusy=false,aiPrompt='',aiEntrance='',aiChildType='grid',sourcePicker=null,coverage='full',nameRoads=false,distanceRoads=false,sourceReport='',editorTool='move',rulesTool='distance',routeId='';
     const floating=options.inline?{keepVisible(){},save(){},reset(){},destroy(){}}:attachFloatingWindow(panel,panel.querySelector('.dm-handle'),()=>collapsed);
     if(options.inline){panel.querySelector('.dm-handle').removeAttribute('tabindex');panel.querySelector('.dm-handle').setAttribute('aria-label','消息末尾地图');}
     const tabs=[['view','查看地图'],['edit','调整地图'],['rules','地图规则'],['ai','AI生成地图'],['templates','地图模板'],['settings','设置']];
@@ -46,7 +75,14 @@ export function createPanel(store,persistence,preferences,options={}){
     toggle.addEventListener('click',()=>setCollapsed(!collapsed));
     if(options.embedded){toggle.hidden=true;panel.setAttribute('aria-label','地图应用');}
     panel.addEventListener('keydown',e=>{if(e.key==='Escape'&&!options.embedded){setCollapsed(true);toggle.focus();}});
-    for(const [id,name]of tabs){const titles={view:'◉ 查看',edit:'✎ 编辑',rules:'☷ 规则',ai:'✦ AI',templates:'▧ 模板',settings:'⚙ 设置'};const b=button(titles[id],()=>{tab=id;camera=null;notice='';render();});b.setAttribute('aria-label',name);b.title=name;b.dataset.tab=id;b.setAttribute('role','tab');panel.querySelector('.dm-tabs').append(b);}
+    page.id=panel.id+'-page';
+    for(const [id,name]of tabs){const titles={view:'查看',edit:'编辑',rules:'规则',ai:'AI 生成',templates:'模板',settings:'设置'};const b=button(titles[id],()=>{tab=id;camera=null;notice='';render();});b.id=panel.id+'-tab-'+id;b.setAttribute('aria-label',name);b.setAttribute('aria-controls',page.id);b.title=name;b.dataset.tab=id;b.setAttribute('role','tab');panel.querySelector('.dm-tabs').append(b);}
+    panel.querySelector('.dm-tabs').addEventListener('keydown',event=>{
+        const buttons=[...panel.querySelectorAll('.dm-tabs [role=tab]')],index=buttons.indexOf(event.target);
+        if(index<0)return;
+        const next=event.key==='ArrowRight'?(index+1)%buttons.length:event.key==='ArrowLeft'?(index+buttons.length-1)%buttons.length:event.key==='Home'?0:event.key==='End'?buttons.length-1:null;
+        if(next===null)return;event.preventDefault();buttons[next].click();buttons[next].focus();
+    });
     function render(){
         sourcePicker?.dispose();sourcePicker=null;
         if(disposed)return;
@@ -55,18 +91,21 @@ export function createPanel(store,persistence,preferences,options={}){
         if(!document.maps[browsedMap]){browsedMap=document.activeMap;navigationRevision++;}const map=document.maps[browsedMap];
         panel.dataset.theme=preferences.snapshot().theme;
         panel.querySelector('.dm-compact-location').textContent=locationPath(saved);
-        for(const b of panel.querySelectorAll('[data-tab]'))b.setAttribute('aria-selected',String(b.dataset.tab===tab));
+        for(const b of panel.querySelectorAll('[data-tab]')){const active=b.dataset.tab===tab;b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;}
+        page.setAttribute('aria-labelledby',panel.id+'-tab-'+tab);
         page.replaceChildren();savebar.replaceChildren();feedback.textContent=notice;
         if(collapsed)return;
         const key=`${persistence.scope()}:${tab}:${map.id}`;if(key!==cameraKey){camera=null;selected=null;unlocked=false;dragMode='move';cameraKey=key;selectedCells=[];brushCells=false;}
-        page.append(el('p','正在浏览 · '+mapPath(document,map.id).map(m=>m.name).join(' / '),'dm-browse-label'),el('h2',map.name));
-        if(map.parentMap)page.append(button('返回上级：'+document.maps[map.parentMap].name,()=>navigateMap(map.parentMap)));
+        const context=el('section',undefined,'dm-map-context amin-context');
+        context.append(el('p',tab==='settings'?'地图设置':tab==='view'?'当前已保存地图':'正在编辑地图草稿','dm-browse-label'),el('h2',map.name),el('p','📍 角色位置：'+locationPath(saved),'dm-role-location'));page.append(context);
+        const mapNavigation=el('div',undefined,'dm-actions');
+        if(map.parentMap)mapNavigation.append(button('返回上级：'+document.maps[map.parentMap].name,()=>navigateMap(map.parentMap)));
         const children=Object.values(document.maps).filter(m=>m.parentMap===map.id);
-        for(const child of children)if(tab!=='view')page.append(button('进入：'+child.name,()=>navigateMap(child.id)));
+        for(const child of children)if(tab!=='view')mapNavigation.append(button('进入：'+child.name,()=>navigateMap(child.id)));
+        if(mapNavigation.children.length)context.append(mapNavigation);
 
-        const pathBar=el('div',undefined,'dm-actions');for(const ancestor of mapPath(document,map.id))pathBar.append(button(ancestor.name,()=>navigateMap(ancestor.id)));if(mapPath(document,map.id).length>1)page.append(pathBar);
-        page.append(el('p','📍 角色位置：'+locationPath(saved),'dm-role-location'));
-        if(Object.keys(document.maps).length>1){const search=field(page,'搜索地图',input(searchTerm)),s=field(page,'地图',select(mapChoices(document),map.id));search.oninput=()=>{searchTerm=search.value;const matches=mapChoices(document).filter(m=>m.name.toLowerCase().includes(searchTerm.toLowerCase()));s.replaceChildren(...select(matches,map.id).children);};s.onchange=()=>navigateMap(s.value);}
+        const pathBar=el('nav',undefined,'dm-actions');pathBar.setAttribute('aria-label','地图层级');for(const ancestor of mapPath(document,map.id))pathBar.append(button(ancestor.name,()=>navigateMap(ancestor.id)));if(mapPath(document,map.id).length>1)context.append(pathBar);
+        if(Object.keys(document.maps).length>1){const picker=el('div',undefined,'dm-map-picker amin-form-grid'),search=field(picker,'搜索地图',input(searchTerm)),s=field(picker,'切换地图',select(mapChoices(document),map.id));search.placeholder='按地图名称搜索';search.type='search';context.append(picker);search.oninput=()=>{searchTerm=search.value;const matches=mapChoices(document).filter(m=>m.name.toLowerCase().includes(searchTerm.toLowerCase()));s.replaceChildren(...select(matches.length?matches:[{id:'',name:'没有匹配的地图'}],map.id).children);s.disabled=!matches.length;};s.onchange=()=>{if(s.value)navigateMap(s.value);};}
         if(tab==='edit'){
             const name=field(page,'地图名称',input(map.name));page.append(button('应用地图名称',()=>edit(m=>{if(!name.value.trim())throw new Error('地图名称不能为空');m.name=name.value.trim();})));
         }
@@ -82,6 +121,7 @@ export function createPanel(store,persistence,preferences,options={}){
             if(status.dirty&&tab!=='view')renderChanges(saved,draft.snapshot());
         }
         for(const text of [...page.querySelectorAll('.dm-help')])if(text.textContent.length>180){const fold=el('details',undefined,'dm-help-fold');fold.append(el('summary','使用说明'));text.replaceWith(fold);fold.append(text);}
+        arrangeFormActions(page);
     }
     function renderChanges(before,after){
         const changes=mapChanges(before,after),box=el('details',undefined,'dm-change-preview');box.append(el('summary',`待保存变更 · ${changes.length} 项`));
@@ -91,7 +131,7 @@ export function createPanel(store,persistence,preferences,options={}){
     function navigateMap(id){browsedMap=id;selected=null;camera=null;searchTerm='';navigationRevision++;render();}
     function renderCanvas(map){
         const controls=el('div',undefined,'dm-toolbar');
-        controls.append(button('拖动后回归',()=>{camera=fitCamera(map,tab==='edit');render();}));
+        controls.append(button('居中显示全图',()=>{camera=fitCamera(map,tab==='edit');render();}));
         if(tab==='edit'){const b=button(`${unlocked?'✓ ':''}允许拖动地点`,()=>{unlocked=!unlocked;render();});b.setAttribute('aria-pressed',String(unlocked));b.disabled=!persistence.scope();if(b.disabled)b.title='请先打开角色卡的聊天';controls.append(b);}
         if(tab==='edit'&&isTileMap(map)&&editorTool==='cells'){const brush=button(`${brushCells?'✓ ':''}刷选格子`,()=>{brushCells=!brushCells;render();});brush.setAttribute('aria-pressed',String(brushCells));controls.append(brush,button('清空格子选择',()=>{selectedCells=[];render();}));}
         if(tab==='edit'&&!isTileMap(map))controls.append(el('span','拖动模式：'+(dragMode==='reconnect'?'重新连接':'调整位置')));
@@ -242,15 +282,16 @@ export function createPanel(store,persistence,preferences,options={}){
 
     }
     function renderAI(map){
-        const form=el('div',undefined,'dm-form');page.append(form);form.append(button('AI 设置 · 全局 API 与预设',()=>globalThis.AminOS?.openApp('ai')));
-        if(aiMapKey!==map.id){aiMapKey=map.id;aiLevel=map.metadata.generationLevel??(map.type==='graph'?'world':'city');}
+        const form=el('div',undefined,'dm-form');page.append(form);form.append(el('h3','生成地图草稿'),button('API 与提示词设置',()=>globalThis.AminOS?.openApp('ai')));
+        form.setAttribute('aria-busy',String(aiBusy));
+        if(aiMapKey!==map.id){aiMapKey=map.id;aiLevel=map.metadata.generationLevel??(map.type==='graph'?'world':'city');aiEntrance='';}
         const level=field(form,'生成层级',select(GENERATION_LEVELS,aiLevel));level.disabled=aiBusy;level.onchange=()=>{aiLevel=level.value;levelRules.textContent=levelPrompt(aiLevel);};
         const levelGuide=el('details'),levelRules=el('pre',levelPrompt(aiLevel));levelGuide.append(el('summary','查看当前层级的生成约束'),levelRules);form.append(levelGuide);
         const density=field(form,'地点覆盖程度',select([{id:'full',name:'全面 · 覆盖各分区与相关地点'},{id:'balanced',name:'适中 · 主要地点与枢纽'},{id:'brief',name:'简略 · 少量地标概览'}],coverage));density.disabled=aiBusy;density.onchange=()=>{coverage=density.value;};
         form.append(el('p','全面模式优先覆盖范围内地点，不保证穷尽现实世界。较大地图需要更多输出预算；可在 AI 设置中调整，或分地区生成后继续新增。','dm-help'));
         if(coverage==='full'&&getAI().capture('map').config.maxTokens<8192)form.append(el('p','当前输出上限低于 8192 tokens，较大地图可能受预算限制；可按模型支持范围提高至 8192–16384。不会自动更改你的 API 设置。','dm-help'));
         form.append(el('p','生成地图草稿：重新生成「'+mapPath(draft.snapshot(),map.id).map(m=>m.name).join(' → ')+'」，保留其他地图；新增按钮只添加内容。','dm-help'));
-        const entrance=field(form,'内部地图入口地点',select([{id:'',name:'请选择地点'},...Object.values(map.nodes)],selected??'')),childType=field(form,'内部地图形态',select(mapTypes,'grid'));entrance.disabled=childType.disabled=aiBusy;
+        const entrance=field(form,'内部地图入口地点',select([{id:'',name:'请选择地点'},...Object.values(map.nodes)],map.nodes[aiEntrance]?aiEntrance:selected??'')),childType=field(form,'内部地图形态',select(mapTypes,aiChildType));entrance.disabled=childType.disabled=aiBusy;entrance.onchange=()=>{aiEntrance=entrance.value;};childType.onchange=()=>{aiChildType=childType.value;};
         const progress=el('p',generationStatus,'dm-generation-progress');progress.setAttribute('role','status');form.append(progress);
         const distances=field(form,'为道路生成距离',input('','checkbox'));distances.checked=distanceRoads;distances.disabled=aiBusy;distances.onchange=()=>{distanceRoads=distances.checked;};
         form.append(el('p','新生成和新增都会读取当前资料、当前地图草稿及最近 30 条非系统聊天正文（不设资料字符上限）。新增只补地点和道路，保留已有资料与当前位置。','dm-help'));
@@ -290,7 +331,7 @@ export function createPanel(store,persistence,preferences,options={}){
                 if(!expand)for(const m of [doc.maps[base.activeMap]])if(['沧州 · 示例地图','未命名地图','根据世界设定命名'].includes(m.name))m.name=`${material.source.角色卡.名称||'当前世界'} · 地图`;
                 doc.maps[base.activeMap].metadata.generationLevel=capturedLevel;doc.activeMap=roleMap;const target=doc.maps[base.activeMap];browsedMap=target.id;draft.applyGeneration(doc);generationStatus=`${childMode?'已创建内部地图':expand?'已新增内容':'已重新生成当前地图'}：${target.name}，${Object.keys(target.nodes).length} 个地点、${target.edges.length} 条道路；保存全部地图调整后生效`; notice='已生成草稿；请检查并保存地图。';if(!expand&&capturedCoverage==='full'&&Object.keys(target.nodes).length<6)notice+=' 本次返回的地点较少，请核对生成层级、世界书读取范围与输出预算；可继续新增补全。';
             }catch(error){generationStatus=error.message;notice=`生成未应用：${error.message}`;}finally{job.finish();activeJob=null;aiBusy=false;render();}
-        };const generate=button(aiBusy?'正在生成…':'生成地图草稿',()=>generateAction(false)),add=button('根据资料与聊天记录新增地点和道路',()=>generateAction(true));generate.disabled=add.disabled=aiBusy;const child=button('为选中地点生成内部地图',()=>generateAction(false,true));child.disabled=aiBusy||!Object.keys(map.nodes).length;form.append(generate,add,child);const undo=button('撤销本次生成',()=>run(()=>{draft.undoGeneration();generationStatus='已撤销本次生成，恢复生成前草稿';render();}));undo.disabled=aiBusy||!draft.status().canUndo;form.append(undo,el('p','生成可在后续编辑或保存之前撤销；生成期间切换地图会取消结果应用。','dm-help'));if(aiBusy)form.append(button('取消生成',()=>activeJob?.cancel()));
+        };const generate=button(aiBusy?'正在生成…':'生成地图草稿',()=>generateAction(false)),add=button('新增地点与道路',()=>generateAction(true));add.title='根据资料与聊天记录新增地点和道路，保留现有内容';generate.disabled=add.disabled=aiBusy;const child=button('生成内部地图',()=>generateAction(false,true));child.title='为选择的入口地点生成子地图';child.disabled=aiBusy||!Object.keys(map.nodes).length;form.append(generate,add,child);const undo=button('撤销本次生成',()=>run(()=>{draft.undoGeneration();generationStatus='已撤销本次生成，恢复生成前草稿';render();}));undo.disabled=aiBusy||!draft.status().canUndo;form.append(undo,el('p','生成可在后续编辑或保存之前撤销；生成期间切换地图会取消结果应用。','dm-help'));if(aiBusy)form.append(button('取消生成',()=>activeJob?.cancel()));
     }
     const libraryKey=`dynamic-map-templates:${persistence.namespace}`;
     function library(){const value=JSON.parse(localStorage.getItem(libraryKey)||'[]');if(!Array.isArray(value))throw new Error('模板库格式错误');return value;}

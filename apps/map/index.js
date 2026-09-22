@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 import { createTextUpdates } from './src/integrations/text-updates.js';
 import { createMapTools } from './src/integrations/tool-calling.js';
 import { createVariableBridge } from './src/integrations/chat-variables.js';
@@ -22,7 +23,7 @@ export function initialize({ mount, onOpen = () => {} } = {}) {
     const inlinePanels = new Set();
     const settingsObject = ctx?.extensionSettings;
     if (settingsObject && !settingsObject.dynamicMapNamespace) {
-        settingsObject.dynamicMapNamespace = crypto.randomUUID();
+        settingsObject.dynamicMapNamespace = uuid();
         ctx.saveSettingsDebounced?.();
     }
     const persistence = bindChatStore(store, {

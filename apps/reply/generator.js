@@ -1,6 +1,7 @@
 import { CONTENT_MODES, contentInstruction, writingInstruction } from './writing-library.js';
 import {getAI} from '../../ai/service.js';
 import { readWorldContext, hostWorldSettings } from './world-context.js';
+import { splitDiceDraft, mergeDiceDraft } from '../dice/draft.js';
 const LEGACY_ROLEPLAY_PROMPT='你是用户的回复拟稿助手。为用户本人拟写下一条消息，不替其他角色决定行动。';
 export const DEFAULT_ROLEPLAY_PROMPT='你是剧情角色的回复拟稿助手。为指定的回复主体拟写下一步对白、行动与反应，贴合该角色的人设和当前剧情。主体可以是剧情中的任何角色，不限定为玩家或用户。';
 export const DEFAULT_AUTHOR_PROMPT='你是作者与编剧的剧情策划助手。以作者视角设计接下来如何推进故事，不扮演用户或任何角色，不直接续写正文。';
@@ -93,6 +94,7 @@ export function perspectiveInstruction(settings, data) {
 
 }
 export async function generateOptions(ctx, settings, { draft = '', world, onContext, signal, isCurrent = () => true, contentStyle, writingStyle } = {}) {
+    draft=splitDiceDraft(draft,ctx).body;
     const sharedAI=getAI(),snapshot=sharedAI?.capture('reply');
     if(!sharedAI && typeof ctx?.generateRaw!=='function') throw new Error('当前前端缺少 generateRaw 接口。');
     const s=normalizeSettings(settings);
@@ -115,12 +117,13 @@ export async function generateOptions(ctx, settings, { draft = '', world, onCont
 export function inputElement(doc=document) { const el=doc.querySelector('#send_textarea'); if(!el || el.disabled || el.readOnly) throw new Error('聊天输入框当前不可用。'); return el; }
 function write(el,text) { el.value=text; el.dispatchEvent(new Event('input',{bubbles:true})); el.focus(); el.setSelectionRange(text.length,text.length); }
 export class DraftSelection {
-    constructor() { this.reset(); }
-    reset() { this.base=null; this.last=null; }
+    constructor(getContext=()=>globalThis.SillyTavern?.getContext?.()) { this.getContext=getContext;this.reset(); }
+    reset() { this.base=null;this.body=null;this.diceSnapshot=null;this.last=null; }
     choose(el,text,mode='append') {
         if(this.last!==null && el.value!==this.last) throw new Error('草稿已被你修改。请先点“保留编辑”，再选择新候选。');
-        if(this.base===null) this.base=el.value;
-        this.last=mode==='replace' || !this.base ? text : `${this.base}\n${text}`;
+        if(this.base===null){const snapshot=splitDiceDraft(el.value,this.getContext());this.base=el.value;this.diceSnapshot=snapshot;this.body=snapshot.body;}
+        const replacement=mode==='replace' || !this.body ? text : `${this.body}\n${text}`;
+        this.last=mergeDiceDraft(replacement,this.diceSnapshot);
         write(el,this.last);
     }
     undo(el) { if(this.base===null) throw new Error('没有可撤销的填入。'); if(el.value!==this.last) throw new Error('草稿已被修改，为保留编辑无法撤销。'); write(el,this.base); this.reset(); }

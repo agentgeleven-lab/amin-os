@@ -1,3 +1,4 @@
+import { uuid } from '../../../../uuid.js';
 import { createNode, createEdge, validateDocument } from '../core/protocol.js';
 import { getActiveMap } from '../core/selectors.js';
 
@@ -65,7 +66,7 @@ export function createEditor(host, store, persistence, report) {
     field(edgeForm, 'edgeId').addEventListener('change', fillEdge);
     nodeForm.addEventListener('submit', event => {
         event.preventDefault(); attempt(() => {
-            const map = getActiveMap(store.snapshot()), id = field(nodeForm, 'nodeId').value || `node_${crypto.randomUUID()}`;
+            const map = getActiveMap(store.snapshot()), id = field(nodeForm, 'nodeId').value || `node_${uuid()}`;
             const old = map.nodes[id];
             const node = old ? structuredClone(old) : createNode(id, '新地点', { position: { x: (360 - map.view.x) / map.view.zoom, y: (200 - map.view.y) / map.view.zoom } });
             node.name = field(nodeForm, 'name').value.trim(); node.type = field(nodeForm, 'type').value.trim(); node.description = field(nodeForm, 'description').value;
@@ -74,7 +75,7 @@ export function createEditor(host, store, persistence, report) {
     });
     edgeForm.addEventListener('submit', event => {
         event.preventDefault(); attempt(() => {
-            const map = getActiveMap(store.snapshot()), id = field(edgeForm, 'edgeId').value || `edge_${crypto.randomUUID()}`;
+            const map = getActiveMap(store.snapshot()), id = field(edgeForm, 'edgeId').value || `edge_${uuid()}`;
             const old = map.edges.find(e => e.id === id);
             const edge = old ? structuredClone(old) : createEdge(id, '', '');
             edge.name = field(edgeForm, 'name').value.trim(); edge.from = field(edgeForm, 'from').value; edge.to = field(edgeForm, 'to').value;

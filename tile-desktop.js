@@ -1,3 +1,4 @@
+import { uuid } from './uuid.js';
 import {installDesktopEffects} from './desktop-effects.js';
 import {mediaURL} from './desktop-effects-model.js';
 import {defaultTiles,loadTiles,saveTiles,moveTile} from './tile-layout.js';
@@ -41,8 +42,8 @@ export function createTileDesktop({home,cards,apps,createIcon,openApp,onLayout})
  const update=patch=>{layout=layout.map(t=>t.id===selected?{...t,...patch}:t);render();save();};
  image.onchange=()=>{try{update({image:mediaURL(image.value)});}catch(e){hint.textContent=e.message;}};
  sizes.onchange=()=>update({size:sizes.value});target.onchange=()=>update({target:target.value});name.oninput=()=>{const start=name.selectionStart,end=name.selectionEnd;update({label:name.value});name.setSelectionRange(start,end);};
- add.onclick=()=>{clearGesture();const t={id:crypto.randomUUID(),target:target.value||apps[0].id,label:'',size:'medium'};layout.push(t);selected=t.id;render();save();name.focus();};
- copy.onclick=()=>{const t=layout.find(t=>t.id===selected);if(!t)return;const clone={...t,id:crypto.randomUUID()};layout.splice(layout.indexOf(t)+1,0,clone);selected=clone.id;render();save();};
+ add.onclick=()=>{clearGesture();const t={id:uuid(),target:target.value||apps[0].id,label:'',size:'medium'};layout.push(t);selected=t.id;render();save();name.focus();};
+ copy.onclick=()=>{const t=layout.find(t=>t.id===selected);if(!t)return;const clone={...t,id:uuid()};layout.splice(layout.indexOf(t)+1,0,clone);selected=clone.id;render();save();};
  remove.onclick=()=>{const i=layout.findIndex(t=>t.id===selected);if(i<0)return;clearGesture();undo={tile:layout[i],index:i};layout.splice(i,1);selected=layout[Math.min(i,layout.length-1)]?.id??'';render();save();};
  restore.onclick=()=>{if(!undo)return;layout.splice(Math.min(undo.index,layout.length),0,undo.tile);selected=undo.tile.id;undo=null;render();save();};
  function step(delta){const i=layout.findIndex(t=>t.id===selected),target=layout[i+delta];if(!target)return;layout=moveTile(layout,selected,target.id,delta>0);render();save();}

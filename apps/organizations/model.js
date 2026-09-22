@@ -1,7 +1,8 @@
+import { uuid } from '../../uuid.js';
 export const ROOT = '势力资料';
 export const GROUPS = ['organizations', 'alliances', 'regions'];
 export const LABELS = { organizations:'组织', alliances:'联盟／阵营', regions:'地区' };
-export const uid = () => 'id_' + crypto.randomUUID().replaceAll('-', '');
+export const uid = () => 'id_' + uuid().replaceAll('-', '');
 export const clone = value => structuredClone(value);
 export const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const canonical = v => Array.isArray(v) ? v.map(canonical) : object(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;

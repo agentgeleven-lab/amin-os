@@ -1,0 +1,109 @@
+import { KEY, readStore, readCurrentScene, visibleEvents, chatPath, transition, appendEvent, mapReferences, currentPrompt, createSceneId } from './model.js';
+export const PROMPT_KEY = 'amin-os-scene-time';
+const clone = value => structuredClone(value);
+const identity = ctx => JSON.stringify([ctx?.groupId != null ? ['group', ctx.groupId] : ['character', ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.characterId ?? null], ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null]);
+const loaded = ctx => ctx?.chatMetadata && typeof ctx.chatMetadata === 'object' && (ctx.getCurrentChatId?.() ?? ctx.chatId) != null && (ctx.getCurrentChatId?.() ?? ctx.chatId) !== '';
+export function createSceneService(getContext = () => globalThis.SillyTavern?.getContext?.(), { createId = createSceneId, now = () => new Date().toISOString(), poll = false } = {}) {
+    const listeners = new Set(), dirty = new WeakSet(), removers = [];
+    let pending = null, busy = false, disposed = false, lastScope = null, lastMessage = '', epoch = 0;
+    const notify = () => { for (const callback of listeners) callback(); };
+    const clearPrompt = () => getContext()?.setExtensionPrompt?.(PROMPT_KEY, '', 1, 0, false);
+    function capture() {
+        const ctx = getContext();
+        if (disposed) throw Error('场景服务已关闭。');
+        if (!loaded(ctx)) throw Error('请先打开一个聊天。');
+        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), epoch };
+    }
+    function check(token, { checkBasis = true } = {}) {
+        const current = capture();
+        if (!token || token.identity !== current.identity || token.metadata !== current.metadata || token.path !== current.path || token.epoch !== current.epoch) throw Error('聊天或消息候选已变化，请在当前剧情重新预览。');
+        if (checkBasis && token.basis !== current.basis) throw Error('场景资料已变化，请重新预览。');
+        return getContext();
+    }
+    function sync() {
+        if (disposed) return;
+        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null) } : null;
+        const changed = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path || next?.basis !== lastScope?.basis;
+        if (!changed) return;
+        clearPrompt();
+        const moved = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path;
+        if (moved) { epoch++; if (pending) lastMessage = '聊天或消息候选已变化，待确认操作已取消。'; }
+        pending = null; lastScope = next; notify();
+    }
+    async function persist(ctx, token, value) {
+        check(token, { checkBasis: false });
+        try { await ctx.saveMetadata(); }
+        catch (error) { throw Error(`操作已记入当前聊天，但保存失败：${error?.message ?? '未知错误'}。请重试保存；不会再次推进时间。`); }
+        if (ctx.chatMetadata[KEY] === value) dirty.delete(ctx.chatMetadata);
+    }
+    function stage(op, data, token = capture()) {
+        if (busy) throw Error('正在保存，请稍候。');
+        const ctx = check(token), at = now(), eventId = createId();
+        const result = transition(readCurrentScene(ctx), op, clone(data), { at, sceneId: op === 'save-scene' && !data.scene?.id ? createId() : undefined });
+        pending = { ...result, op, eventId, at, token };
+        lastMessage = '请核对预览，确认后才更新当前剧情。'; notify(); return preview();
+    }
+    function preview() { if (!pending) return null; const { token, ...result } = pending; return clone(result); }
+    async function confirm() {
+        if (busy) throw Error('正在保存，请稍候。');
+        if (!pending) throw Error('没有待确认的操作。');
+        const operation = pending, ctx = check(operation.token);
+        if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口。');
+        const value = appendEvent(readStore(ctx), ctx.chat, operation, operation);
+        // Consume before persistence: failure retries only saving, never the transition.
+        pending = null; busy = true; ctx.chatMetadata[KEY] = value; dirty.add(ctx.chatMetadata); clearPrompt();
+        lastScope = { ...operation.token, basis: JSON.stringify(value) };
+        lastMessage = '正在保存已确认的场景与时间。'; notify();
+        try {
+            await persist(ctx, operation.token, value);
+            check(operation.token, { checkBasis: false }); lastMessage = '已保存。';
+            return clone(operation.state);
+        } catch (error) { lastMessage = error.message; throw error; }
+        finally { busy = false; sync(); notify(); }
+    }
+    async function retrySave() {
+        if (busy) throw Error('正在保存，请稍候。');
+        const token = capture(), ctx = check(token), value = ctx.chatMetadata[KEY];
+        if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口。');
+        if (!dirty.has(ctx.chatMetadata)) return;
+        busy = true; notify();
+        try { await persist(ctx, token, value); check(token, { checkBasis: false }); lastMessage = '已重新保存，时间没有再次推进。'; }
+        catch (error) { lastMessage = error.message; throw error; }
+        finally { busy = false; sync(); notify(); }
+    }
+    function start(type = 'normal', options = {}, dryRun = false) {
+        clearPrompt();
+        if (disposed || dryRun || options?.signal?.aborted || !['normal', 'regenerate', 'swipe', 'continue'].includes(type)) return;
+        try {
+            if (busy) throw Error('场景与时间正在保存，本轮未附加场景。');
+            const ctx = getContext();
+            if (!loaded(ctx)) return;
+            let chat = ctx.chat ?? [];
+            // The replaced assistant candidate must not contribute facts to its own retry.
+            if (['regenerate', 'swipe'].includes(type) && chat.length && !chat.at(-1).is_user) chat = chat.slice(0, -1);
+            const prompt = currentPrompt({ ...ctx, chat });
+            ctx.setExtensionPrompt(PROMPT_KEY, prompt, 1, 0, false);
+            lastMessage = prompt ? `已附加 ${prompt.length} 字符已确认场景与时间。` : '当前分支没有开启读取的场景与时间。';
+        } catch (error) { lastMessage = error.message; }
+        notify();
+    }
+    const initial = getContext(), source = initial?.eventSource, types = initial?.eventTypes ?? initial?.event_types ?? {};
+    const supported = !!(initial?.setExtensionPrompt && source?.on && types.GENERATION_AFTER_COMMANDS && types.CHAT_CHANGED);
+    const clearAndSync = () => { clearPrompt(); sync(); };
+    const handlers = { CHAT_CHANGED: clearAndSync, MESSAGE_SENT: clearAndSync, MESSAGE_RECEIVED: clearAndSync, MESSAGE_UPDATED: clearAndSync, MESSAGE_DELETED: clearAndSync, MESSAGE_SWIPED: clearAndSync, GENERATION_ENDED: clearAndSync, GENERATION_STOPPED: clearAndSync };
+    if (supported) handlers.GENERATION_AFTER_COMMANDS = start;
+    for (const [name, callback] of Object.entries(handlers)) if (types[name] && source?.on) {
+        source.on(types[name], callback); removers.push(() => source.removeListener ? source.removeListener(types[name], callback) : source.off?.(types[name], callback));
+    }
+    const timer = poll ? setInterval(sync, 800) : null;
+    sync();
+    return { context: getContext, capture, check, sync, stage, preview, confirm, retrySave, supported,
+        read: () => readCurrentScene(getContext()), history: () => visibleEvents(getContext()), mapReferences: () => mapReferences(getContext()),
+        discard() { pending = null; lastMessage = '已取消预览。'; notify(); },
+        status: () => lastMessage, busy: () => busy, dirty: () => !!getContext()?.chatMetadata && dirty.has(getContext().chatMetadata),
+        subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
+        dispose() { disposed = true; pending = null; clearPrompt(); clearInterval(timer); for (const remove of removers) remove(); listeners.clear(); },
+    };
+}
+let shared;
+export function getSharedSceneService(getContext) { return shared ??= createSceneService(getContext, { poll: true }); }

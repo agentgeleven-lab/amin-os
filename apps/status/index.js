@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 import {mountWorldbookSources} from '../worldbook-source-ui.js';
 import {sourceSettings,saveSourceSettings} from '../worldbook-sources.js';
 import { createMapLink } from './map-link.js';
@@ -5,30 +6,39 @@ import { checkpointState } from './state-checkpoint.js';
 import { compileRules, createRulesPage } from './rules.js';
 import { installUpdateEntry, boundWorldbook } from './lorebook.js';
 import { createHistory } from './history.js';
-import { historyView, installFloorButtons } from './history-ui.js';
+import { historyView, installFloorButtons, latestStatusFloor } from './history-ui.js';
 import { createTemplatesPage, copyPrompt } from './templates.js';
 import { buildUpdatePrompt } from './state-tools.js';
 import { generateStatus } from './generator.js';
-import { installFloatingButton } from './floating.js';
-import { enablePanelDrag } from './drag-panel.js';
 import { setLocalVariable } from '/scripts/variables.js';
 
 const KEY = 'world_status_hud_v1';
 const context = () => SillyTavern.getContext();
 let embeddedMount, embeddedClose = () => {}, activeIdentity;
 export function initialize({mount: target, onClose = () => {}} = {}) { embeddedMount=target; embeddedClose=onClose; mount(); return {open: openEmbedded}; }
-async function openEmbedded(){
-  if(hudPanel){try{checkIdentity(activeIdentity);return;}catch{closeHud();}}
-  await showHud();
+async function openEmbedded(page = selectedPage){
+  identity();
+  if (await floorButtons.openCurrent(page)) { embeddedClose(); return; }
+  if (!embeddedMount) { notify('请加载最新聊天楼层，并在设置中显示世界状态按钮。'); return; }
+  if (latestStatusFloor(context().chat) < 0) {
+    await showHud(page,{target:embeddedMount,emptyChat:true}); return;
+  }
+  closeHud(); embeddedMount.replaceChildren();
+  const notice=node('section',undefined,'amin-page amin-ui wsh-floor-notice');
+  const open=node('button','显示入口并打开最新楼层','amin-primary');open.type='button';
+  const message=node('p','世界状态已移至楼层窗口。请加载最新消息；编辑器、生成设置、规则和模板都在当前状态工作台中。','amin-notice');
+  open.onclick=async()=>{try{context().extensionSettings[KEY]={...context().extensionSettings[KEY],floorButtons:true};context().saveSettingsDebounced();if(await floorButtons.openCurrent(page))embeddedClose();else message.textContent='最新楼层尚未显示，或统一外观中隐藏了世界状态入口。请加载最新消息并在统一外观中开启世界状态按钮后重试。';}catch(e){message.textContent=e.message;}};
+  notice.append(message,open);embeddedMount.append(notice);
 }
 let running = null;
 let sessionKey = '';
 let hudPanel = null;
 let hudEpoch = 0;
-let generationForm, formHome, sourceHost, sourcePicker, sourceIdentity;
+let generationForm, formHome, sourceHost, sourcePicker, sourceIdentity, restorePanel;
 let selectedPage = 'state';
 let selectHudPage = null;
 let requestUpdate = null;
+let migratingEmptyChat = false;
 const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, includePersona: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096 };
 const getSettings = () => {const legacy={...defaults,...context().extensionSettings[KEY]};return {...legacy,...sourceSettings(context(),'status',{legacyBindings:true,includeGlobalBooks:legacy.includeGlobalBooks,extraBooks:legacy.extraBooks})};};
 function refreshSourceControls(){
@@ -61,13 +71,24 @@ function parseState(raw) {
 const history = createHistory({ context, read: () => parseState(context().chatMetadata.variables?.状态栏),
   write: value => { if (value === null) { delete context().chatMetadata.variables?.状态栏; } else setLocalVariable('状态栏', JSON.stringify(value)); },
   beforeRestore: () => { running?.abort(); closeHud(); }, warn: message => notify(message, true) });
-const floorButtons = installFloorButtons({ history, node, enabled: () => getSettings().floorButtons });
-function syncHistory() { try { history.sync(); floorButtons.refresh(); } catch (e) { console.warn('[世界状态栏] 记录同步失败', e); } }
+const floorButtons = installFloorButtons({ history, node, context, enabled: () => getSettings().floorButtons,
+  openWorkbench:(target,{page,onClose,validate})=>showHud(page,{target,onClose,validate}) });
+function syncHistory() {
+  try {
+    history.sync(); floorButtons.refresh();
+    if(hudPanel?.dataset.emptyChat==='true'&&latestStatusFloor(context().chat)>=0&&!migratingEmptyChat){
+      // MESSAGE_SENT can precede the host's DOM mount. Retain the fallback until
+      // the scheduler has observed the new floor, then move the workbench once.
+      migratingEmptyChat=true;
+      void floorButtons.openCurrent(selectedPage).then(opened=>{if(opened)embeddedClose();}).catch(e=>notify(e.message,true)).finally(()=>{migratingEmptyChat=false;});
+    }
+  } catch (e) { console.warn('[世界状态栏] 记录同步失败', e); }
+}
 function createDisplaySettings() {
   const page = node('section', undefined, 'wsh-generation-page');
-  const label = node('label', '在消息末尾显示小型状态按钮'); const input = node('input'); input.type = 'checkbox'; input.checked = getSettings().floorButtons;
+  const label = node('label', '在楼层工具栏显示世界状态入口'); const input = node('input'); input.type = 'checkbox'; input.checked = getSettings().floorButtons;
   input.onchange = () => { context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], floorButtons: input.checked }; context().saveSettingsDebounced(); floorButtons.refresh(); };
-  label.append(input); page.append(node('h3', '显示与记录设置'), label, node('p', '楼层记录随当前聊天自动保存。关闭按钮只隐藏入口，仍可在“楼层记录”中查看。'), node('p', '翻页仅浏览；删除后续消息、回退剧情时才恢复末尾楼层的变量。没有记录的旧楼层不会自动推测数值。'));
+  label.append(input); page.append(node('h3', '显示与记录设置'), label, node('p', '最新楼层打开当前状态工作台，旧楼层打开只读记录。楼层记录随当前聊天自动保存。'), node('p', '翻页仅浏览；删除后续消息、回退剧情时才恢复末尾楼层的变量。没有记录的旧楼层不会自动推测数值。'));
   const appearanceLink=node('button','打开设置 · 统一外观','menu_button');appearanceLink.type='button';appearanceLink.onclick=()=>globalThis.AminOS?.openApp('settings');page.append(appearanceLink,createLorebookControl());
   return page;
 }
@@ -96,21 +117,26 @@ function closeHud() {
   hudEpoch++;
   hudPanel?.close();
 }
-async function showHud(page = selectedPage) {
+async function showHud(page = selectedPage, {target = embeddedMount, onClose = () => {}, validate = () => {}, emptyChat = false} = {}) {
   if (typeof page !== 'string') page = selectedPage;
   closeHud();
   const epoch = hudEpoch;
   const id = identity();
+  validate();
   activeIdentity=id;
   const response = await fetch(new URL('./hud.html', import.meta.url));
   if (!response.ok) throw Error('无法加载状态栏界面。');
   let html = await response.text();
   if (epoch !== hudEpoch) return;
   checkIdentity(id);
-  const dialog = node('dialog', undefined, 'wsh-dialog');
-  const close = node('button', '关闭', 'menu_button');
+  validate();
+  const dialog = node('section', undefined, 'wsh-workbench wsh-floor-window amin-ui');
+  dialog.dataset.emptyChat=String(emptyChat);
+  dialog.setAttribute('aria-label','世界状态 · 当前状态工作台');
+  const close = node('button', '收起', 'menu_button'); close.type='button';
   const heading = node('div', undefined, 'wsh-panel-heading');
-  heading.append(node('strong', context().characters[context().characterId].name + ' · 当前聊天状态'), close);
+  const title=node('strong','世界状态 · 当前剧情');title.title=context().characters[context().characterId].name+' · 当前状态工作台';
+  heading.append(title, close);
   const tabs = node('div', undefined, 'wsh-tabs'); tabs.setAttribute('role', 'tablist');
   const stateTab = node('button', '状态栏', 'wsh-tab');
   const generateTab = node('button', '生成设置', 'wsh-tab');
@@ -126,10 +152,10 @@ async function showHud(page = selectedPage) {
   generationPage.setAttribute('aria-labelledby', generateTab.id);
   if (generationForm) generationPage.append(generationForm);
   refreshSourceControls();
-  const readCurrent = () => { checkIdentity(id); return parseState(id.metadata.variables?.状态栏); };
+  const readCurrent = () => { checkIdentity(id); validate(); return parseState(id.metadata.variables?.状态栏); };
   const templatePage = createTemplatesPage({ context, settingsKey: KEY, read: readCurrent,
     write: async value => {
-      checkIdentity(id); if (running) throw Error('模型任务运行中，请稍后应用模板。');
+      checkIdentity(id); validate(); if (running) throw Error('模型任务运行中，请稍后应用模板。');
       const old = id.metadata.variables?.状态栏;
       if (old !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), old);
       setLocalVariable('状态栏', JSON.stringify(value)); checkpointState(context()); history.sync(); await context().saveMetadata();
@@ -143,12 +169,13 @@ async function showHud(page = selectedPage) {
   history.sync();
   const recordsView = historyView({ history, node });
   const historyPage = recordsView.element; historyPage.id = 'wsh-history-page';
-  const rulesPage = createRulesPage({ context, settingsKey: KEY, node, check: () => checkIdentity(id), syncWorldbook: writeUpdateWorldbook }); rulesPage.id = 'wsh-rules-page';
+  const rulesPage = createRulesPage({ context, settingsKey: KEY, node, check: () => {checkIdentity(id);validate();}, syncWorldbook: writeUpdateWorldbook }); rulesPage.id = 'wsh-rules-page';
   const displayPage = createDisplaySettings(); displayPage.id = 'wsh-display-page';
   for (const [tab, page] of [[historyTab, historyPage], [displayTab, displayPage], [rulesTab, rulesPage]]) { tab.type = 'button'; tab.setAttribute('aria-controls', page.id); page.setAttribute('role', 'tabpanel'); page.setAttribute('aria-labelledby', tab.id); }
   rulesTab.onclick = () => selectPage('rules');
   historyTab.onclick = () => selectPage('history'); displayTab.onclick = () => selectPage('display');
   function selectPage(value) {
+    if (value === undefined) value = selectedPage;
     selectedPage = ['generate', 'templates', 'history', 'display', 'rules'].includes(value) ? value : 'state';
     if (selectedPage === 'state' && readyHtml && !frameLoaded) { frame.srcdoc = readyHtml; frameLoaded = true; }
     rulesPage.hidden = selectedPage !== 'rules';
@@ -169,7 +196,7 @@ async function showHud(page = selectedPage) {
   selectHudPage = selectPage; tabs.append(stateTab, generateTab, templateTab, rulesTab, historyTab, displayTab); body.append(frame, generationPage, templatePage, historyPage, displayPage, rulesPage); selectPage(page);
   frame.title = '世界状态栏编辑器';
   // Only the bundled frame may use this variable bridge; commands are allowlisted.
-  const token = crypto.randomUUID();
+  const token = uuid();
   const bridge = `<script>
   window.WSH_CARD_KEY=${JSON.stringify(encodeURIComponent(context().characters[context().characterId].avatar || 'current'))};
   const token=${JSON.stringify(token)};let seq=0;const pending=new Map();
@@ -178,13 +205,14 @@ async function showHud(page = selectedPage) {
   <\/script>`;
   html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" data-wsh-frame data-wsh-theme="nexus">');
   html = html.replace('</head>', '<link rel="stylesheet" href="' + new URL('./themes.css', import.meta.url).href + '"></head>');
-  if(embeddedMount)html=html.replace('</head>','<link rel="stylesheet" href="'+new URL('../../ui-status.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../settings/appearance-frame.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../ui/standard.css',import.meta.url).href+'"></head>');
+  html=html.replace('</head>','<link rel="stylesheet" href="'+new URL('../../ui-status.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../settings/appearance-frame.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../ui/standard.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('./workbench-frame.css',import.meta.url).href+'"></head>');
   html = html.replace('<head>', '<head>' + bridge);
   const listener = event => {
     if (event.source !== frame.contentWindow || event.data?.wsh !== token) return;
     const { command, id: requestId } = event.data;
     try {
       checkIdentity(id);
+      validate();
       let value;
       if (command === '/getvar 状态栏') value = parseState(id.metadata.variables?.状态栏);
       else if (typeof command === 'string' && command.startsWith('/setvar key=状态栏 ')) {
@@ -197,32 +225,32 @@ async function showHud(page = selectedPage) {
     } catch (e) { event.source.postMessage({ wsh: token, id: requestId, error: e.message }, '*'); }
   };
   addEventListener('message', listener);
-  dialog.addEventListener('close', () => { recordsView.dispose(); removeEventListener('message', listener); frame.srcdoc = ''; if (generationForm?.parentElement === generationPage) formHome?.append(generationForm); dialog.remove(); if (hudPanel === dialog) { hudPanel = null; selectHudPage = null; } }, { once: true });
-  close.onclick = () => embeddedMount ? embeddedClose() : closeHud();
-  if(embeddedMount)close.hidden=true;
+  let closed=false;
+  dialog.close=()=>{if(closed)return;closed=true;recordsView.dispose();removeEventListener('message',listener);frame.srcdoc='';restorePanel?.remove();restorePanel=null;if(generationForm?.parentElement===generationPage)formHome?.append(generationForm);dialog.remove();mapLink.destroy();if(hudPanel===dialog){hudPanel=null;selectHudPage=null;}onClose();};
+  close.onclick = closeHud;
   const quickActions = node('div', undefined, 'wsh-actions');
   const quickStatus = node('p', '', 'wsh-quick-status'); quickStatus.setAttribute('role', 'status');
-  const update = node('button', '按当前剧情更新值', 'menu_button amin-primary'); update.type = 'button';
+  const update = node('button', '按剧情更新', 'menu_button amin-primary'); update.type = 'button'; update.title='根据近期对话更新当前状态值';
   update.onclick = async () => {
-    try { checkIdentity(id); update.disabled = true; quickStatus.textContent = '正在读取近期对话并更新…';
+    try { checkIdentity(id); validate(); update.disabled = true; quickStatus.textContent = '正在读取近期对话并更新…';
       const result = await requestUpdate(); checkIdentity(id);
       quickStatus.textContent = result?.ok ? (result.changed ? '数值已更新。' : '无需更新。') : result?.message || '更新未完成，请查看生成设置。';
     } catch (e) { quickStatus.textContent = e.message; } finally { update.disabled = false; }
   };
-  const copy = node('button', '复制模型更新提示词', 'menu_button'); copy.type = 'button';
+  const copy = node('button', '复制更新提示词', 'menu_button'); copy.type = 'button'; copy.title='复制当前状态、字段路径和模型更新要求';
   copy.onclick = async () => {
-    try { const text = buildUpdatePrompt(readCurrent()) + '\n\n' + compileRules(context(), KEY, 'update').replaceAll('<', '＜').replaceAll('>', '＞'); const ok = await copyPrompt(text); quickStatus.textContent = ok ? '已复制当前变量、路径与更新要求，可粘贴到对话。' : '请在弹窗中手动复制。'; }
+    try { const text = buildUpdatePrompt(readCurrent()) + '\n\n' + compileRules(context(), KEY, 'update').replaceAll('<', '＜').replaceAll('>', '＞'); const ok = await copyPrompt(text,{mount:dialog}); quickStatus.textContent = ok ? '已复制当前变量、路径与更新要求，可粘贴到对话。' : '请在工作台下方的文本框中手动复制。'; }
     catch (e) { quickStatus.textContent = e.message; }
   };
   quickActions.append(update, copy);
-  const mapLink=createMapLink({check:()=>checkIdentity(id)});
-  dialog.addEventListener('close',()=>mapLink.destroy(),{once:true});
-  dialog.append(heading, tabs, quickActions, quickStatus, body);
+  const mapLink=createMapLink({check:()=>{checkIdentity(id);validate();}});
+  dialog.append(heading,node('p',emptyChat?'当前聊天还没有消息，暂在这里编辑；发送第一条消息后，从最新楼层继续。':'编辑将更新当前剧情状态，历史快照仅供浏览。','wsh-workbench-note'), tabs, quickActions, quickStatus, body);
   displayPage.append(mapLink.element);
-  (embeddedMount??document.body).append(dialog);
-  if(embeddedMount)dialog.classList.add('amin-status-embedded');
-  hudPanel = dialog; readyHtml = html; selectPage(selectedPage); dialog.show();
-  if(!embeddedMount)enablePanelDrag(dialog, heading, { context, settingsKey: KEY });
+  if(emptyChat)target.replaceChildren();
+  target.append(dialog);
+  if(emptyChat)dialog.classList.add('amin-status-embedded');
+  hudPanel = dialog; readyHtml = html; selectPage(selectedPage);
+  return {element:dialog,selectPage,dispose:()=>dialog.close()};
 }
 async function restoreBackup() {
   if (running) throw Error('请先等待生成结束。');
@@ -231,7 +259,10 @@ async function restoreBackup() {
   const candidates = new Map(backups.map(k => [k, id.metadata.variables[k]]));
   for (const row of history.list()) { if (row.available && row.state) candidates.set(`楼层记录 · 第 ${row.index + 1} 楼 · ${row.name}`, JSON.stringify(row.state)); }
   if (!candidates.size) throw Error('当前聊天没有备份或楼层记录。');
-  const d = node('dialog', undefined, 'wsh-restore');
+  restorePanel?.remove();
+  const d = node('section', undefined, 'wsh-restore amin-card'); restorePanel=d;
+  d.setAttribute('aria-label','恢复状态栏备份');
+  d.close=()=>{d.remove();if(restorePanel===d)restorePanel=null;};
   const title = node('h3', '恢复状态栏备份');
   const select = node('select', undefined, 'text_pole');
   [...candidates.keys()].forEach(k => { const o = node('option', k); o.value = k; select.append(o); });
@@ -250,12 +281,12 @@ async function restoreBackup() {
       await context().saveMetadata(); d.close(); notify('已恢复，恢复前的状态也已备份。');
     } catch (e) { result.textContent = e.message; }
   };
-  cancel.onclick = () => d.close(); d.onclose = () => d.remove();
-  d.append(title, node('p', '恢复会用所选完整状态覆盖当前值，并先备份当前状态。楼层记录只在点击恢复后才应用；不会回退聊天正文。'), select, restore, cancel, result); document.body.append(d); d.showModal();
+  cancel.onclick = () => d.close();
+  d.append(title, node('p', '恢复会用所选完整状态覆盖当前值，并先备份当前状态。楼层记录只在点击恢复后才应用；不会回退聊天正文。'), select, restore, cancel, result); generationForm.append(d); d.scrollIntoView({block:'nearest'}); select.focus({preventScroll:true});
 }
 function mount() {
   if (generationForm) return;
-  // Keep the shared form detached while the floating window is closed.
+  // Keep the shared form detached while the floor workbench is closed.
   formHome = node('div');
   generationForm = node('div', undefined, 'wsh-generation-form');
   generationForm.append(node('h3', '按设定生成状态栏'), node('p', '读取当前角色卡与关联世界书，生成后可切回“状态栏”查看。'));
@@ -311,7 +342,7 @@ function mount() {
   const generateButton = action('生成／补充', () => generate('fill'));
   const replaceButton = action('重新生成整套', () => generate('replace'));
   action('取消生成', () => { running?.abort(); report.textContent = '已请求取消，等待底层调用返回；结果不会写入。'; });
-  action('查看状态栏', () => selectHudPage ? selectHudPage('state') : showHud('state'));
+  action('查看状态栏', () => selectHudPage ? selectHudPage('state') : openEmbedded('state'));
   action('恢复备份', restoreBackup);
   action('写入世界书更新提示词', async () => { report.textContent = await writeUpdateWorldbook(); });
   generationForm.append(actions, report, node('p', '独立接口使用 Chat Completions 格式，需要允许浏览器跨域。生成与编辑共用聊天变量“状态栏”。', 'wsh-note'));

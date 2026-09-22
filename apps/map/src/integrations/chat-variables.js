@@ -1,3 +1,4 @@
+import { uuid } from '../../../../uuid.js';
 import { chatIdentity, STORAGE_KEY } from '../adapters/chat.js';
 import { mapPath } from '../core/hierarchy.js';
 import { connectionDetails, prepareDocument } from '../core/spatial.js';
@@ -31,7 +32,7 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
   if(!Array.isArray(ctx.chat))return;
   if(!ctx.chat.length){if(previous.length){store.applyUpdate([{type:'setCurrentLocation',nodeId:null}]);if(ctx.chatMetadata[HISTORY_KEY])ctx.chatMetadata[HISTORY_KEY].sequence=[];lastRequest=JSON.stringify(ctx.chatMetadata.variables?.地图移动请求);}previous=[];return;}
   const history=ctx.chatMetadata[HISTORY_KEY]??={records:{}},now=[];let assigned=false;
-  for(const m of ctx.chat){m.extra??={};if(!m.extra.dynamic_map_message_id){m.extra.dynamic_map_message_id=crypto.randomUUID();assigned=true;}now.push(m.extra.dynamic_map_message_id+':'+String(m.swipe_id??0));}
+  for(const m of ctx.chat){m.extra??={};if(!m.extra.dynamic_map_message_id){m.extra.dynamic_map_message_id=uuid();assigned=true;}now.push(m.extra.dynamic_map_message_id+':'+String(m.swipe_id??0));}
   if(assigned)Promise.resolve(ctx.saveChat?.()).catch(()=>report('位置楼层标识保存失败'));
   const rollback=previous.length&&(now.length<previous.length&&now.every((id,i)=>id===previous[i])||now.length===previous.length&&now.at(-1)!==previous.at(-1)&&now.slice(0,-1).every((id,i)=>id===previous[i]));
   if(rollback){const saved=history.records[now.at(-1)]??history.records[now.at(-2)],doc=store.snapshot(),target=saved&&doc.maps[saved.mapId]?.nodes[saved.nodeId];

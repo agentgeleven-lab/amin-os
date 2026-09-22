@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 // History lives in chat metadata, never in the model-facing variable namespace.
 export const HISTORY_KEY = 'world_status_hud_history_v1';
 const copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
@@ -9,7 +10,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
     let assigned = false;
     const result = (context().chat || []).map(m => {
       m.extra ||= {};
-      if (!m.extra[messageKey]) { m.extra[messageKey] = crypto.randomUUID(); assigned = true; }
+      if (!m.extra[messageKey]) { m.extra[messageKey] = uuid(); assigned = true; }
       return { id: m.extra[messageKey], variant: String(m.swipe_id ?? 0), message: m };
     });
     if (assigned) Promise.resolve(context().saveChat?.()).catch(e => warn('楼层标识保存失败：' + e.message));

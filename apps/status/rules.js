@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 export const AFFINITY_RULE = `好感度:
 
 - 每个 NPC 的好感信息拆成同一角色项目中的两个独立字段：“好感度”为数字，“好感阶段”为文本。禁止合写成“75 - 感情加深”。
@@ -92,7 +93,7 @@ export function createRulesPage({ context, settingsKey, node, check, syncWorldbo
   });
   function action(label, fn) { const b = node('button', label, 'menu_button'); b.type = 'button'; b.onclick = protect(fn); actions.append(b); return b; }
   function add(sample = false) {
-    const id = crypto.randomUUID();
+    const id = uuid();
     rules.push({ id, title: sample ? '好感度规则示例' : '新规则', content: sample ? AFFINITY_RULE : '', scope: 'both', enabled: true }); save(); render(id);
   }
   action('＋ 新建规则', () => add()); action('添加好感度示例', () => add(true));

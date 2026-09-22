@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 import { cloneState, validateTemplate, applyTemplate } from './state-tools.js';
 
 export function createTemplatesPage({ context, settingsKey, read, write, isRunning, node }) {
@@ -28,7 +29,7 @@ export function createTemplatesPage({ context, settingsKey, read, write, isRunni
     const label = name.value.trim(); if (!label) throw Error('请输入模板名称。');
     const state = read(); if (!state) throw Error('当前聊天还没有状态栏。'); validateTemplate(state);
     if (get().some(t => t.name === label)) throw Error('同名模板已存在，请使用其他名称。');
-    const item = { id: crypto.randomUUID(), name: label, state: cloneState(state) };
+    const item = { id: uuid(), name: label, state: cloneState(state) };
     persist([...get(), item]); render(item.id); status.textContent = '模板已保存，可跨角色使用。';
   });
   async function apply(replace) {
@@ -48,11 +49,15 @@ export function createTemplatesPage({ context, settingsKey, read, write, isRunni
   page.append(name, actions, list, preview, status); render(); return page;
 }
 
-export async function copyPrompt(text) {
+export async function copyPrompt(text, {mount} = {}) {
   try { await navigator.clipboard.writeText(text); return true; } catch { /* WebView fallback. */ }
-  const d = document.createElement('dialog'), area = document.createElement('textarea'), close = document.createElement('button');
+  mount?.querySelector('.wsh-copy-panel')?.remove();
+  const d = document.createElement(mount ? 'section' : 'dialog'), area = document.createElement('textarea'), close = document.createElement('button');
   d.className = 'wsh-restore'; area.className = 'text_pole'; area.value = text; area.readOnly = true; area.style.height = '55vh'; area.style.width = '100%';
+  area.setAttribute('aria-label','模型更新提示词');close.type='button';
   close.textContent = '关闭'; close.className = 'menu_button'; close.onclick = () => d.close(); d.onclose = () => d.remove();
   d.append(document.createTextNode('自动复制不可用，请复制下方已选中的内容。'), area, close);
-  document.body.append(d); d.showModal(); area.focus(); area.select(); return false;
+  if(mount){d.classList.add('wsh-copy-panel');area.style.height='180px';d.close=()=>d.remove();mount.append(d);d.scrollIntoView({block:'nearest'});}
+  else{document.body.append(d);d.showModal();}
+  area.focus(); area.select(); return false;
 }

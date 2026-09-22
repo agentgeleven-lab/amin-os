@@ -1,0 +1,24 @@
+.amin-dice { display:flex; flex-direction:column; gap:var(--amin-gap); min-width:0; }
+.amin-dice .amin-context { overflow-wrap:anywhere; }
+.amin-dice .amin-tabs { margin-bottom:0; }
+.amin-dice .amin-dice-body { display:grid; gap:var(--amin-gap); min-width:0; }
+.amin-dice .amin-card { min-width:0; }
+.amin-dice .amin-card h3 { margin:0 0 var(--amin-gap); font-size:calc(var(--amin-font) + 2px); font-weight:600; }
+.amin-dice .amin-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--amin-gap); margin-bottom:var(--amin-gap); }
+.amin-dice .amin-field { display:flex; flex-direction:column; min-width:0; gap:calc(var(--amin-gap) / 2); }
+.amin-dice .amin-field :is(input,select) { width:100%; min-width:0; }
+.amin-dice .amin-help,.amin-dice .amin-dice-meta { color:var(--amin-muted); margin:0; overflow-wrap:anywhere; }
+.amin-dice .amin-help { margin-top:calc(var(--amin-gap) / 2); }
+.amin-dice .amin-toolbar { margin-top:var(--amin-gap); margin-bottom:0; }
+.amin-dice .amin-dice-result-heading { display:flex; align-items:center; flex-wrap:wrap; gap:var(--amin-gap); }
+.amin-dice .amin-dice-total { font-size:calc(var(--amin-font) * 2); font-variant-numeric:tabular-nums; color:var(--amin-accent-text,var(--amin-accent)); overflow-wrap:anywhere; }
+.amin-dice .amin-dice-breakdown { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; padding:var(--amin-gap); background:var(--amin-control); border:1px solid var(--amin-line); border-radius:var(--amin-radius); }
+.amin-dice .amin-dice-select { display:inline-flex; align-items:center; gap:calc(var(--amin-gap) / 2); min-height:44px; }
+.amin-dice .amin-savebar { padding:var(--amin-gap) 0; }
+.amin-dice .amin-savebar .amin-help { flex-basis:100%; }
+@media (max-width:600px) {
+  .amin-dice .amin-form-grid { grid-template-columns:minmax(0,1fr); }
+  .amin-dice .amin-tabs button { flex:1 1 auto; min-height:44px; }
+  .amin-dice .amin-toolbar button,.amin-dice .amin-savebar button { min-height:44px; flex:1 1 auto; white-space:normal; }
+  .amin-dice .amin-dice-quick button { flex:1 1 calc(25% - var(--amin-gap)); }
+}

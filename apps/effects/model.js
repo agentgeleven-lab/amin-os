@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 import {LIBRARY_KEY,mergeLibrary} from './library.js';
 export const KEY='amin_os_effects_v1';
 export const empty=()=>({version:1,skills:[],events:[],enabled:true,limit:30000});
@@ -24,7 +25,7 @@ export function change(store,chat,op,data){
   const skill=next.skills.find(s=>s.id===data.skillId);if(!skill)throw Error('请先关联技能');
    const targetMode=data.targetMode??skill.ui?.targetMode??'targeted';
    if(!['targeted','direct'].includes(targetMode))throw Error('发动方式无效');
-  event.effect={id:crypto.randomUUID(),skill:structuredClone(skill),targetMode,holder:required(data.holder,'持有者'),target:targetMode==='direct'?'':required(data.target,'目标'),scope:required(data.scope,'作用层面'),command:data.command?.trim()??'',condition:required(data.condition,'持续或解除条件')};
+  event.effect={id:uuid(),skill:structuredClone(skill),targetMode,holder:required(data.holder,'持有者'),target:targetMode==='direct'?'':required(data.target,'目标'),scope:required(data.scope,'作用层面'),command:data.command?.trim()??'',condition:required(data.condition,'持续或解除条件')};
   if(effects.some(e=>e.scope===event.effect.scope&&(targetMode==='direct'?directEffect(e)&&e.skill.id===skill.id&&e.holder===event.effect.holder:!directEffect(e)&&e.target===event.effect.target)))throw Error(targetMode==='direct'?'该使用者的同一能力、相同层面已有直接发动记录，请编辑原记录':'该目标的相同层面已有记录，请编辑或转让原记录');
  }else{
   if(!effects.some(e=>e.id===data.id))throw Error('该效果已失效或不在当前分支');

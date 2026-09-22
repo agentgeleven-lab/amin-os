@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mount } from '../apps/stylewriter/view.js';
 import { STORE_KEY } from '../apps/stylewriter/model.js';
+import { createDiceService } from '../apps/dice/service.js';
 
 // ---- Minimal DOM double: only the subset the stylewriter view uses. ----
 class FakeEvent { constructor(type, init = {}) { this.type = type; this.bubbles = Boolean(init.bubbles); } }
@@ -597,4 +598,78 @@ test('invalid floor or replaced chat metadata blocks generation and fill, and ev
  a.view.dispose();assert.doesNotThrow(()=>f.eventSource.emit('chat_changed'));
  // A stale floor getter must never become the shared library's persistence provider.
  assert.doesNotThrow(()=>styleLibrary(()=>f.ctx).save({name:'关闭楼层之后',description:'仍可保存'}));
+});
+
+async function fixedDice(f, t) {
+    let draws = 0;
+    f.ctx.saveMetadata = async () => {};
+    const dice = createDiceService(() => f.ctx, { rng: () => { draws++; return 14; }, createId: () => 'stylewriter-dice-fixed', now: () => 12345 });
+    t.after(() => { dice.dispose(); f.view.dispose(); });
+    const record = await dice.roll({ formula: 'd20+3', label: '潜行' });
+    return { record, dice, draws: () => draws };
+}
+
+test('rewrite reads only prose and fill/undo preserve exact fixed dice without duplicate blocks or new rolls', async t => {
+    const f = fixture(), fixed = await fixedDice(f, t), block = fixed.record.text;
+    f.view.setMode('none');
+    const original = '我轻轻走过走廊。\n' + block;
+    f.input.value = original;
+    await click(f.root, '读取聊天输入框');
+    assert.equal(byLabel(f.root, '原文', 'textarea').value, '我轻轻走过走廊。');
+    await click(f.root, '转换文风');
+    assert.ok(f.calls[0].request.prompt.includes('我轻轻走过走廊。'));
+    assert.ok(!f.calls[0].request.prompt.includes(block));
+    await f.respond('我放轻脚步，穿过走廊。');
+    await click(f.root, '填回聊天输入框');
+    assert.equal(f.input.value, '我放轻脚步，穿过走廊。\n' + block);
+    await click(f.root, '撤销填回');
+    assert.equal(f.input.value, original, 'undo restores the exact full original draft');
+    const result = byLabel(f.root, '转换结果', 'textarea');
+    result.value = '我悄然越过走廊。\n' + block; fire(result, 'input');
+    await click(f.root, '填回聊天输入框');
+    assert.equal(f.input.value, '我悄然越过走廊。\n' + block);
+    await click(f.root, '填回聊天输入框');
+    assert.equal(f.input.value.split(block).length - 1, 1, 'repeated fill does not duplicate fixed dice');
+    assert.equal(fixed.draws(), 1);
+    assert.deepEqual(fixed.dice.history()[0].results, fixed.record.results);
+    assert.deepEqual(f.input.dispatched.map(event => event.type), ['input', 'input', 'input', 'input']);
+    assert.equal(f.ctx.chat.length, 2, 'fill never sends a message');
+});
+
+test('manually pasted registered source dice are excluded from rewrite and carried into the guarded fill', async t => {
+    const f = fixture(), fixed = await fixedDice(f, t), block = fixed.record.text;
+    f.view.setMode('none');
+    const source = byLabel(f.root, '原文', 'textarea');
+    source.value = '我靠近石门。\n' + block + '\n【手写判定】保留这段叙事'; fire(source, 'input');
+    f.input.value = '原有草稿';
+    await click(f.root, '转换文风');
+    assert.ok(!f.calls[0].request.prompt.includes(block));
+    assert.ok(f.calls[0].request.prompt.includes('【手写判定】保留这段叙事'));
+    await f.respond('我缓步靠近石门。');
+    await click(f.root, '填回聊天输入框');
+    assert.equal(f.input.value, '我缓步靠近石门。\n' + block);
+    await click(f.root, '撤销填回');
+    assert.equal(f.input.value, '原有草稿');
+    assert.equal(fixed.draws(), 1);
+});
+
+test('a dice-bearing draft edited during rewriting is protected and dice-only source never calls the model', async t => {
+    const f = fixture(), fixed = await fixedDice(f, t), block = fixed.record.text;
+    f.view.setMode('none');
+    f.input.value = '原行动\n' + block;
+    await click(f.root, '读取聊天输入框');
+    await click(f.root, '转换文风');
+    const edited = f.input.value.replace(block, block.replace('14', '19'));
+    assert.notEqual(edited, f.input.value, 'the user changed a displayed dice value');
+    f.input.value = edited;
+    await f.respond('改写行动');
+    await click(f.root, '填回聊天输入框');
+    assert.equal(f.input.value, edited);
+    assert.match(statusOf(f.root), /不会覆盖新草稿/);
+    const source = byLabel(f.root, '原文', 'textarea');
+    source.value = block; fire(source, 'input');
+    await click(f.root, '转换文风');
+    assert.equal(f.calls.length, 1, 'an exact dice block alone is not rewriteable prose');
+    assert.match(statusOf(f.root), /填写需要转换的原文/);
+    assert.equal(fixed.draws(), 1);
 });

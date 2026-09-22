@@ -1,3 +1,4 @@
+import { uuid } from '../../uuid.js';
 // Stylewriter pure logic: preset validation + persistence, chat identity stamps,
 // reference sample collection, fill-back guard and request assembly. No DOM here.
 
@@ -76,7 +77,7 @@ export function createStore(contextProvider, { seeds = SEED_PRESETS, key = STORE
     let nextSeq = 1, committedSeq = 0, attempts = [];
     if (!ctx()?.extensionSettings?.[key] && seeds.length) {
         // seeding goes through the same commit path: no self-referential predecessor
-        commit(normalize({ presets: seeds.map(seed => ({ id: seed.id || crypto.randomUUID(), ...seed, updatedAt: Date.now() })) }));
+        commit(normalize({ presets: seeds.map(seed => ({ id: seed.id || uuid(), ...seed, updatedAt: Date.now() })) }));
     }
     // The baseline is the loaded host value. A rejected first seed write is not a
     // successful checkpoint; the original absent key must remain absent on rollback.
@@ -143,7 +144,7 @@ export function createStore(contextProvider, { seeds = SEED_PRESETS, key = STORE
         save(draft, id) {
             const keepId = typeof id === 'string' && state.presets.some(p => p.id === id) ? id : '';
             const value = validate(draft, state.presets, keepId);
-            const preset = { id: keepId || crypto.randomUUID(), ...value, updatedAt: Date.now() };
+            const preset = { id: keepId || uuid(), ...value, updatedAt: Date.now() };
             commit({ ...state, presets: [...state.presets.filter(p => p.id !== preset.id), preset], selectedId: preset.id });
             return structuredClone(preset);
         },

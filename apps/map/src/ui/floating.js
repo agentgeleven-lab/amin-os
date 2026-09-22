@@ -1,5 +1,12 @@
 /** UI-only preferences, never map/story data. */
 const KEY = 'sillytavern-dynamic-map.window.v1';
+export function fitWindowPosition(position, bounds, viewport) {
+    const left=viewport.offsetLeft??0,top=viewport.offsetTop??0;
+    return {
+        x:Math.max(left+8,Math.min(position.x,left+viewport.width-bounds.width-8)),
+        y:Math.max(top+8,Math.min(position.y,top+viewport.height-bounds.height-8)),
+    };
+}
 export function readWindowPreferences() {
     try {
         const value = JSON.parse(localStorage.getItem(KEY));
@@ -15,9 +22,11 @@ export function attachFloatingWindow(element, handle, getCollapsed) {
         catch { /* Storage may be blocked; the window still works. */ }
     }
     function place(x, y) {
+        const viewport=window.visualViewport??{width:window.innerWidth,height:window.innerHeight,offsetLeft:0,offsetTop:0};
+        element.style.setProperty('--dm-viewport-height',`${viewport.height}px`);
+        element.style.setProperty('--dm-viewport-width',`${viewport.width}px`);
         const bounds = element.getBoundingClientRect();
-        position = { x: Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8)),
-            y: Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8)) };
+        position=fitWindowPosition({x,y},bounds,viewport);
         element.style.left = `${position.x}px`; element.style.top = `${position.y}px`;
     }
     function reset() { place(window.innerWidth - element.offsetWidth - 18, 140); save(); }
@@ -43,6 +52,8 @@ export function attachFloatingWindow(element, handle, getCollapsed) {
         place(position.x + moves[event.key][0] * step, position.y + moves[event.key][1] * step); save();
     }, options);
     window.addEventListener('resize', keepVisible, options);
+    window.visualViewport?.addEventListener('resize',keepVisible,options);
+    window.visualViewport?.addEventListener('scroll',keepVisible,options);
     const observer = new ResizeObserver(keepVisible); observer.observe(element);
     return { reset, save, keepVisible, destroy() { abort.abort(); observer.disconnect(); } };
 }
