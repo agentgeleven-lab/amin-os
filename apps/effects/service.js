@@ -1,19 +1,19 @@
 import {KEY,readStore,anchor,compile} from './model.js';
-import {LIBRARY_KEY,mergeLibrary} from './library.js';
+import {LIBRARY_KEY,mergeLibrary,libraryStamp} from './library.js';
 export const PROMPT_KEY='amin-os-persistent-effects';
 export function createEffects(getContext){
  let busy=false,message='尚未发送提醒';const listeners=new Set();
- const notify=()=>listeners.forEach(f=>f());
+ const notify=event=>listeners.forEach(f=>f(event));
  function clear(){getContext()?.setExtensionPrompt?.(PROMPT_KEY,'',1,0,false);}
  function identity(c){return String(c?.groupId??'')+' / '+String(c?.getCurrentChatId?.()??'');}
- function capture(){const c=getContext();if(!c?.chatMetadata||c.getCurrentChatId?.()==null)throw Error('请先打开一个聊天');return {meta:c.chatMetadata,id:identity(c),path:JSON.stringify(anchor(c.chat)),library:JSON.stringify(readStore(c).skills)};}
- function check(token){const c=getContext();if(token.meta!==c?.chatMetadata||token.id!==identity(c)||token.path!==JSON.stringify(anchor(c.chat)))throw Error('聊天或楼层已变化，请重新打开表单');if(token.library!==JSON.stringify(readStore(c).skills))throw Error('共享能力库已变化，请重新打开表单');return c;}
+ function capture(){const c=getContext();if(!c?.chatMetadata||c.getCurrentChatId?.()==null)throw Error('请先打开一个聊天');return {meta:c.chatMetadata,id:identity(c),path:JSON.stringify(anchor(c.chat)),library:libraryStamp(readStore(c))};}
+ function check(token){const c=getContext();if(token.meta!==c?.chatMetadata||token.id!==identity(c)||token.path!==JSON.stringify(anchor(c.chat)))throw Error('聊天或楼层已变化，请重新打开表单');if(token.library!==libraryStamp(readStore(c)))throw Error('共享能力库已变化，请重新打开表单');return c;}
  function migrate(c){
   if(!c?.extensionSettings||typeof c.saveSettingsDebounced!=='function')return;
   const before=c.extensionSettings[LIBRARY_KEY],next=mergeLibrary(before,c.chatMetadata?.[KEY]?.skills??[]);
   if(JSON.stringify(before)===JSON.stringify(next))return;
   c.extensionSettings[LIBRARY_KEY]=next;
-  try{const pending=c.saveSettingsDebounced();pending?.catch?.(e=>{if(c.extensionSettings[LIBRARY_KEY]===next)c.extensionSettings[LIBRARY_KEY]=before;message='旧能力迁移保存失败：'+e.message;notify();});}catch(e){c.extensionSettings[LIBRARY_KEY]=before;throw e;}
+  try{const pending=c.saveSettingsDebounced();pending?.catch?.(e=>{if(c.extensionSettings[LIBRARY_KEY]===next)c.extensionSettings[LIBRARY_KEY]=before;message='旧能力迁移保存失败：'+e.message;notify({error:true});});}catch(e){c.extensionSettings[LIBRARY_KEY]=before;throw e;}
  }
  function read(){const c=getContext();readStore(c);migrate(c);return readStore(c);}
  async function saveLibrary(token,update){
@@ -23,20 +23,20 @@ export function createEffects(getContext){
   if(JSON.stringify(next.events)!==events)throw Error('能力库不能修改聊天生效记录');
   const trash=structuredClone(next.trash??before.trash??[]);
   const imported=[...new Set([...before.imported,...trash.map(e=>JSON.stringify(e.skill))])];
-  const library={...before,skills:structuredClone(next.skills),trash,imported};busy=true;c.extensionSettings[LIBRARY_KEY]=library;
+  const library=mergeLibrary({...before,skills:structuredClone(next.skills),groups:structuredClone(next.groups??before.groups??[]),trash,imported});busy=true;c.extensionSettings[LIBRARY_KEY]=library;
   try{await c.saveSettingsDebounced();message='能力库已保存，所有角色和聊天共享；已发动效果保持原规则';}
   catch(e){if(c.extensionSettings[LIBRARY_KEY]===library)c.extensionSettings[LIBRARY_KEY]=before;message='能力库保存失败：'+e.message;throw e;}
-  finally{busy=false;notify();}
+  finally{busy=false;notify({error:message.includes('失败')});}
  }
  async function save(token,update){
   if(busy)throw Error('正在保存，请稍候');const c=check(token);if(typeof c.saveMetadata!=='function')throw Error('当前酒馆缺少聊天保存接口');
-  migrate(c);const before=c.chatMetadata[KEY],next=update(readStore(c));busy=true;
+  migrate(c);const meta=c.chatMetadata,before=meta[KEY],next=update(readStore(c));busy=true;
   if(c.extensionSettings?.[LIBRARY_KEY])next.skills=structuredClone(before?.skills??[]);
-  delete next.trash;
-  c.chatMetadata[KEY]=next;
+  delete next.trash;delete next.groups;
+  meta[KEY]=next;
   try{await c.saveMetadata();clear();message='已保存，下次生成时使用当前记录';}
-  catch(e){c.chatMetadata[KEY]=before;message='保存失败：'+e.message;throw e;}
-  finally{busy=false;notify();}
+  catch(e){if(meta[KEY]===next)meta[KEY]=before;message='保存失败：'+e.message;throw e;}
+  finally{busy=false;notify({error:message.includes('失败')});}
  }
  function start(type='normal',params={},dry=false){
   clear();if(dry||!['normal','regenerate','swipe','continue'].includes(type)||params?.signal?.aborted)return;

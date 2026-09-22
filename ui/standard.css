@@ -164,3 +164,7 @@ body .amin-floor[data-amin-surface][data-amin-theme^=win10]>.amin-floor-toolbar>
 .amin-worldbook-sources label{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;overflow-wrap:anywhere}
 .amin-worldbook-sources input[type="checkbox"]{flex:0 0 auto;width:auto}
 .amin-worldbook-sources p{margin:0;overflow-wrap:anywhere}
+
+/* Target-free abilities must hide target fields even under host label layout rules. */
+.amin-effects [hidden] {display:none!important}
+.amin-effects .amin-ability-chooser select {width:100%;min-width:0}
