@@ -6,6 +6,7 @@ import * as Effects from '../effects/model.js';
 import * as Journal from '../journal/model.js';
 import * as Information from '../information/model.js';
 import * as Organizations from '../organizations/model.js';
+import * as Linkage from '../linkage/policy.js';
 import { validateTemplate } from '../status/state-tools.js';
 import { validateDocument } from '../map/src/core/protocol.js';
 import { normalizeConfig } from '../dice/engine.js';
@@ -14,8 +15,8 @@ import { uuid } from '../../uuid.js';
 const clone = value => structuredClone(value);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-export const MODULE_LABELS = Object.freeze({ characters:'角色档案', inventory:'物品与经济', relationships:'人物关系', scene:'场景与时间', effects:'持续效果', journal:'剧情档案', dice:'固定骰点', map:'地图', status:'世界状态', organizations:'势力资料', information:'信息面板', informationLibrary:'信息资料库' });
-const keys = { characters:Characters.KEY, inventory:Inventory.KEY, relationships:Relationships.KEY, scene:Scene.KEY, effects:Effects.KEY, journal:Journal.KEY, dice:'amin_os_dice_v1', map:'dynamicMapV1', information:Information.KEY, informationLibrary:Information.LIBRARY_KEY };
+export const MODULE_LABELS = Object.freeze({ characters:'角色档案', inventory:'物品与经济', relationships:'人物关系', scene:'场景与时间', effects:'持续效果', journal:'剧情档案', dice:'固定骰点', map:'地图', status:'世界状态', organizations:'势力资料', information:'信息面板', informationLibrary:'信息资料库', linkage:'统一联动设置与记录' });
+const keys = { characters:Characters.KEY, inventory:Inventory.KEY, relationships:Relationships.KEY, scene:Scene.KEY, effects:Effects.KEY, journal:Journal.KEY, dice:'amin_os_dice_v1', map:'dynamicMapV1', information:Information.KEY, informationLibrary:Information.LIBRARY_KEY, linkage:Linkage.KEY };
 export const SNAPSHOT_PATHS = Object.freeze([...Object.values(keys).map(key => [key]), ['variables','状态栏'], ['variables','势力资料'], ['amin_os_organizations_v1']]);
 export const RESTORE_DEPENDENCIES = Object.freeze([...SNAPSHOT_PATHS, ['dynamicMapPositionHistoryV1']]);
 const rootShape = (v, allowed, label) => { if (!object(v) || Object.keys(v).some(k => !allowed.includes(k))) throw Error(label+'包含未知字段或格式无效。'); };
@@ -25,22 +26,6 @@ const unique = (v, label) => { if (new Set(v.map(x => x.id)).size !== v.length) 
 const bounded = (v, min, max, label) => { if (!Number.isInteger(v) || v < min || v > max) throw Error(label+'超出有效范围。'); };
 const readRaw = (ctx,key) => ctx.chatMetadata[key];
 
-function validateJournal(input) {
-    version(input,['version','limit','entries'],'剧情档案'); bounded(input.limit,1,10000000,'档案提示上限'); list(input.entries,2000,'剧情档案'); unique(input.entries,'剧情档案');
-    for (const entry of input.entries) {
-        const allowed=['id','kind','title','body','enabled','confirmed','actors','gameTime','gameTimeText','sourceNote','sources','status','remindAfter'];
-        rootShape(entry,allowed,'档案条目');
-        if (entry.confirmed !== true || typeof entry.enabled !== 'boolean') throw Error('档案确认状态无效。');
-        Journal.validateRecord({...entry,enabled:false,sources:null},[]);
-        if (entry.sources !== null) {
-            const s=entry.sources; rootShape(s,['start','end','messages'],'档案来源');
-            bounded(s.start,0,1000000,'来源起点');bounded(s.end,s.start,1000000,'来源终点');list(s.messages,100000,'来源消息');
-            if(s.messages.length!==s.end-s.start+1)throw Error('档案来源不完整。');
-            for(const [offset,m]of s.messages.entries())if(!object(m)||m.index!==s.start+offset||typeof m.text!=='string'||typeof m.revision!=='string'||typeof m.name!=='string'||typeof m.isUser!=='boolean'||!Number.isInteger(m.swipeId))throw Error('档案来源消息格式无效。');
-        }
-    }
-    return clone(input);
-}
 function validateDice(input) {
     version(input,['version','rolls'],'骰点');list(input.rolls,5000,'骰点');unique(input.rolls,'骰点');
     for(const r of input.rolls){
@@ -61,15 +46,16 @@ function validateOrganizations(input) {
 }
 export function validateModules(modules) {
     rootShape(modules,Object.keys(MODULE_LABELS),'存档模块');
-    if(Object.keys(modules).length!==Object.keys(MODULE_LABELS).length)throw Error('存档模块不完整。');
+    if(Object.keys(MODULE_LABELS).some(name=>name!=='linkage'&&!own(modules,name)))throw Error('存档模块不完整。');
     for(const [name,value]of Object.entries(modules)){
         if(value===null)continue;
         if(name==='characters')Characters.validateState(value);
         else if(name==='inventory')Inventory.validateState(value);
         else if(name==='relationships')Relationships.validateState(value);
-        else if(name==='scene'){rootShape(value,['version','clock','periods','scenes','activeSceneId','settings'],'场景快照');Scene.validateState(value);}
+        else if(name==='scene'){rootShape(value,['version','clock','periods','scenes','activeSceneId','settings','schedules','timeRules','absenceRules'],'场景快照');Scene.validateState(value);}
         else if(name==='effects'){rootShape(value,['version','enabled','limit','effects','consumedActionIds'],'持续效果快照');Effects.validateEffectsSnapshot(value);}
-        else if(name==='journal')validateJournal(value);
+        else if(name==='journal')Journal.validateJournalSnapshot(value);
+        else if(name==='linkage')Linkage.validateLinkageState(value);
         else if(name==='dice')validateDice(value);
         else if(name==='map')validateDocument(value);
         else if(name==='status'){if(value.版本!==undefined&&value.版本!==1)throw Error('世界状态版本不兼容。');validateTemplate(value);}
@@ -90,7 +76,8 @@ export function materialize(ctx) {
     const readers={characters:Characters.readCharacters,inventory:Inventory.readInventory,relationships:Relationships.readRelationships,scene:Scene.readCurrentScene};
     for(const [name,read]of Object.entries(readers))if(own(meta,keys[name]))result[name]=read(ctx);
     if(own(meta,Effects.KEY))result.effects=Effects.snapshotEffects(Effects.readStore(ctx),ctx.chat);
-    if(own(meta,Journal.KEY)){const store=Journal.readStore(ctx);result.journal={version:1,limit:store.limit,entries:Journal.currentEntries(store,ctx.chat).map(({savedAt,savedFloor,eventId,...record})=>record)};}
+    if(own(meta,Journal.KEY))result.journal=Journal.snapshotJournal(Journal.readStore(ctx),ctx.chat);
+    if(own(meta,Linkage.KEY))result.linkage=Linkage.readLinkageState(ctx);
     if(own(meta,keys.dice))result.dice=validateDice(readRaw(ctx,keys.dice));
     if(own(meta,keys.map)){const envelope=readRaw(ctx,keys.map);rootShape(envelope,['updatedAt','document'],'地图存储');if(!Number.isFinite(envelope.updatedAt))throw Error('地图版本时间无效。');result.map=validateDocument(envelope.document);}
     if(own(meta.variables??{},'状态栏')){const raw=meta.variables.状态栏;result.status=typeof raw==='string'?JSON.parse(raw):clone(raw);}
@@ -100,16 +87,6 @@ export function materialize(ctx) {
     return validateModules(result);
 }
 
-function restoreJournal(ctx, value, at, makeId, warnings) {
-    const store=Journal.readStore(ctx), target=value??{version:1,limit:40000,entries:[]}, existing=Journal.currentEntries(store,ctx.chat), next=clone(store);
-    next.limit=target.limit;
-    for(const old of existing)next.events.push({id:makeId(),op:'delete',recordId:old.id,path:Journal.path(ctx.chat),at});
-    for(const entry of target.entries){
-        let record=clone(entry);
-        if(record.sources&&!Journal.sourceState(record.sources,ctx.chat).valid){record={...record,enabled:false,sources:null,sourceNote:[record.sourceNote,'存档恢复：原聊天来源已失效，请重新绑定当前楼层后启用引用。'].filter(Boolean).join('\n').slice(0,1000)};warnings.push('部分剧情档案的原消息来源不匹配，已关闭引用并保留正文。');}
-        record=Journal.validateRecord(record,ctx.chat);next.events.push({id:makeId(),op:'update',recordId:record.id,path:Journal.path(ctx.chat),at,record});
-    }return next;
-}
 function restoreInformation(ctx,value,at,makeId){
     let next=Information.read(ctx);const target=value??{version:1,enabled:true,limit:40000,records:[]};
     for(const old of Information.current(next,ctx.chat))next.history.push({id:makeId(),recordId:old.id,path:Information.path(ctx.chat),at,reason:'存档恢复清除当前面板',action:'reset',snapshot:null});
@@ -134,7 +111,7 @@ export function restorePatches(ctx, modules, {at=new Date().toISOString(),makeId
     }
     if(modules.scene!==null||own(ctx.chatMetadata,Scene.KEY)){const state=modules.scene??Scene.emptyState();put([Scene.KEY],Scene.appendEvent(Scene.readStore(ctx),ctx.chat,{op:'restore',reason:'存档恢复到当前楼层',state,details:{beforeTime:Scene.readCurrentScene(ctx).clock,afterTime:state.clock}},{eventId:makeId(),at}));}
     if(modules.effects!==null||own(ctx.chatMetadata,Effects.KEY))put([Effects.KEY],Effects.restoreEffects(ctx.chatMetadata[Effects.KEY]??Effects.empty(),ctx.chat,modules.effects??Effects.snapshotEffects(Effects.empty(),[]),{operationId:makeId(),at}));
-    if(modules.journal!==null||own(ctx.chatMetadata,Journal.KEY))put([Journal.KEY],restoreJournal(ctx,modules.journal,at,makeId,warnings));
+    if(modules.journal!==null||own(ctx.chatMetadata,Journal.KEY))put([Journal.KEY],Journal.restoreJournal(ctx,modules.journal,{at,makeId,warnings}));
     if(modules.information!==null||own(ctx.chatMetadata,Information.KEY))put([Information.KEY],restoreInformation(ctx,modules.information,at,makeId));
     if(modules.informationLibrary!==null)put([Information.LIBRARY_KEY],modules.informationLibrary);else if(own(ctx.chatMetadata,Information.LIBRARY_KEY))remove([Information.LIBRARY_KEY]);
     if(modules.dice!==null){const dice=clone(modules.dice);for(const roll of dice.rolls){if(roll.status==='appended')roll.status='rolled';delete roll.pending;}put([keys.dice],dice);if(modules.dice.rolls.some(r=>r.status==='appended'))warnings.push('已追加草稿的骰点恢复为固定未追加状态；聊天输入框不会改写。');}else if(own(ctx.chatMetadata,keys.dice))remove([keys.dice]);
@@ -143,13 +120,25 @@ export function restorePatches(ctx, modules, {at=new Date().toISOString(),makeId
     if(modules.status!==null)put(['variables','状态栏'],JSON.stringify(modules.status));else if(own(ctx.chatMetadata.variables??{},'状态栏'))remove(['variables','状态栏']);
     if(modules.organizations!==null){put(['variables',Organizations.ROOT],JSON.stringify(modules.organizations.doc));put(['amin_os_organizations_v1','locks'],modules.organizations.locks);put(['amin_os_organizations_v1','assessment'],modules.organizations.assessment);}
     else if(own(ctx.chatMetadata.variables??{},Organizations.ROOT)){remove(['variables',Organizations.ROOT]);put(['amin_os_organizations_v1','locks'],[]);put(['amin_os_organizations_v1','assessment'],null);}
+    if(own(modules,'linkage')){
+        if(modules.linkage!==null||own(ctx.chatMetadata,Linkage.KEY)){
+            const current=Linkage.readLinkageState(ctx), target=clone(modules.linkage??Linkage.emptyLinkageState());
+            const records=new Map(target.applied.map(record=>[record.id,{...record,archived:true}]));
+            // Existing live receipts remain valid. Imported receipts retain their
+            // original sources solely as history and never authorize a second write.
+            for(const record of current.applied)records.set(record.id,record);
+            target.applied=[...records.values()];Linkage.validateLinkageState(target);put([Linkage.KEY],target);
+            if((modules.linkage?.applied.length??0)>0)warnings.push('存档中的联动记录作为归档历史保留；当前已执行记录的去重凭据不会回滚。');
+        }
+    }else if(own(ctx.chatMetadata,Linkage.KEY))warnings.push('旧存档未收录统一联动配置，当前联动设置与执行记录保留。');
     return {patches,warnings:[...new Set(warnings)]};
 }
 export function describeModule(name,value){
-    if(value===null)return '未建立';
+    if(value==null)return '未建立';
     if(name==='characters')return value.characters.length+' 个角色';if(name==='inventory')return `${value.items.length} 种物品 · ${value.balances.length} 项余额 · ${value.ledger.length} 条账目`;
     if(name==='relationships')return value.relationships.length+' 条关系';if(name==='scene')return Scene.formatGameTime(value.clock,value.periods)+' · '+Object.keys(value.scenes).length+' 个场景';
     if(name==='effects')return value.effects.length+' 条效果';if(name==='journal')return value.entries.length+' 条档案';if(name==='dice')return value.rolls.length+' 条骰点';if(name==='map')return Object.keys(value.maps).length+' 张地图';
+    if(name==='linkage')return (value.enabled?'已启用':'已关闭')+' · '+value.applied.length+' 条联动记录';
     if(name==='status')return Object.values(value.项目).reduce((sum,fields)=>sum+Object.keys(fields).length,0)+' 个字段';if(name==='organizations')return Organizations.GROUPS.reduce((sum,key)=>sum+Object.keys(value.doc[key]).length,0)+' 个主体';if(name==='information')return value.records.length+' 个面板';return value.length+' 条资料';
 }
 function fieldChanges(before,after){

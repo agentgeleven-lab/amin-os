@@ -2,13 +2,16 @@ import {KEY,readStore,anchor,compile,change,splitEffect,timedEffects,contextExpi
 import {LIBRARY_KEY,mergeLibrary,libraryStamp} from './library.js';
 import {KEY as SCENE_KEY,readCurrentScene} from '../scene/model.js';
 import {createOperationService,subscribeStateChanges,chatIdentity,acquireMetadataWrite} from '../shared/operations.js';
+import {uuid} from '../../uuid.js';
+import {managesModule} from '../linkage/policy.js';
+import {buildSettlement,periodicPreview,SETTLEMENT_PATHS,MANUAL_SETTLEMENT_PATHS,validatePeriodicReferences} from './settlement.js';
 export const PROMPT_KEY='amin-os-persistent-effects';
 export function createEffects(getContext){
  let busy=false,message='尚未发送提醒';const listeners=new Set(),operations=createOperationService(getContext);
  const notify=event=>listeners.forEach(f=>{try{f(event);}catch{}});
  function clear(){getContext()?.setExtensionPrompt?.(PROMPT_KEY,'',1,0,false);}
  function identity(c){return String(c?.groupId??'')+' / '+String(c?.getCurrentChatId?.()??'');}
- function capture(){const c=getContext();if(!c?.chatMetadata||c.getCurrentChatId?.()==null)throw Error('请先打开一个聊天');return {meta:c.chatMetadata,id:identity(c),path:JSON.stringify(anchor(c.chat)),library:libraryStamp(readStore(c)),operation:operations.capture([[KEY],[SCENE_KEY]])};}
+ function capture(){const c=getContext();if(!c?.chatMetadata||c.getCurrentChatId?.()==null)throw Error('请先打开一个聊天');return {meta:c.chatMetadata,id:identity(c),path:JSON.stringify(anchor(c.chat)),library:libraryStamp(readStore(c)),operation:operations.capture(SETTLEMENT_PATHS)};}
  function check(token){const c=getContext();if(!token||token.meta!==c?.chatMetadata||token.id!==identity(c)||token.path!==JSON.stringify(anchor(c.chat)))throw Error('聊天或楼层已变化，请重新打开表单');if(token.library!==libraryStamp(readStore(c)))throw Error('共享能力库已变化，请重新打开表单');operations.check(token.operation);return c;}
  function ensureAvailable(){if(busy||operations.busy())throw Error('正在保存，请稍候');if(operations.dirty())throw Error('当前聊天有已确认但尚未保存的操作，请先重试保存');}
  function forMetadata(next,c){if(c.extensionSettings?.[LIBRARY_KEY])next.skills=structuredClone(c.chatMetadata[KEY]?.skills??[]);delete next.trash;delete next.groups;return next;}
@@ -47,12 +50,14 @@ export function createEffects(getContext){
   catch(error){message=error.message;throw error;}
   finally{notify({error:operations.dirty()});}
  }
- const mutate=(token,op,data)=>commit(token,'更新持续效果',(store,c)=>change(store,c.chat,op,data,{clock:readCurrentScene(c).clock}));
+ const mutate=(token,op,data)=>commit(token,'更新持续效果',(store,c)=>{if(data.periodic)validatePeriodicReferences(c,data.periodic);return change(store,c.chat,op,data,{clock:readCurrentScene(c).clock});});
  const split=(token,id,parts)=>commit(token,'分割持续效果',(store,c)=>splitEffect(store,c.chat,id,parts));
+ function stageSettlement(token=capture(),effectIds){ensureAvailable();const c=check(token),basis=operations.capture(MANUAL_SETTLEMENT_PATHS),plan=buildSettlement(c,{effectIds,operationId:uuid(),includeCheckpoint:true});operations.stage({label:'确认周期效果结算',patches:plan.patches,summary:{rows:plan.rows,clock:plan.clock}},basis);return {summary:plan.summary,rows:plan.rows,clock:plan.clock};}
+ async function confirmSettlement(){ensureAvailable();try{const result=await operations.confirm();clear();message='周期结算已保存，重复预览不会再次扣除';return result;}catch(error){message=error.message;throw error;}finally{notify({error:operations.dirty()});}}
  async function retrySave(){try{const result=await operations.retrySave();message=operations.status();return result;}catch(error){message=error.message;throw error;}finally{clear();notify({error:operations.dirty()});}}
  function start(type='normal',params={},dry=false){
   clear();if(dry||!['normal','regenerate','swipe','continue'].includes(type)||params?.signal?.aborted)return;
-  try{if(busy||operations.busy()||operations.dirty())throw Error('聊天资料尚未保存，本轮未附加持续效果提醒');const ctx=getContext();let chat=ctx.chat??[];
+  try{if(busy||operations.busy()||operations.dirty())throw Error('聊天资料尚未保存，本轮未附加持续效果提醒');const ctx=getContext();if(managesModule(ctx,'effects')){message='持续效果由统一联动条目提供';notify();return;}let chat=ctx.chat??[];
    // Some hosts emit this event before removing the assistant reply being replaced.
    if(['regenerate','swipe'].includes(type)&&chat.length&&!chat.at(-1).is_user)chat=chat.slice(0,-1);
    const prompt=compile(readStore(ctx),chat,readCurrentScene({...ctx,chat}).clock);ctx.setExtensionPrompt(PROMPT_KEY,prompt,1,0,false);message=prompt?`已附加 ${prompt.length} 字符持续效果提醒`:'当前没有启用且未到期的生效记录';}
@@ -64,7 +69,7 @@ export function createEffects(getContext){
  if(supported)for(const [event,fn]of Object.entries(handlers))if(events[event])source.on(events[event],fn);
  const unsubscribeOperations=operations.subscribe(()=>{if(operations.status())message=operations.status();notify({error:operations.dirty()&&!operations.busy()});});
  const unsubscribeState=subscribeStateChanges((event,metadata)=>{if(metadata===getContext()?.chatMetadata&&event.identity===chatIdentity(getContext())&&event.paths.some(path=>[KEY,SCENE_KEY].includes(path[0]))){clear();notify();}});
- return {capture,check,save,saveLibrary,read,mutate,split,retrySave,dirty:operations.dirty,busy:()=>busy||operations.busy(),gameClock:()=>readCurrentScene(getContext()).clock,timedEffects:()=>{const c=getContext();return timedEffects(readStore(c),c?.chat,readCurrentScene(c).clock);},expiryPreview:afterClock=>contextExpiryPreview(getContext(),afterClock),prompt:()=>currentPrompt(getContext()),context:getContext,status:()=>operations.dirty()?message:supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();unsubscribeOperations();unsubscribeState();operations.dispose();listeners.clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
+ return {capture,check,save,saveLibrary,read,mutate,split,stageSettlement,confirmSettlement,discardSettlement:()=>operations.discard(),periodicPreview:()=>periodicPreview(getContext()),retrySave,dirty:operations.dirty,busy:()=>busy||operations.busy(),gameClock:()=>readCurrentScene(getContext()).clock,timedEffects:()=>{const c=getContext();return timedEffects(readStore(c),c?.chat,readCurrentScene(c).clock);},expiryPreview:afterClock=>contextExpiryPreview(getContext(),afterClock),prompt:()=>currentPrompt(getContext()),context:getContext,status:()=>operations.dirty()?message:supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();unsubscribeOperations();unsubscribeState();operations.dispose();listeners.clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
 }
 
 let sharedService;

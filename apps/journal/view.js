@@ -1,10 +1,12 @@
 import { uuid } from '../../uuid.js';
-import { STATUSES, change, compile, inspectEntries, filterEntries, sourceFromRange, exportRecords, parseImport } from './model.js';
+import { STATUSES, KINDS, TRUTHS, KNOWLEDGE_STATES, change, changeWithContext, compile, inspectEntries, filterEntries, sourceFromRange, exportRecords, parseImport,
+    parsePriorImport, memoryEntries, autoSettings, configureAuto, dueRanges, currentDrafts, resolveAutoDraft } from './model.js';
 import { createJournal, getSharedService } from './service.js';
 import { readCurrentScene, formatGameTime } from '../scene/model.js';
+import { readCharacters } from '../characters/model.js';
 
 const mounted = new WeakMap();
-const tabNames = { hook: '伏笔', chronicle: '编年史', references: '引用预览', transfer: '导入 / 导出' };
+const tabNames = { hook: '伏笔', chronicle: '编年史', memory: '事实与记忆', auto: '自动整理', prior: '前作参考', references: '引用预览', transfer: '导入 / 导出' };
 
 export function mount(target, options = {}) {
     if (mounted.has(target)) return mounted.get(target);
@@ -19,7 +21,7 @@ export function mount(target, options = {}) {
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     body.id = instance + '-body'; body.setAttribute('role', 'tabpanel');
     page.append(context, tabs, notice, body); target.append(page);
-    let selected = 'hook', form = null, controller = null, disposed = false;
+    let selected = options.characterId ? 'memory' : 'hook', memoryCharacterId = options.characterId ?? '', form = null, controller = null, disposed = false;
     const filters = { query: '', status: '', scope: 'current', dueOnly: false };
     const say = (text, state = '') => { if (!disposed) { notice.textContent = text; notice.dataset.state = state; } };
     const stop = () => { controller?.abort(); controller = null; };
@@ -90,7 +92,12 @@ export function mount(target, options = {}) {
             for (const source of entry.sources.messages) {
                 const block = make('details'); block.append(make('summary', `第 ${source.index + 1} 楼 · ${source.name || (source.isUser ? '用户' : '角色')}`), make('pre', source.text)); details.append(block);
             }
-        } else details.append(make('p', '尚未绑定本聊天来源，不能启用引用。', 'amin-meta'));
+        } else details.append(make('p', entry.kind === 'prior' ? `前作：${entry.origin?.work ?? ''} · 原档案 ${entry.origin?.recordId || '未记录'}。仅作为前作背景参考。` : '尚未绑定本聊天来源，不能启用引用。', 'amin-meta'));
+        if (entry.kind === 'prior' && entry.origin?.sources) {
+            const original = make('details'); original.append(make('summary', '前作保存的原文（非本聊天楼层）'));
+            for (const source of entry.origin.sources.messages) original.append(make('p', `前作第 ${source.index + 1} 楼 · ${source.name}`, 'amin-meta'), make('pre', source.text));
+            details.append(original);
+        }
     }
 
     function openForm(entry = null, copy = false) {
@@ -218,6 +225,190 @@ export function mount(target, options = {}) {
         due?.addEventListener('change', () => { filters.dueOnly = due.checked; drawList(); }); drawList();
     }
 
+    function bindMemorySources(card, entry, ctx) {
+        const chat = ctx.chat ?? [], sourceCard = section('获知或确认的来源楼层', card), values = grid(sourceCard);
+        const bind = checkbox(sourceCard, '绑定当前聊天的来源楼层', entry ? !!entry.sources : chat.length > 0); bind.disabled = !chat.length;
+        const start = field(values, '起始楼层', entry?.sources ? entry.sources.start + 1 : Math.max(1, chat.length));
+        const end = field(values, '结束楼层', entry?.sources ? entry.sources.end + 1 : Math.max(1, chat.length));
+        for (const input of [start, end]) { input.type = 'number'; input.min = 1; input.max = Math.max(1, chat.length); input.step = 1; }
+        const sourceNote = field(sourceCard, '来源说明', entry?.sourceNote ?? '', true); sourceNote.maxLength = 1000;
+        return context => ({ sources: bind.checked ? sourceFromRange(context.chat, Number(start.value) - 1, Number(end.value) - 1) : null, sourceNote: sourceNote.value });
+    }
+
+    function openMemoryForm(kind, entry = null) {
+        stop(); const token = api.capture(), ctx = api.check(token), time = currentTime(), people = readCharacters(ctx).characters;
+        const facts = inspectEntries(api.read(), ctx.chat).filter(item => item.kind === 'fact' && item.current);
+        form = { dirty: false, revision: 0, token, valid: true }; const state = form; body.replaceChildren();
+        const card = section((entry ? '编辑' : '新增') + (kind === 'fact' ? '事实' : '人物记忆')), fields = grid(card);
+        let title, content, truth, person, fact, known, confidence, belief, learnedFrom, learnedAt;
+        if (kind === 'fact') {
+            title = field(fields, '事实标题', entry?.title ?? ''); title.maxLength = 120;
+            content = field(fields, '事实内容', entry?.body ?? '', true); content.maxLength = 60000;
+            truth = select(fields, '确认程度', Object.entries(TRUTHS), entry?.truth ?? 'confirmed');
+            card.append(make('p', '事实只保存一份；人物可以知情、听到不同传闻或遗忘它。未证实内容不会自动成为确定事实。', 'amin-help'));
+        } else {
+            const personChoices = [['', '请选择人物'], ...people.map(item => [item.id, `${item.name} · ${item.id}`])];
+            if (entry && !people.some(item => item.id === entry.characterId)) personChoices.push([entry.characterId, `人物已缺失 · ${entry.characterId}`]);
+            person = select(fields, '人物', personChoices, entry?.characterId ?? memoryCharacterId);
+            const factChoices = [['', '请选择事实'], ...facts.map(item => [item.id, item.title])];
+            if (entry && !facts.some(item => item.id === entry.factId)) factChoices.push([entry.factId, `事实已缺失 · ${entry.factId}`]);
+            fact = select(fields, '关联事实', factChoices, entry?.factId ?? '');
+            known = select(fields, '认知状态', Object.entries(KNOWLEDGE_STATES), entry?.state ?? 'known');
+            confidence = field(fields, '可信程度（0–100）', entry?.confidence ?? 100); confidence.type = 'number'; confidence.min = 0; confidence.max = 100;
+            belief = field(fields, '人物理解或传闻内容（可选）', entry?.belief ?? '', true); belief.maxLength = 6000;
+            const sourceChoices = [['', '亲历 / 其他来源'], ...people.map(item => [item.id, `${item.name} · ${item.id}`])];
+            if (entry?.learnedFromId && !people.some(item => item.id === entry.learnedFromId)) sourceChoices.push([entry.learnedFromId, `人物已缺失 · ${entry.learnedFromId}`]);
+            learnedFrom = select(fields, '从谁得知', sourceChoices, entry?.learnedFromId ?? '');
+            learnedAt = field(fields, '获知时间', entry?.learnedAtText ?? time.label); learnedAt.maxLength = 160;
+            card.append(make('p', '人物按稳定编号关联。留空“人物理解”表示与事实内容一致；传闻可信程度表示该人物的判断。遗忘保留历史，不删除事实。', 'amin-help'));
+        }
+        const sources = bindMemorySources(card, entry, ctx), enabled = checkbox(card, '启用后续生成引用（当前分支）', entry?.enabled ?? false);
+        card.append(make('p', '此开关同时控制普通生成与统一联动的资料读取。事实和人物记忆分别启用；记忆不能通过关联编号公开未启用的事实正文。', 'amin-help'));
+        const actions = toolbar(card, 'amin-savebar');
+        button(actions, kind === 'fact' ? '保存事实' : '保存人物记忆', async () => {
+            if (!state.valid) throw Error('来源已变化，请取消编辑后重新打开');
+            const context = api.check(token), currentFacts = inspectEntries(api.read(), context.chat), selectedFact = kind === 'knowledge' ? currentFacts.find(item => item.id === fact.value && item.kind === 'fact' && item.current) : null;
+            const record = { ...(entry ?? {}), id: entry?.id ?? uuid(), kind, ...sources(context), enabled: enabled.checked,
+                ...(kind === 'fact' ? { title: title.value, body: content.value, truth: truth.value } : { title: selectedFact?.title ?? entry?.title ?? '人物记忆', body: '', factId: fact.value,
+                    characterId: person.value, state: known.value, confidence: Number(confidence.value), belief: belief.value, learnedFromId: learnedFrom.value || null,
+                    learnedAtText: learnedAt.value, gameTime: learnedAt.value === time.label ? time.clock : learnedAt.value === entry?.learnedAtText ? entry?.gameTime ?? null : null }) };
+            await api.save(token, store => changeWithContext(store, context, entry ? 'update' : 'create', record, token.operationId));
+            finish('已保存' + (kind === 'fact' ? '事实。' : '人物记忆。'));
+        }, true);
+        button(actions, '取消编辑', () => { form = null; render(); });
+    }
+
+    function drawMemory() {
+        const ctx = api.context(), entries = inspectEntries(api.read(), ctx.chat), facts = entries.filter(item => item.kind === 'fact' && item.current), people = readCharacters(ctx).characters;
+        const tools = toolbar(body); button(tools, '新增事实', () => openMemoryForm('fact'), true);
+        button(tools, '新增人物记忆', () => openMemoryForm('knowledge')).disabled = !facts.length || !people.length;
+        body.append(make('p', '事实与人物认知分别记录。先建立事实，再登记谁知道、如何得知、传闻可信度和遗忘状态；未登记不代表所有人都知道。', 'amin-help'));
+        const choices = [['', '所有人物'], ...people.map(item => [item.id, `${item.name} · ${item.id}`])];
+        if (memoryCharacterId && !people.some(item => item.id === memoryCharacterId)) choices.push([memoryCharacterId, `人物已缺失 · ${memoryCharacterId}`]);
+        const filter = select(body, '筛选人物记忆', choices, memoryCharacterId);
+        filter.addEventListener('change', () => { memoryCharacterId = filter.value; render(); });
+        if (!people.length) body.append(make('p', '请先在人物卡建立人物，再登记记忆。', 'amin-empty'));
+        const factList = section(`事实 · ${facts.length} 条`);
+        if (!facts.length) factList.append(make('p', '尚未登记事实。', 'amin-empty'));
+        for (const entry of facts) {
+            const card = section(entry.title, factList); card.append(make('p', `${TRUTHS[entry.truth]} · ${entry.id} · ${entry.enabled && !entry.stale ? '引用已启用' : '不参与引用'}`, 'amin-meta'), make('pre', entry.body));
+            showSources(card, entry); const actions = toolbar(card);
+            button(actions, '编辑事实', () => openMemoryForm('fact', entry)); button(actions, '删除事实', () => deleteForm(entry), 'amin-danger');
+        }
+        const memories = memoryEntries(ctx, { characterId: memoryCharacterId }), list = section(`人物记忆 · ${memories.length} 条`);
+        if (!memories.length) list.append(make('p', '没有匹配的人物记忆。', 'amin-empty'));
+        for (const entry of memories) {
+            const card = section(`${entry.characterName} · ${entry.fact?.title ?? entry.title}`, list);
+            card.append(make('p', `${KNOWLEDGE_STATES[entry.state]} · 可信程度 ${entry.confidence}% · ${entry.learnedAtText || '获知时间未填'}`, 'amin-meta'), make('pre', entry.belief || entry.fact?.body || '关联事实不可用'));
+            if (entry.learnedFromId) card.append(make('p', '从谁得知：' + entry.learnedFromName, 'amin-meta'));
+            if (entry.missing.length) card.append(make('p', entry.missing.join('；') + '；请手动核对编号，不会自动按姓名替换。', 'amin-notice'));
+            if (entry.fact?.stale) card.append(make('p', '关联事实来源未绑定或已变化，不能作为有效引用。', 'amin-notice'));
+            showSources(card, entry); const actions = toolbar(card);
+            button(actions, '编辑记忆', () => openMemoryForm('knowledge', entry));
+            if (entry.state !== 'forgotten') button(actions, '标记遗忘', async () => {
+                const token = api.capture(), context = api.check(token);
+                await api.save(token, store => changeWithContext(store, context, 'update', { ...entry, state: 'forgotten' }, token.operationId)); finish('已标记遗忘，原有事实与历史仍保留。');
+            });
+            button(actions, '删除记忆', () => deleteForm(entry), 'amin-danger');
+        }
+    }
+
+    function openAutoDraft(draft) {
+        const token = api.capture(); form = { dirty: false, revision: 0, token, valid: true }; const state = form; body.replaceChildren();
+        const card = section('审核自动编年史草稿'), title = field(card, '草稿标题', draft.title), content = field(card, '草稿正文', draft.body, true);
+        title.maxLength = 120; content.maxLength = 60000; showSources(card, draft);
+        card.append(make('p', '确认后新增一条编年史，引用保持关闭；不会覆盖已有编年史。', 'amin-help'));
+        const actions = toolbar(card, 'amin-savebar');
+        button(actions, '确认保存编年史', async () => {
+            if (controller || !state.valid) throw Error('请先等待生成完成，或在来源变化后重新打开草稿');
+            const ctx = api.check(token); await api.save(token, store => resolveAutoDraft(store, ctx.chat, draft.id, 'accept', { title: title.value, body: content.value }, token.operationId)); finish('草稿已确认保存，引用保持关闭。');
+        }, true);
+        button(actions, '重新生成该范围', async () => {
+            if (state.dirty) throw Error('草稿有未保存修改，请先确认保存或取消编辑');
+            if (controller) throw Error('正在生成，请稍候');
+            api.check(token); const request = new AbortController(); controller = request;
+            try { await api.generateAutoDraft({ draftId: draft.id, signal: request.signal }); if (form === state && !request.signal.aborted) finish('已更新同一范围的待确认草稿。'); }
+            finally { if (controller === request) controller = null; }
+        });
+        button(actions, '忽略该范围', async () => {
+            if (controller) throw Error('请先取消生成'); const ctx = api.check(token);
+            await api.save(token, store => resolveAutoDraft(store, ctx.chat, draft.id, 'dismiss', {}, token.operationId)); finish('已忽略此范围，不会重复自动生成。');
+        });
+        button(actions, '取消编辑', () => { stop(); form = null; render(); });
+    }
+
+    function drawAuto() {
+        const store = api.read(), ctx = api.context(), settings = autoSettings(store), token = api.capture(), card = section('自动编年史');
+        card.append(make('p', '默认关闭。每累计指定楼层，使用“剧情档案”的 AI 渠道产生待确认草稿；只在正常对话生成完成后检查，每次整理一个待处理范围。草稿确认前不参与剧情引用。', 'amin-help'));
+        const enabled = checkbox(card, '启用自动编年史', settings.enabled), fields = grid(card), every = field(fields, '每多少楼整理一次', settings.every), start = field(fields, '从第几楼开始累计', store.autoChronicle ? settings.start + 1 : ctx.chat.length + 1);
+        every.type = start.type = 'number'; every.min = 2; every.max = 1000; every.step = start.step = 1; start.min = 1;
+        const instruction = field(card, '自动整理要求', settings.instruction, true); instruction.maxLength = 4000;
+        for (const input of [enabled, every, start, instruction]) for (const event of ['input', 'change']) input.addEventListener(event, () => { form ??= { dirty: true, revision: 0, token, valid: true }; touch(); });
+        const actions = toolbar(card);
+        button(actions, '保存自动整理设置', async () => {
+            api.check(token); await api.save(token, current => configureAuto(current, { enabled: enabled.checked, every: Number(every.value), start: Number(start.value) - 1, instruction: instruction.value })); finish('自动整理设置已保存。');
+        }, true);
+        button(actions, '取消编辑', () => { form = null; render(); });
+        const due = dueRanges(store, ctx.chat); card.append(make('p', `已到间隔但尚未整理：${due.length} 段。`, 'amin-meta'));
+        const generate = button(actions, '生成下一段待确认草稿', async () => {
+            if (form?.dirty) throw Error('请先保存自动整理设置');
+            await api.generateAutoDraft(); if (!disposed && !form) render(); say(api.status());
+        }); generate.disabled = !due.length || api.autoBusy?.();
+        const drafts = currentDrafts(store, ctx.chat).filter(draft => draft.status === 'ready'), list = section(`待确认草稿 · ${drafts.length} 条`);
+        if (!drafts.length) list.append(make('p', '没有待确认草稿。已确认或忽略的相同范围不会重复提交。', 'amin-empty'));
+        for (const draft of drafts) {
+            const row = section(draft.title, list); row.append(make('p', `来源：第 ${draft.sources.start + 1}–${draft.sources.end + 1} 楼`, 'amin-meta'), make('pre', draft.body));
+            button(toolbar(row), '审核草稿', () => openAutoDraft(draft), true);
+        }
+    }
+
+    function openPriorReference(entry) {
+        const token = api.capture(); form = { dirty: false, revision: 0, token, valid: true }; const state = form; body.replaceChildren();
+        const card = section('核对前作参考'), title = field(card, '参考标题', entry.title), content = field(card, '参考内容', entry.body, true);
+        title.maxLength = 120; content.maxLength = 60000;
+        card.append(make('p', `前作：${entry.origin.work} · 原档案：${entry.origin.recordId || '未记录'}\n${entry.origin.sourceNote}`, 'amin-meta'));
+        const confirmed = checkbox(card, '我已核对来源，将这些内容仅作为前作背景参考', false), enabled = checkbox(card, '启用后续生成引用（当前分支）', entry.enabled);
+        const actions = toolbar(card, 'amin-savebar');
+        button(actions, '确认前作引用范围', async () => {
+            if (!state.valid || !confirmed.checked) throw Error('请先核对并勾选前作来源确认');
+            const ctx = api.check(token); await api.save(token, store => change(store, ctx.chat, 'update', { ...entry, title: title.value, body: content.value, enabled: enabled.checked, explicitReference: true }, token.operationId)); finish('前作参考已保存。');
+        }, true);
+        button(actions, '取消编辑', () => { form = null; render(); });
+    }
+
+    function drawPrior() {
+        const entries = inspectEntries(api.read(), api.context().chat).filter(entry => entry.kind === 'prior' && entry.current), importCard = section('选用前作剧情档案');
+        importCard.append(make('p', '粘贴前作导出的剧情档案，选择需要的条目并明确确认。前作保留原作来源，不伪装成本聊天的来源楼层，不自动改变当前人物、物品或世界状态。', 'amin-help'));
+        const work = field(importCard, '前作名称'), sourceNote = field(importCard, '前作来源说明', '', true), raw = field(importCard, '前作剧情档案 JSON', '', true);
+        work.maxLength = 120; sourceNote.maxLength = 2000; const preview = make('div', '', 'amin-stack'); importCard.append(preview);
+        for (const input of [work, sourceNote, raw]) input.addEventListener('input', () => { preview.replaceChildren(); form = { dirty: true, revision: 0 }; });
+        button(toolbar(importCard), '预览并选择前作条目', () => {
+            const records = parsePriorImport(raw.value, { work: work.value, sourceNote: sourceNote.value }), token = api.capture(), baseline = JSON.stringify([raw.value, work.value, sourceNote.value]);
+            if (!records.length) throw Error('前作档案没有可选择的条目');
+            form = { dirty: true, revision: 0, token, valid: true }; preview.replaceChildren();
+            const selectedRecords = records.map(record => {
+                const card = section(record.title, preview), checked = checkbox(card, '选用：' + record.title, false); card.append(make('pre', record.body)); return { record, checked };
+            });
+            const confirm = checkbox(preview, '我已核对前作来源，仅选用勾选的条目作为背景', false);
+            button(toolbar(preview), '确认保存选中的前作条目', async () => {
+                if (!confirm.checked) throw Error('请先勾选前作来源确认');
+                if (baseline !== JSON.stringify([raw.value, work.value, sourceNote.value])) throw Error('前作资料已修改，请重新预览');
+                const chosen = selectedRecords.filter(item => item.checked.checked).map(item => item.record);
+                if (!chosen.length) throw Error('请至少选择一个前作条目');
+                const ctx = api.check(token); await api.save(token, store => chosen.reduce((next, record, index) => change(next, ctx.chat, 'create', record, token.operationId + ':' + index), store));
+                finish(`已保存 ${chosen.length} 条前作参考，引用保持关闭，可逐条启用。`);
+            }, true);
+        });
+        button(toolbar(importCard), '取消编辑', () => { form = null; render(); });
+        const list = section(`已选用的前作参考 · ${entries.length} 条`);
+        for (const entry of entries) {
+            const card = section(entry.title, list); card.append(make('p', `${entry.origin.work} · ${entry.enabled && !entry.stale ? '引用已启用' : '不参与引用'}`, 'amin-meta'), make('pre', entry.body)); showSources(card, entry);
+            const actions = toolbar(card); button(actions, '核对并设置引用', () => openPriorReference(entry));
+            if (entry.enabled) button(actions, '关闭前作引用', async () => { const token = api.capture(), ctx = api.check(token); await api.save(token, store => change(store, ctx.chat, 'reference', { id: entry.id, enabled: false }, token.operationId)); finish('已关闭前作引用。'); });
+            button(actions, '删除前作参考', () => deleteForm(entry), 'amin-danger');
+        }
+    }
+
     function drawReferences() {
         const store = api.read(), ctx = api.context(), all = inspectEntries(store, ctx?.chat ?? []), active = all.filter(entry => entry.current && !entry.stale && entry.enabled);
         const card = section(`当前引用 · ${active.length} 条`);
@@ -243,7 +434,7 @@ export function mount(target, options = {}) {
             form = { dirty: true, revision: 0, token, valid: true };
             if (!records.length) throw Error('导入内容没有档案');
             preview.append(make('p', `即将导入 ${records.length} 条；引用全部关闭。`, 'amin-notice'));
-            for (const record of records) { const row = section((record.kind === 'hook' ? '伏笔 · ' : '编年史 · ') + record.title, preview); row.append(make('pre', record.body)); }
+            for (const record of records) { const row = section(KINDS[record.kind] + ' · ' + record.title, preview); row.append(make('pre', record.body)); }
             button(toolbar(preview), '确认保存导入', async () => {
                 if (baseline !== raw.value) throw Error('导入内容已变动，请重新验证');
                 const context = api.check(token);
@@ -259,7 +450,7 @@ export function mount(target, options = {}) {
         stop(); form = null; body.replaceChildren(); drawTabs();
         const ctx = api.context(); context.textContent = `剧情档案 · ${ctx?.getCurrentChatId?.() ?? '尚未打开聊天'} · 当前加载 ${ctx?.chat?.length ?? 0} 楼`;
         if (!ctx?.chatMetadata || ctx?.getCurrentChatId?.() == null) { body.append(make('p', '打开一个聊天后，即可管理它的伏笔与编年史。', 'amin-empty')); return; }
-        try { if (selected === 'references') drawReferences(); else if (selected === 'transfer') drawTransfer(); else drawEntries(); }
+        try { if (selected === 'references') drawReferences(); else if (selected === 'transfer') drawTransfer(); else if (selected === 'memory') drawMemory(); else if (selected === 'auto') drawAuto(); else if (selected === 'prior') drawPrior(); else drawEntries(); }
         catch (error) { say(error.message, 'error'); }
     }
     const unsubscribe = api.subscribe(event => {
@@ -269,6 +460,11 @@ export function mount(target, options = {}) {
         else if (!form && event?.type !== 'prompt') { render(); say(api.status(), event?.error ? 'error' : ''); }
         else if (!form) say(api.status());
     });
-    const view = { open() { if (!form) render(); }, dispose() { if (disposed) return; disposed = true; stop(); unsubscribe(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
+    function selectCharacter(event) {
+        if (event?.detail?.app !== 'journal' || typeof event.detail.characterId !== 'string') return;
+        go(() => { selected = 'memory'; memoryCharacterId = event.detail.characterId; render(); });
+    }
+    doc.addEventListener?.('amin:select-character', selectCharacter);
+    const view = { open(options = {}) { if (!form) { if (options.tab && Object.hasOwn(tabNames, options.tab)) selected = options.tab; if (options.characterId) { selected = 'memory'; memoryCharacterId = options.characterId; } render(); } }, dispose() { if (disposed) return; disposed = true; stop(); unsubscribe(); doc.removeEventListener?.('amin:select-character', selectCharacter); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); render(); say(api.status()); return view;
 }

@@ -5,9 +5,9 @@ const tabs = { saves: '剧情存档', transfer: '导入 / 导出' };
 const moduleLabels = {
     characters: '角色档案', inventory: '物品与经济', relationships: '人物关系', scene: '场景与时间',
     effects: '持续效果', dice: '固定骰点', journal: '剧情档案', information: '信息面板', informationLibrary: '信息资料库', map: '地图',
-    status: '世界状态', worldStatus: '世界状态', organizations: '势力资料',
+    status: '世界状态', worldStatus: '世界状态', organizations: '势力资料', linkage: '统一联动设置与记录',
 };
-const confirmLabels = { save: '确认创建存档', restore: '确认恢复到当前楼层', delete: '确认删除存档', import: '确认导入存档' };
+const confirmLabels = { save: '确认创建存档', restore: '确认恢复到当前楼层', delete: '确认删除存档', import: '确认导入存档', branch: '确认新建并恢复分支', 'checkpoint-settings': '确认检查点设置' };
 
 function moduleRows(snapshot) {
     return Object.entries(snapshot?.modules ?? {}).filter(([, value]) => value !== null).map(([id, value]) => ({
@@ -33,6 +33,7 @@ export function mount(target, options = {}) {
     const existing = mounted.get(target); if (existing) { existing.open(); return existing; }
     const doc = options.document ?? target.ownerDocument ?? document;
     const api = options.api ?? getSharedSavesService(options.getContext);
+    const visibleTabs = api.captureCheckpoint ? { ...tabs, checkpoints: '楼层检查点' } : tabs;
     const getContext = options.getContext ?? api.context ?? (() => globalThis.SillyTavern?.getContext?.());
     const make = (tag, text = '', className = '') => {
         const element = doc.createElement(tag); element.textContent = text;
@@ -50,6 +51,7 @@ export function mount(target, options = {}) {
 
     let selected = 'saves', disposed = false, ownAction = false, message = '', failed = false;
     let nameDraft = '', noteDraft = '', importText = '', inspected = null, exportText = '', exportName = '';
+    let checkpointDraft = null, observedMetadata = null;
     const say = (text, error = false) => { message = String(text ?? ''); failed = error; };
     function section(title, parent = body, className = 'amin-card amin-stack') {
         const card = make('section', '', className); if (title) card.append(make('h3', title)); parent.append(card); return card;
@@ -78,13 +80,13 @@ export function mount(target, options = {}) {
     function ensureNoPreview() { if (api.preview()) throw Error('请先确认或取消当前预览。'); }
     function drawTabs() {
         tablist.replaceChildren();
-        for (const [id, label] of Object.entries(tabs)) {
+        for (const [id, label] of Object.entries(visibleTabs)) {
             const element = make('button', label); element.type = 'button'; element.id = `${instance}-tab-${id}`;
             element.setAttribute('role', 'tab'); element.setAttribute('aria-controls', body.id);
             element.setAttribute('aria-selected', String(selected === id)); element.tabIndex = selected === id ? 0 : -1;
             element.addEventListener('click', () => { if (disposed) return; selected = id; render(); });
             element.addEventListener('keydown', event => {
-                const ids = Object.keys(tabs), index = ids.indexOf(id); let next;
+                const ids = Object.keys(visibleTabs), index = ids.indexOf(id); let next;
                 if (event.key === 'ArrowRight') next = ids[(index + 1) % ids.length];
                 else if (event.key === 'ArrowLeft') next = ids[(index + ids.length - 1) % ids.length];
                 else if (event.key === 'Home') next = ids[0]; else if (event.key === 'End') next = ids.at(-1); else return;
@@ -141,10 +143,12 @@ export function mount(target, options = {}) {
                 backup.append(make('strong', summary.backup.name), make('p', `${when(summary.backup.createdAt)} · 编号 ${summary.backup.id}`, 'amin-meta'));
                 backup.append(make('p', '此备份尚未写入；确认恢复时会先一起保存。应用保留最近 5 份自动安全备份。', 'amin-help'));
             } else panel.append(make('p', '确认恢复时会先自动保存当前应用状态，并保留最近 5 份安全备份。', 'amin-help'));
-            panel.append(make('p', '如果需要回退聊天正文，请使用 SillyTavern 原生“创建分支”或“检查点”。', 'amin-help'));
+            panel.append(make('p', '已有完整来源检查点时，可使用“从此处新开分支”继续旧楼剧情。', 'amin-help'));
+        } else if (kind === 'branch') {
+            panel.append(make('p', `将从${sourceText(summary.source)}创建独立聊天，并恢复当时记录的完整应用状态。原聊天仍保留，缺失的旧楼数据不会由当前状态推算。`));
         } else if (kind === 'delete') panel.append(make('p', '这会删除所选命名存档；当前应用状态和聊天消息不会改变。'));
         else if (kind === 'import') panel.append(make('p', '导入只把已验证的存档收入当前聊天，不会立即恢复，也不会改动聊天消息。'));
-        else if (kind === 'save') panel.append(make('p', '确认后保存当前允许范围内的应用状态；不会收录聊天正文、全局设置、API 配置或密钥。'));
+        else if (kind === 'save') panel.append(make('p', '确认后保存当前允许范围内的应用状态及消息来源修订；不会替换聊天正文，也不收录全局设置、API 配置或密钥。'));
         if (summary.snapshot) panel.append(make('p', `${when(summary.snapshot.createdAt)} · ${sourceText(summary.snapshot.source)}`, 'amin-meta'));
         if (Array.isArray(summary.moduleNames)) panel.append(make('p', summary.moduleNames.length ? `包含模块：${summary.moduleNames.join('、')}` : '当前没有可保存的应用状态。', 'amin-meta'));
         if (kind === 'restore' || summary.changes?.length) drawChanges(panel, summary.changes);
@@ -153,7 +157,7 @@ export function mount(target, options = {}) {
             for (const warning of summary.warnings) warnings.append(make('p', String(warning)));
         }
         const actions = toolbar(panel, 'amin-savebar');
-        button(actions, confirmLabels[kind] ?? '确认应用一次', async () => { await api.confirm(); inspected = null; say(api.status(), false); }, kind === 'delete' ? 'amin-danger' : 'amin-primary');
+        button(actions, confirmLabels[kind] ?? '确认应用一次', async () => { await api.confirm(); inspected = null; checkpointDraft = null; say(api.status(), false); }, kind === 'delete' ? 'amin-danger' : 'amin-primary');
         button(actions, '取消预览', () => { api.discard(); say(api.status(), false); });
     }
     function drawRetry() {
@@ -162,22 +166,27 @@ export function mount(target, options = {}) {
         card.append(make('p', '已确认的变化保留在当前聊天内存中。请重试保存；重试不会再次恢复、导入或删除。'));
         button(toolbar(card), '重试保存', async () => { await api.retrySave(); say(api.status(), false); }, 'amin-primary');
     }
-    function drawSnapshot(snapshot, parent, { backup = false } = {}) {
+    function drawSnapshot(snapshot, parent, { backup = false, checkpoint = false } = {}) {
         const card = section(snapshot.name, parent); snapshotMeta(card, snapshot);
         if (backup) card.append(make('p', '自动安全备份，可用于撤销一次恢复。', 'amin-help'));
         const actions = toolbar(card);
         button(actions, backup ? '预览恢复此备份' : '预览恢复', () => { ensureNoPreview(); api.stageRestore(snapshot.id); });
+        if (api.stageBranch) {
+            const availability = api.branchAvailability(snapshot.id);
+            const branch = button(actions, '从此处新开分支', () => { ensureNoPreview(); api.stageBranch(snapshot.id); });
+            if (!availability.available) { branch.disabled = true; branch.title = availability.reason; card.append(make('p', availability.reason, 'amin-help')); }
+        }
         button(actions, '导出 JSON', () => {
             exportText = api.exportSave(snapshot.id); exportName = snapshot.name; selected = 'transfer';
             inspected = null; say(`已生成「${snapshot.name}」的导出 JSON。`, false);
         });
-        if (!backup) button(actions, '删除存档', () => { ensureNoPreview(); api.stageDelete(snapshot.id); }, 'amin-danger');
+        if (!backup) button(actions, checkpoint ? '删除检查点' : '删除存档', () => { ensureNoPreview(); api.stageDelete(snapshot.id); }, 'amin-danger');
     }
     function drawSaves(store) {
         const create = section('创建当前状态存档'), grid = make('div', '', 'amin-form-grid'); create.append(grid);
         field(grid, '存档名称', nameDraft, value => { nameDraft = value; });
         field(grid, '备注（可选）', noteDraft, value => { noteDraft = value; }, { multiline: true, full: true });
-        create.append(make('p', '只保存允许范围内的应用状态。聊天消息、全局界面设置、模型 API 配置与密钥不会进入存档。', 'amin-help'));
+        create.append(make('p', '保存应用状态与核验分支所需的消息来源修订。恢复不会替换聊天消息；全局界面设置、模型 API 配置与密钥不会进入存档。', 'amin-help'));
         button(toolbar(create), '预览创建存档', () => { ensureNoPreview(); api.stageSave({ name: nameDraft, note: noteDraft }); }, 'amin-primary');
 
         const list = section('命名存档');
@@ -187,6 +196,23 @@ export function mount(target, options = {}) {
         backups.append(make('p', '每次恢复前自动建立；它们同样只包含允许范围内的应用状态。', 'amin-help'));
         if (!store.backups.length) backups.append(make('p', '还没有安全备份。第一次确认恢复时会自动创建。', 'amin-empty'));
         for (const snapshot of [...store.backups].reverse()) drawSnapshot(snapshot, backups, { backup: true });
+    }
+    function drawCheckpoints(store) {
+        const settings = store.checkpointSettings ?? { enabled: true, limit: 12 }, draft = checkpointDraft ??= { ...settings };
+        const config = section('自动记录完整楼层状态');
+        config.append(make('p', '只记录当前聊天末尾实际存在的完整状态。后续楼层与候选分别保留；消息被编辑或切换候选后，只有来源完全匹配的记录才能新开分支。旧历史不会补造检查点。', 'amin-help'));
+        const enabledLabel = make('label', '', 'amin-check'), enabled = make('input'); enabled.type = 'checkbox'; enabled.checked = draft.enabled;
+        enabled.setAttribute('aria-label', '启用自动楼层检查点'); enabled.addEventListener('change', () => { draft.enabled = enabled.checked; });
+        enabledLabel.append(enabled, make('span', '启用自动楼层检查点')); config.append(enabledLabel);
+        const limit = field(config, '自动检查点保留数量', String(draft.limit), value => { draft.limit = Number(value); }); limit.type = 'number'; limit.min = '1'; limit.max = '24'; limit.step = '1';
+        button(toolbar(config), '预览检查点设置', () => { ensureNoPreview(); api.stageCheckpointSettings(draft); });
+        if (api.checkpointStatus?.()) config.append(make('p', api.checkpointStatus(), 'amin-notice'));
+        const actions = toolbar(config);
+        button(actions, '立即记录当前楼层', async () => { ensureNoPreview(); const saved = await api.captureCheckpoint(); say(saved ? '已记录当前楼层完整状态。' : '空聊天尚无可记录楼层。'); }, 'amin-primary');
+        const list = section(`楼层检查点 · ${store.checkpoints?.length ?? 0} 份`);
+        list.append(make('p', '同一楼层同一修订的状态更新会替换该检查点。自动检查点会按数量和容量滚动淘汰；长期保留请另建命名存档或导出 JSON。', 'amin-help'));
+        if (!store.checkpoints?.length) list.append(make('p', '尚无完整楼层检查点。可立即记录当前楼层，或等待后续消息和应用更新。', 'amin-empty'));
+        for (const saved of [...(store.checkpoints ?? [])].reverse()) drawSnapshot(saved, list, { checkpoint: true });
     }
     function drawTransfer() {
         const importing = section('导入已验证的 Amin OS 存档');
@@ -222,9 +248,10 @@ export function mount(target, options = {}) {
             body.replaceChildren(make('p', error.message, 'amin-empty')); notice.textContent = ''; return;
         }
         const ctx = getContext?.(); const chatId = ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? '当前聊天';
+        if (observedMetadata !== ctx?.chatMetadata) { checkpointDraft = null; observedMetadata = ctx?.chatMetadata; }
         context.textContent = `剧情存档 · ${chatId} · ${store.saves.length} 个命名存档 · ${store.backups.length} 个安全备份`;
         drawTabs(); drawReview(); body.replaceChildren(); drawRetry();
-        if (selected === 'saves') drawSaves(store); else drawTransfer();
+        if (selected === 'saves') drawSaves(store); else if (selected === 'checkpoints') drawCheckpoints(store); else drawTransfer();
         notice.textContent = failed ? message : (message || api.status()); notice.dataset.state = failed ? 'error' : api.busy() || ownAction ? 'busy' : '';
     }
     const unsubscribe = api.subscribe(() => { if (!disposed) { if (!failed) message = api.status(); render(); } });

@@ -21,19 +21,21 @@ class Node {
     querySelector(selector) { return this.querySelectorAll(selector)[0]; }
     focus() { this.ownerDocument.activeElement = this; }
 }
-const doc = () => { const document = { createElement: tag => new Node(tag, document), createElementNS: (_, tag) => new Node(tag, document) }; return document; };
+const doc = () => { const listeners = new Map(); const document = { createElement: tag => new Node(tag, document), createElementNS: (_, tag) => new Node(tag, document),
+    addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); }, removeEventListener(type, fn) { listeners.get(type)?.delete(fn); },
+    dispatchEvent(event) { for (const fn of listeners.get(event.type) ?? []) fn(event); }, listeners }; return document; };
 const walk = root => [root, ...root.children.flatMap(walk)];
 const find = (root, label, tag = 'button') => walk(root).find(node => node.tagName === tag.toUpperCase() && (node.textContent === label || node.getAttribute('aria-label') === label));
 async function click(root, label) { const node = find(root, label); assert.ok(node, 'missing button: ' + label); assert.equal(node.disabled, false, 'button disabled: ' + label); await node.dispatch('click'); }
 async function input(root, label, value, tag = 'input') { const node = find(root, label, tag); assert.ok(node, 'missing field: ' + label); node.value = value; await node.dispatch(tag === 'select' ? 'change' : 'input'); return node; }
 const notice = root => walk(root).find(node => node.className === 'amin-notice')?.textContent;
 const people = [{ id: 'a', name: '艾琳', kind: 'pc', notes: '', stats: [] }, { id: 'b', name: '守卫', kind: 'npc', notes: '', stats: [] }, { id: 'c', name: '医师', kind: 'npc', notes: '', stats: [] }];
-function fixture() {
+function fixture(options = {}) {
     let failure = false, saveCount = 0, serial = 0;
     const newContext = id => ({ characterId: 0, getCurrentChatId: () => id, chat: [{ name: '旅人', is_user: true, mes: '抵达城门' }], chatMetadata: { untouched: 'original' }, saveMetadata: async () => { saveCount++; if (failure) throw Error('disk unavailable'); } });
     let ctx = newContext('chat-a');
     const seed = (characters = people) => { ctx.chatMetadata[CHARACTERS_KEY] = appendSnapshot(emptyStore(), ctx.chat, { version: 1, characters }, { id: 'characters-' + ++serial }); };
-    seed(); const api = createRelationshipsService(() => ctx, { createId: () => 'rel-' + ++serial }), document = doc(), root = new Node('main', document), view = mount(root, { api, document });
+    seed(); const api = createRelationshipsService(() => ctx, { createId: () => 'rel-' + ++serial, ...options }), document = doc(), root = new Node('main', document), view = mount(root, { api, document });
     return { root, view, api, document, ctx: () => ctx, saveCount: () => saveCount, failure(value) { failure = value; }, characters(value) { seed(value); api.sync(); }, switch() { ctx = newContext('chat-b'); seed(); api.sync(); }, dispose() { view.dispose(); api.dispose(); } };
 }
 async function stageNew(f, { type = '信任', strength, notes = '' } = {}) {
@@ -137,4 +139,43 @@ test('mount and dispose are idempotent and settings remain opt-in behind confirm
         await click(f.root, '预览读取设置'); assert.equal(readRelationships(f.ctx()).settings.includeInContext, false); await click(f.root, '确认应用一次'); assert.equal(readRelationships(f.ctx()).settings.includeInContext, true);
     } finally { f.dispose(); }
     f.view.dispose(); assert.equal(f.root.children.length, 0);
+});
+
+test('threshold editor previews a rule, exposes a crossed reminder and acknowledges it without creating story events', async () => {
+    const f = fixture();
+    try {
+        await stageNew(f, { strength: '1' }); await click(f.root, '确认应用一次');
+        await click(f.root, '新增阈值规则'); await input(f.root, '阈值数值', '5'); await input(f.root, '阈值提醒内容', '可以检查合作意愿，但不代表事件已发生', 'textarea');
+        await click(f.root, '预览保存阈值'); assert.equal(readRelationships(f.ctx()).thresholdRules, undefined);
+        await click(f.root, '确认应用一次'); assert.equal(readRelationships(f.ctx()).thresholdRules.length, 1); assert.equal(find(f.root, '预览保存阈值'), undefined);
+        await click(f.root, '编辑关系：艾琳 → 守卫'); await input(f.root, '强度（可选）', '6'); await input(f.root, '本次调整依据（可选）', '已经完成约定的救援', 'textarea'); await click(f.root, '预览保存关系');
+        assert.match(f.root.textContent, /阈值提醒（不是剧情事件）/); assert.equal(readRelationships(f.ctx()).thresholdAlerts, undefined);
+        await click(f.root, '确认应用一次'); assert.equal(readRelationships(f.ctx()).thresholdAlerts.length, 1); assert.match(f.root.textContent, /关系阈值提醒 · 1 项/);
+        await click(f.root, '预览标记已读'); assert.equal(readRelationships(f.ctx()).thresholdAlerts[0].acknowledged, false);
+        await click(f.root, '确认应用一次'); assert.equal(readRelationships(f.ctx()).thresholdAlerts[0].acknowledged, true); assert.match(f.root.textContent, /已经完成约定的救援/);
+        assert.equal(readRelationships(f.ctx()).relationships.length, 1);
+    } finally { f.dispose(); }
+});
+
+test('relationship analysis shows exact source and reason only after an explicit batch confirmation', async () => {
+    const ai = { capture: () => ({}), generate: async () => JSON.stringify({ version: 1, changes: [{ module: 'relationships', action: 'save', target: 'new_relation', data: { fromId: 'a', toId: 'b', type: '认识', sources: [0] }, reason: '艾琳在城门与守卫相识。' }] }) };
+    const f = fixture({ ai });
+    try {
+        await click(f.root, '分析所选剧情'); assert.match(f.root.textContent, /待确认 · 剧情关系建议 · 1 项/); assert.match(f.root.textContent, /来源：第 1 楼/);
+        assert.equal(readRelationships(f.ctx()).relationships.length, 0); await click(f.root, '确认应用一次');
+        assert.equal(readRelationships(f.ctx()).relationships[0].id, 'new_relation'); assert.equal(f.saveCount(), 1);
+        assert.match(f.root.textContent, /AI 建议确认/); assert.match(f.root.textContent, /抵达城门/); assert.match(f.root.textContent, /艾琳在城门与守卫相识/);
+    } finally { f.dispose(); }
+});
+
+test('character entry focuses the stable ID and its document listener is removed on disposal', async () => {
+    const f = fixture();
+    try {
+        f.document.dispatchEvent({ type: 'amin:select-character', detail: { app: 'relationships', characterId: 'b' } });
+        assert.equal(find(f.root, '聚焦人物', 'select').value, 'b');
+        f.document.dispatchEvent({ type: 'amin:select-character', detail: { app: 'inventory', characterId: 'a' } });
+        assert.equal(find(f.root, '聚焦人物', 'select').value, 'b');
+        assert.equal(f.document.listeners.get('amin:select-character').size, 1);
+    } finally { f.dispose(); }
+    assert.equal(f.document.listeners.get('amin:select-character').size, 0);
 });

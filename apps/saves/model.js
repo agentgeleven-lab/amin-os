@@ -1,7 +1,8 @@
 import { validateModules } from './adapters.js';
 export const KEY='amin_os_saves_v1';
 export const FORMAT='amin-os-save';
-export const LIMITS=Object.freeze({saves:20,backups:5,snapshotBytes:8*1024*1024,storeBytes:24*1024*1024});
+export const LIMITS=Object.freeze({saves:20,backups:5,checkpoints:24,snapshotBytes:8*1024*1024,storeBytes:24*1024*1024});
+export const DEFAULT_CHECKPOINT_SETTINGS=Object.freeze({enabled:true,limit:12});
 const clone=value=>structuredClone(value);
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const forbidden=new Set(['__proto__','constructor','prototype']);
@@ -23,15 +24,33 @@ export function validateSnapshot(value){
     if(value.format!==FORMAT||value.version!==1)throw Error('存档版本或类型不兼容。');
     text(value.id,100,'存档编号',true);text(value.name,120,'存档名称',true);text(value.note,2000,'存档备注');text(value.createdAt,100,'创建时间',true);
     if(!Number.isFinite(Date.parse(value.createdAt)))throw Error('存档创建时间无效。');
-    shape(value.source,['identity','floor','candidate'],'来源');text(value.source.identity,2000,'来源聊天',true);
+    shape(value.source,['identity','floor','candidate','path'],'来源');text(value.source.identity,2000,'来源聊天',true);
     if(!Number.isInteger(value.source.floor)||value.source.floor<0||!Number.isInteger(value.source.candidate)||value.source.candidate<0)throw Error('存档来源楼层无效。');
+    if(value.source.path!==undefined){
+        if(!Array.isArray(value.source.path)||value.source.path.length!==value.source.floor||value.source.path.length>100000)throw Error('存档来源消息路径不完整。');
+        for(const revision of value.source.path){
+            text(revision,LIMITS.snapshotBytes,'消息修订',true);
+            let parts;try{parts=JSON.parse(revision);}catch{throw Error('存档消息修订无效。');}
+            if(!Array.isArray(parts)||parts.length!==4||typeof parts[0]!=='string'||typeof parts[1]!=='boolean'||typeof parts[2]!=='string'||!Number.isInteger(parts[3])||parts[3]<0)throw Error('存档消息修订无效。');
+        }
+        if(value.source.path.length&&JSON.parse(value.source.path.at(-1))[3]!==value.source.candidate)throw Error('存档候选与来源消息不一致。');
+    }
     validateModules(value.modules);return clone(value);
 }
-export const empty=()=>({version:1,saves:[],backups:[]});
+export function validateCheckpointSettings(value){
+    shape(value,['enabled','limit'],'检查点设置');
+    if(typeof value.enabled!=='boolean'||!Number.isInteger(value.limit)||value.limit<1||value.limit>LIMITS.checkpoints)throw Error(`检查点设置无效；保留数量应为 1 至 ${LIMITS.checkpoints}。`);
+    return clone(value);
+}
+export const empty=()=>({version:1,saves:[],backups:[],checkpoints:[],checkpointSettings:{...DEFAULT_CHECKPOINT_SETTINGS}});
 export function validateStore(value){
-    validateJSON(value,LIMITS.storeBytes);shape(value,['version','saves','backups'],'存档库');
+    validateJSON(value,LIMITS.storeBytes);shape(value,['version','saves','backups','checkpoints','checkpointSettings'],'存档库');
     if(value.version!==1||!Array.isArray(value.saves)||!Array.isArray(value.backups)||value.saves.length>LIMITS.saves||value.backups.length>LIMITS.backups)throw Error('存档库版本、格式或数量不兼容。');
-    const ids=new Set();for(const item of [...value.saves,...value.backups]){validateSnapshot(item);if(ids.has(item.id))throw Error('存档编号重复。');ids.add(item.id);}return clone(value);
+    if(value.checkpoints!==undefined&&(!Array.isArray(value.checkpoints)||value.checkpoints.length>LIMITS.checkpoints))throw Error('检查点数量或格式无效。');
+    const settings=validateCheckpointSettings(value.checkpointSettings??DEFAULT_CHECKPOINT_SETTINGS);
+    const ids=new Set();for(const item of [...value.saves,...value.backups,...(value.checkpoints??[])]){validateSnapshot(item);if(ids.has(item.id))throw Error('存档编号重复。');ids.add(item.id);}
+    for(const checkpoint of value.checkpoints??[])if(!checkpoint.source.path||!checkpoint.source.floor)throw Error('自动检查点缺少完整来源消息。');
+    return {...clone(value),checkpoints:clone(value.checkpoints??[]),checkpointSettings:settings};
 }
 export function readStore(ctx){return ctx?.chatMetadata?.[KEY]===undefined?empty():validateStore(ctx.chatMetadata[KEY]);}
 export function parseImport(raw){

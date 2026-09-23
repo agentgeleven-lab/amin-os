@@ -1,14 +1,15 @@
 import { uuid } from '../../uuid.js';
-import { KEY, readStore, path, compile, sourceFromRange } from './model.js';
+import { KEY, readStore, path, compile, sourceFromRange, autoSettings, dueRanges, currentDrafts, putAutoDraft } from './model.js';
 import { draftChronicle } from './draft.js';
 import { getAI } from '../../ai/service.js';
 import { acquireMetadataWrite, chatIdentity, subscribeStateChanges } from '../shared/operations.js';
+import { managesModule } from '../linkage/policy.js';
 
 export const PROMPT_KEY = 'amin-os-journal';
 
 export function createJournal(getContext, { ai = getAI } = {}) {
     const listeners = new Set(), pending = new Set(), saved = new WeakMap();
-    let busy = false, disposed = false, epoch = 0, message = '引用默认关闭；只有已保存且明确启用的条目会附加到后续生成。';
+    let busy = false, disposed = false, epoch = 0, autoRunning = false, normalGeneration = false, message = '引用默认关闭；只有已保存且明确启用的条目会附加到后续生成。';
     const identity = ctx => JSON.stringify([ctx?.groupId ?? null, ctx?.characterId ?? null, ctx?.getCurrentChatId?.() ?? null]);
     const stamp = ctx => JSON.stringify(readStore(ctx));
     const notify = event => { for (const callback of listeners) { try { callback(event); } catch { /* A view must not interrupt persistence. */ } } };
@@ -72,14 +73,44 @@ export function createJournal(getContext, { ai = getAI } = {}) {
         } finally { pending.delete(controller); signal?.removeEventListener('abort', onAbort); }
     }
 
+    async function generateAutoDraft({ draftId = null, signal } = {}) {
+        if (autoRunning) throw Error('正在整理自动编年史，请稍候');
+        const token = capture(), ctx = check(token), store = readStore(ctx), settings = autoSettings(store);
+        const previous = draftId ? currentDrafts(store, ctx.chat).find(draft => draft.id === draftId && draft.status === 'ready') : null;
+        if (draftId && !previous) throw Error('草稿已处理或不在当前分支，请刷新');
+        const range = previous ? { start: previous.sources.start, end: previous.sources.end } : dueRanges(store, ctx.chat)[0];
+        if (!range) return null;
+        autoRunning = true;
+        message = `正在整理第 ${range.start + 1}–${range.end + 1} 楼的待确认草稿…`; notify({ type: 'auto' });
+        try {
+            const title = previous?.title ?? `第 ${range.start + 1}–${range.end + 1} 楼纪要`;
+            const body = await generateDraft(token, { ...range, title, current: previous?.body ?? '', instruction: settings.instruction }, { signal });
+            const sources = sourceFromRange(check(token).chat, range.start, range.end), id = previous?.id ?? uuid();
+            await save(token, (latest, current) => putAutoDraft(latest, current.chat, { id, title, body, sources }, token.operationId));
+            message = '自动编年史草稿已就绪；请到“自动整理”核对后确认保存。'; notify({ type: 'auto' });
+            return id;
+        } finally { autoRunning = false; notify({ type: 'auto' }); }
+    }
+
+    function ended() {
+        clear(); const shouldRun = normalGeneration; normalGeneration = false;
+        if (!shouldRun || disposed || autoRunning || busy) return;
+        // Quiet generations and failed/stopped generations never start another AI task.
+        return Promise.resolve().then(() => generateAutoDraft()).catch(error => {
+            if (disposed) return;
+            message = '自动整理未保存：' + error.message; notify({ type: 'auto', error: true });
+        });
+    }
+
     function start(type = 'normal', options = {}, dryRun = false) {
         clear();
+        normalGeneration = !disposed && !dryRun && ['normal', 'regenerate', 'swipe', 'continue'].includes(type) && !options?.signal?.aborted;
         if (disposed || dryRun || !['normal', 'regenerate', 'swipe', 'continue'].includes(type) || options?.signal?.aborted) return;
         try {
             if (busy) throw Error('剧情档案正在保存，本轮未附加引用');
             const ctx = getContext(); let chat = ctx.chat ?? [];
             if (['regenerate', 'swipe'].includes(type) && chat.length && !chat.at(-1).is_user) chat = chat.slice(0, -1);
-            const prompt = compile(readStore(ctx), chat);
+            const prompt = managesModule(ctx, 'journal') ? '' : compile(readStore(ctx), chat);
             ctx.setExtensionPrompt(PROMPT_KEY, prompt, 1, 0, false);
             message = prompt ? `已附加 ${prompt.length} 字符剧情档案引用` : '当前分支没有启用引用的有效条目';
         } catch (error) { message = error.message; }
@@ -87,7 +118,7 @@ export function createJournal(getContext, { ai = getAI } = {}) {
     }
 
     function invalidate(type) {
-        epoch++;
+        epoch++; normalGeneration = false;
         for (const controller of pending) controller.abort(new Error('聊天或来源已变化'));
         clear(); message = type === 'chat' ? '已切换聊天，未保存的档案编辑已关闭。' : '楼层或来源已变化，请重新核对档案来源。';
         notify({ type });
@@ -95,7 +126,7 @@ export function createJournal(getContext, { ai = getAI } = {}) {
 
     const initial = getContext(), events = initial?.eventTypes ?? initial?.event_types ?? {}, source = initial?.eventSource;
     const supported = !!(initial?.setExtensionPrompt && source?.on && events.GENERATION_AFTER_COMMANDS && events.CHAT_CHANGED);
-    const handlers = { GENERATION_AFTER_COMMANDS: start, CHAT_CHANGED: () => invalidate('chat'), GENERATION_ENDED: clear, GENERATION_STOPPED: clear,
+    const handlers = { GENERATION_AFTER_COMMANDS: start, CHAT_CHANGED: () => invalidate('chat'), GENERATION_ENDED: ended, GENERATION_STOPPED: () => { normalGeneration = false; clear(); },
         MESSAGE_DELETED: () => invalidate('source'), MESSAGE_SWIPED: () => invalidate('source'), MESSAGE_UPDATED: () => invalidate('source') };
     if (source?.on) for (const [event, callback] of Object.entries(handlers)) if (events[event] && (event !== 'GENERATION_AFTER_COMMANDS' || supported)) source.on(events[event], callback);
     const unsubscribeState = subscribeStateChanges((detail, metadata) => {
@@ -105,7 +136,7 @@ export function createJournal(getContext, { ai = getAI } = {}) {
         invalidate('source');
     });
 
-    return { capture, check, save, generateDraft, supported, context: getContext, read: () => readStore(getContext()), status: () => message, busy: () => busy,
+    return { capture, check, save, generateDraft, generateAutoDraft, autoBusy: () => autoRunning, supported, context: getContext, read: () => readStore(getContext()), status: () => message, busy: () => busy,
         subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },
         dispose() { if (disposed) return; disposed = true; epoch++; for (const controller of pending) controller.abort(); pending.clear(); clear();
             unsubscribeState();

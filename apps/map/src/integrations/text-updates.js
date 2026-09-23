@@ -1,4 +1,5 @@
 import { chatIdentity } from '../adapters/chat.js';
+import { managesModule } from '../../../linkage/policy.js';
 
 export const TEXT_PROMPT = `当前使用动态地图正文更新模式，不调用 dynamic_map_query 或 dynamic_map_update，也不写地图移动请求变量。
 只有本轮收到“本轮地图数据”并且剧情明确发生地图变化时，在回复最末尾追加且只追加一个 <map_update>严格 JSON 对象</map_update>，不要使用 Markdown 代码围栏。没有变化则不输出此块。
@@ -32,6 +33,7 @@ export function createTextUpdates({ tools, getContext, report = () => {} }) {
     function start(type = 'normal', params = {}, dryRun = false) {
         if (dryRun) return;
         cancel();
+        if (managesModule(getContext(), 'map')) return;
         if (disposed || !tools.status().enabled || !tools.status().textMode) return;
         if (!supported) { say('当前酒馆缺少正文模式所需的生成事件或提示词接口'); return; }
         // Continuations may already contain an old block; don't reinterpret it.

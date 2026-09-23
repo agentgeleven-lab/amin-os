@@ -1,0 +1,32 @@
+# Internal linkage adapter contract
+
+This work integrates existing apps; it does not create new desktop apps. All adapters live in `apps/linkage/adapters/<id>.js` and export `adapter`.
+
+```js
+export const adapter = {
+  id: 'inventory', label: '背包与账本',
+  // Exact metadata read dependencies, including other modules read by apply.
+  paths: [['amin_os_inventory_v1'], ['amin_os_characters_v1']],
+  // Human-readable, complete supported operation schema for the unified prompt.
+  contract: 'consume: target=item ID, data={quantity: positive integer}',
+  // Current branch JSON-safe data. Missing modules return a valid empty state.
+  read(ctx) {},
+  // Optional model-facing projection: omit unconfirmed/raw evidence and data
+  // owned by other modules. The coordinator applies each module's read policy.
+  readForPrompt(ctx) {},
+  // Pure: must not mutate ctx, save metadata, emit events, call AI or roll dice.
+  // One change: {module, action, target?, data: object, reason: nonempty string}.
+  // Validate references, use module's validated model operations, preserve history.
+  // Return {patches:[{path: [...], value}|{path:[...],remove:true}], summary: string}.
+  // operationId is supplied by the coordinator, stable within the transaction.
+  apply(ctx, change, {operationId, now}) {},
+};
+```
+
+The coordinator applies adapters sequentially to a cloned metadata snapshot, validates the entire batch, then commits all resulting patches under the existing operation lock. No adapter may commit/save separately. Settings, credentials, global libraries, chat messages, and generated dice results are not writable through model updates. IDs refer to existing module-owned IDs; new object IDs must be safe and explicit. Reason is required. Unknown operations and invalid references are errors.
+
+Cross-module links use stable IDs: character IDs, map/node IDs, item IDs, relationship IDs, effect IDs, journal IDs. World Status uses its existing project/field paths as the canonical numeric source. Renaming must not rebind references by display name. Missing or removed references must remain visible and must not be silently retargeted.
+
+Module settings are managed by the coordinator at `amin_os_linkage_v1`: master enabled, review/auto mode, per-module enabled/read/write, editable extra rules. Hiding a tile is unrelated. `apps/linkage/policy.js` exports `managesModule(ctx,id)` and `readLinkageSettings(ctx)` for legacy prompt/writer suppression only when the unified master and that module are enabled.
+
+New optional fields must remain backward-compatible with 0.13 snapshots and existing histories. Update the save adapters alongside changes to snapshot validation and restoration. Tests must cover real invariants, branch ownership and persistence/retry behavior.

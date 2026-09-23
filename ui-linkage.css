@@ -1,0 +1,20 @@
+/* Linkage shares the OS/floor theme tokens and remains usable in a 320px host. */
+.amin-ui .amin-linkage {min-width:0;max-width:100%;padding:var(--amin-space,12px);overflow-wrap:anywhere}
+.amin-ui .amin-linkage :is(h3,h4,p) {margin:0}
+.amin-ui .amin-linkage details>summary {cursor:pointer;min-height:44px;align-content:center}
+.amin-ui .amin-linkage details[open]>summary {margin-bottom:var(--amin-space,12px)}
+.amin-ui .amin-linkage-modules {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:var(--amin-space,12px);min-width:0}
+.amin-ui :is(.amin-linkage-module,.amin-linkage-change,.amin-linkage-suggestion) {padding:var(--amin-space,12px);border:1px solid var(--amin-line);border-radius:var(--amin-radius,4px);min-width:0;background:var(--amin-control)}
+.amin-ui .amin-linkage-permissions {display:grid;gap:4px;min-width:0}
+.amin-ui .amin-linkage .amin-check {min-height:44px;white-space:normal}
+.amin-ui .amin-linkage .amin-check span {min-width:0;overflow-wrap:anywhere}
+.amin-ui .amin-linkage :is(textarea,select) {width:100%;max-width:100%;min-width:0}
+.amin-ui .amin-linkage textarea {resize:vertical}
+.amin-ui :is(.amin-linkage-text,.amin-linkage-value) {white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+.amin-ui .amin-linkage-value {max-width:100%;min-width:0;margin:0;padding:8px;border:1px solid var(--amin-line);background:var(--amin-card);font:inherit}
+.amin-ui .amin-linkage-code {font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.5}
+.amin-ui .amin-linkage-comparison {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--amin-space,12px);min-width:0}
+.amin-ui .amin-linkage-reference-list {margin:0;padding-inline-start:20px;min-width:0}
+.amin-ui .amin-linkage-reference-list>li {padding-block:4px}
+@container amin-app (max-width:540px) {.amin-ui :is(.amin-linkage-modules,.amin-linkage-comparison) {grid-template-columns:minmax(0,1fr)}}
+@media(max-width:640px) {.amin-ui :is(.amin-linkage-modules,.amin-linkage-comparison) {grid-template-columns:minmax(0,1fr)}.amin-ui .amin-linkage {padding:8px}}

@@ -2,7 +2,9 @@ import { uuid } from '../../uuid.js';
 
 export const KEY = 'amin_os_inventory_v1';
 export const LIMITS = Object.freeze({ items: 1000, balances: 300, ledger: 2000, events: 2000, amount: 1000000000 });
-const OPS = new Set(['save-item', 'delete-item', 'consume-item', 'transfer-item', 'equip-item', 'save-balance', 'delete-balance', 'adjust-balance', 'transfer-balance', 'restore']);
+const OPS = new Set(['save-item', 'delete-item', 'consume-item', 'transfer-item', 'equip-item', 'set-condition', 'save-balance', 'delete-balance', 'adjust-balance', 'transfer-balance', 'restore']);
+export const WEAR_SLOTS = Object.freeze({ head: '头部', face: '面部', neck: '颈部', torso: '上身', hands: '双手', waist: '腰部', legs: '腿部', feet: '足部', back: '背部', accessory: '饰品' });
+export const WEAR_LAYERS = Object.freeze({ base: '贴身层', middle: '中间层', outer: '外层' });
 const clone = value => structuredClone(value);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, label, max, required = false) => {
@@ -32,11 +34,27 @@ export const emptyStore = () => ({ version: 1, events: [] });
 export const chatPath = chat => (chat ?? []).map(message => JSON.stringify([message?.name ?? '', !!message?.is_user, message?.mes ?? '', message?.swipe_id ?? 0]));
 const belongs = (event, path) => event.path.length <= path.length && event.path.every((part, index) => part === path[index]);
 
-function validateItem(value) {
+export function validateWear(value) {
+    if (!object(value) || Object.keys(value).some(key => !['slot', 'layer', 'description'].includes(key))) throw Error('穿戴资料格式无效。');
+    if (value.slot !== '' && !Object.hasOwn(WEAR_SLOTS, value.slot)) throw Error('穿戴部位无效。');
+    if (!Object.hasOwn(WEAR_LAYERS, value.layer)) throw Error('穿戴层次无效。');
+    return { slot: value.slot, layer: value.layer, description: text(value.description ?? '', '衣物外观', 2000) };
+}
+export function validateCondition(value) {
+    if (!object(value) || Object.keys(value).some(key => !['wetness', 'dirt', 'damage', 'notes'].includes(key))) throw Error('物品状态格式无效。');
+    for (const key of ['wetness', 'dirt', 'damage']) if (!Number.isInteger(value[key]) || value[key] < 0 || value[key] > 100) throw Error('湿润、污渍和破损程度必须是 0–100 的整数。');
+    return { wetness: value.wetness, dirt: value.dirt, damage: value.damage, notes: text(value.notes ?? '', '状态说明', 1000) };
+}
+export function validateItem(value) {
     if (!object(value)) throw Error('物品记录损坏。');
     id(value.id); id(value.ownerId, '持有人编号'); text(value.name, '物品名称', 120, true); text(value.notes, '物品备注', 4000);
     quantity(value.quantity);
     if (typeof value.equipped !== 'boolean' || (value.equipped && !value.quantity)) throw Error('装备状态无效：零数量物品不能装备。');
+    if (value.wear !== undefined) {
+        const wear = validateWear(value.wear);
+        if (wear.slot && value.quantity > 1) throw Error('指定穿戴部位的衣物需逐件登记，数量只能为 0 或 1。');
+    }
+    if (value.condition !== undefined) validateCondition(value.condition);
 }
 function validateBalance(value) {
     if (!object(value)) throw Error('资源记录损坏。');
@@ -63,6 +81,12 @@ export function validateState(state) {
     for (const key of ['items', 'balances', 'ledger']) if (state[key].length > LIMITS[key]) throw Error(`背包与账本的 ${key} 已超过容量上限。`);
     state.items.forEach(validateItem); state.balances.forEach(validateBalance); state.ledger.forEach(validateLedger);
     unique(state.items, '物品'); unique(state.balances, '资源'); unique(state.ledger, '账本');
+    const occupied = new Set();
+    for (const item of state.items) if (item.equipped && item.wear?.slot) {
+        const key = JSON.stringify([item.ownerId, item.wear.slot, item.wear.layer]);
+        if (occupied.has(key)) throw Error('同一人物的同一部位和层次已有穿戴物品，请先卸下再更换。');
+        occupied.add(key);
+    }
     const accounts = new Set();
     for (const balance of state.balances) {
         const key = JSON.stringify([balance.ownerId, balance.name, balance.unit]);
@@ -107,17 +131,23 @@ export function transition(source, op, data, context = {}) {
         const existing = data.id ? find(state.items, data.id, '物品') : null;
         if (!existing || existing.ownerId !== data.ownerId) requireOwner(data.ownerId, context);
         if (existing && existing.ownerId !== data.ownerId) throw Error('请通过转移物品改变持有人，以便保留双方账目。');
-        const item = { ...(existing ?? {}), id: existing?.id ?? makeId(), name: text(data.name, '物品名称', 120, true), ownerId: data.ownerId,
+        const item = { ...(existing ?? {}), id: existing?.id ?? (data.newId ? id(data.newId) : makeId()), name: text(data.name, '物品名称', 120, true), ownerId: data.ownerId,
             quantity: quantity(data.quantity), equipped: data.equipped ?? false, notes: text(data.notes ?? '', '物品备注', 4000) };
+        if (data.wear !== undefined) item.wear = validateWear(data.wear);
+        if (data.condition !== undefined) item.condition = validateCondition(data.condition);
         validateItem(item); entries.push(entry('item', item, existing?.quantity ?? 0, item.quantity));
         if (existing) state.items[state.items.indexOf(existing)] = item; else state.items.push(item);
         summary = `${existing ? '更新' : '登记'}物品「${item.name}」：${existing?.quantity ?? 0} → ${item.quantity}`;
-    } else if (['consume-item', 'transfer-item', 'equip-item', 'delete-item'].includes(op)) {
+    } else if (['consume-item', 'transfer-item', 'equip-item', 'delete-item', 'set-condition'].includes(op)) {
         const item = find(state.items, data.id, '物品'), before = item.quantity;
         if (op === 'equip-item') {
             if (typeof data.equipped !== 'boolean') throw Error('请选择装备或卸下。');
             if (data.equipped && !item.quantity) throw Error('零数量物品不能装备。');
             item.equipped = data.equipped; summary = `${item.equipped ? '装备' : '卸下'}「${item.name}」`;
+        } else if (op === 'set-condition') {
+            if (!object(data.condition)) throw Error('物品状态参数无效。');
+            item.condition = validateCondition({ wetness: 0, dirt: 0, damage: 0, notes: '', ...item.condition, ...data.condition });
+            summary = `更新「${item.name}」状态：湿润 ${item.condition.wetness} / 污渍 ${item.condition.dirt} / 破损 ${item.condition.damage}`;
         } else if (op === 'delete-item') {
             if (item.quantity) throw Error('请先消耗或转移剩余物品，再删除零数量条目。');
             state.items.splice(state.items.indexOf(item), 1); summary = `删除零数量物品「${item.name}」`;
@@ -127,18 +157,26 @@ export function transition(source, op, data, context = {}) {
             if (op === 'transfer-item') {
                 requireOwner(data.toOwnerId, context);
                 if (data.toOwnerId === item.ownerId) throw Error('转移目标必须是其他人物。');
-                const target = { ...clone(item), id: makeId(), ownerId: data.toOwnerId, quantity: count, equipped: false };
-                state.items.push(target); entries.push(entry('item', target, 0, count));
                 summary = `转移「${item.name}」× ${count}：${item.ownerId} → ${data.toOwnerId}`;
+                if (item.wear?.slot) {
+                    // An individually registered garment keeps its identity when handed over.
+                    entries.push(entry('item', item, before, 0));
+                    item.ownerId = data.toOwnerId; item.equipped = false;
+                    entries.push(entry('item', item, 0, count));
+                } else {
+                    const target = { ...clone(item), id: data.newId ? id(data.newId) : makeId(), ownerId: data.toOwnerId, quantity: count, equipped: false };
+                    state.items.push(target); entries.push(entry('item', target, 0, count));
+                }
             } else summary = `消耗「${item.name}」× ${count}`;
-            item.quantity -= count; if (!item.quantity) item.equipped = false;
+            if (!(op === 'transfer-item' && item.wear?.slot)) item.quantity -= count;
+            if (!item.quantity) item.equipped = false;
         }
-        entries.unshift(entry('item', item, before, item.quantity));
+        if (!(op === 'transfer-item' && item.wear?.slot)) entries.unshift(entry('item', item, before, item.quantity));
     } else if (op === 'save-balance') {
         const existing = data.id ? find(state.balances, data.id, '资源账户') : null;
         if (!existing || existing.ownerId !== data.ownerId) requireOwner(data.ownerId, context);
         if (existing && existing.ownerId !== data.ownerId) throw Error('请通过转账改变资源归属，以便保留双方账目。');
-        const balance = { ...(existing ?? {}), id: existing?.id ?? makeId(), name: text(data.name, '资源名称', 120, true), ownerId: data.ownerId,
+        const balance = { ...(existing ?? {}), id: existing?.id ?? (data.newId ? id(data.newId) : makeId()), name: text(data.name, '资源名称', 120, true), ownerId: data.ownerId,
             amount: amount(data.amount), unit: text(data.unit ?? '', '资源单位', 40), notes: text(data.notes ?? '', '资源备注', 4000) };
         validateBalance(balance); entries.push(entry('balance', balance, existing?.amount ?? 0, balance.amount));
         if (existing) state.balances[state.balances.indexOf(existing)] = balance; else state.balances.push(balance);
@@ -158,7 +196,7 @@ export function transition(source, op, data, context = {}) {
             if (data.toOwnerId === balance.ownerId) throw Error('转账目标必须是其他人物。');
             if (count > balance.amount) throw Error('资源余额不足，无法完成转账。');
             let target = state.balances.find(value => value.ownerId === data.toOwnerId && value.name === balance.name && value.unit === balance.unit);
-            if (!target) { target = { ...clone(balance), id: makeId(), ownerId: data.toOwnerId, amount: 0 }; state.balances.push(target); }
+            if (!target) { target = { ...clone(balance), id: data.newId ? id(data.newId) : makeId(), ownerId: data.toOwnerId, amount: 0 }; state.balances.push(target); }
             const targetBefore = target.amount; target.amount = addAmount(target.amount, count);
             balance.amount = addAmount(balance.amount, -count); entries.push(entry('balance', target, targetBefore, target.amount));
             summary = `转账「${balance.name}」${count}${balance.unit}：${balance.ownerId} → ${data.toOwnerId}`;

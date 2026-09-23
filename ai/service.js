@@ -9,6 +9,8 @@ import { createPresetLibrary, compilePreset } from '../apps/map/src/core/generat
 import { parseRequestBody } from '../apps/map/src/adapters/request-body.js';
 import {createHostRoutes} from './host-settings.js';
 import {getHostRouteOptions, captureHostRoute, observeHostGeneration, runHostGeneration} from './host-generation.js';
+import { managesModule } from '../apps/linkage/policy.js';
+import { buildUnifiedPrompt } from '../apps/linkage/prompt.js';
 
 export const AI_APPS = [
     {id:'map',name:'地图',tasks:['地图']},
@@ -19,6 +21,7 @@ export const AI_APPS = [
     {id:'information',name:'信息面板',tasks:['信息面板','信息面板 · 模拟推演']},
     {id:'organizations',name:'势力概览',tasks:['势力概览']},
     {id:'journal',name:'剧情档案',tasks:['剧情档案 · 编年史']},
+    {id:'relationships',name:'人物关系',tasks:['人物关系 · 剧情更新']},
 ];
 const appId = app => AI_APPS.find(a=>a.id===app||a.tasks.includes(app))?.id;
 const renderMessages = messages => messages.map(m => `[${m?.role ?? '未知'}]\n${typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? m) ?? ''}`).join('\n\n');
@@ -103,11 +106,12 @@ export function createAI(storage, namespace, {resolveConnection=resolveHostConne
         tasks: () => tasks.map(({controller, ...rest}) => ({...rest})),
         previews: () => [...previews].map(([app, text]) => ({app, text})),
         cancel(id) { tasks.find(t => t.id === id)?.controller.abort(new Error('已从 AI 设置取消任务')); },
-        async generate(app, ctx, request, { signal, snapshot, data, includeEffects = true, includeJournal = includeEffects, includeScene = includeEffects } = {}) {
+        async generate(app, ctx, request, { signal, snapshot, data, includeEffects = true, includeJournal = includeEffects, includeScene = includeEffects, includeLinkage = includeEffects } = {}) {
             const sharedPrompt=[
-                includeEffects?currentPrompt(ctx):'',
-                includeJournal?currentJournalPrompt(ctx):'',
-                includeScene?currentScenePrompt(ctx):'',
+                includeEffects&&!managesModule(ctx,'effects')?currentPrompt(ctx):'',
+                includeJournal&&!managesModule(ctx,'journal')?currentJournalPrompt(ctx):'',
+                includeScene&&!managesModule(ctx,'scene')?currentScenePrompt(ctx):'',
+                includeLinkage?buildUnifiedPrompt(ctx,{purpose:'tool',write:false}):'',
             ].filter(Boolean).join('\n\n');
             const captured = snapshot ?? this.capture(app);
             if(!captured.preset.blocks.some(b=>b.type==='request'&&b.enabled))throw Error('共享预设必须启用“本次要求”块，请在 AI 设置中恢复。');

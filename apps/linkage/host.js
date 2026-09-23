@@ -1,0 +1,193 @@
+import { chatIdentity } from '../shared/operations.js';
+import { managesModule, readLinkageSettings } from './policy.js';
+import { isUnifiedEntry, hasUnifiedPlaceholder, LINKAGE_PLACEHOLDER } from './lorebook.js';
+
+const storyTypes = new Set(['normal', 'regenerate', 'swipe']);
+const buckets = ['chatLore', 'characterLore', 'globalLore', 'personaLore'];
+const requiredEvents = ['GENERATION_AFTER_COMMANDS', 'WORLDINFO_ENTRIES_LOADED', 'WORLD_INFO_ACTIVATED', 'MESSAGE_RECEIVED', 'GENERATION_ENDED', 'GENERATION_STOPPED', 'CHAT_CHANGED'];
+const toolScopes = new WeakMap();
+let sequence = 0;
+
+const contextKey = ctx => ctx?.eventSource && typeof ctx.eventSource === 'object' ? ctx.eventSource : ctx?.chatMetadata;
+function inToolScope(ctx) {
+    const stack = toolScopes.get(contextKey(ctx));
+    return !!stack?.some(scope => scope.metadata === ctx?.chatMetadata && scope.identity === chatIdentity(ctx));
+}
+
+/** Use only around the actual quiet call, after the host generation queue waits. */
+export async function withLinkageToolScope(getContext, task) {
+    const ctx = typeof getContext === 'function' ? getContext() : getContext;
+    const key = contextKey(ctx);
+    if (!key || typeof key !== 'object') return task();
+    const stack = toolScopes.get(key) ?? [];
+    const scope = { metadata: ctx.chatMetadata, identity: chatIdentity(ctx) };
+    stack.push(scope); toolScopes.set(key, stack);
+    try { return await task(); }
+    finally { const index = stack.indexOf(scope); if (index >= 0) stack.splice(index, 1); if (!stack.length) toolScopes.delete(key); }
+}
+
+function legacyModule(entry) {
+    if (entry?.world_status_hud_owner === 'world-status-hud/variable-update-v1') return 'status';
+    if (entry?.amin_organizations_owner === 'amin-os/organizations-v1') return 'organizations';
+    if (entry?.dynamic_map_owner === 'dynamic-map/tool-calling-v1') return 'map';
+    return null;
+}
+const disabledCopy = entry => ({ ...entry, content: '', disable: true });
+const entryKey = entry => JSON.stringify([entry.world ?? '', entry.uid]);
+const messageSnapshot = ctx => (ctx.chat ?? []).map(message => ({ ref: message, text: message.mes, swipe: message.swipe_id ?? 0 }));
+function promptContext(ctx, type) {
+    const tail = ctx.chat?.at(-1);
+    return ['regenerate', 'swipe'].includes(type) && tail && !tail.is_user && !tail.is_system
+        ? { ...ctx, chat: ctx.chat.slice(0, -1) } : ctx;
+}
+
+/**
+ * Mutates only the event's arrays of scan-local entries. Both supported host
+ * implementations copy cached book entries before WORLDINFO_ENTRIES_LOADED and
+ * clone the scan afterward. No current-chat data is written to worldInfoCache.
+ */
+export function createLinkageHost(getContext, {
+    captureGeneration, collectReply, buildPrompt, cancelGeneration = () => {}, report = () => {},
+    readSettings = readLinkageSettings, manages = managesModule,
+} = {}) {
+    const initial = getContext(), events = initial?.eventTypes ?? initial?.event_types ?? {}, source = initial?.eventSource;
+    const supported = !!source?.on && requiredEvents.every(key => events[key]) && typeof buildPrompt === 'function'
+        && typeof captureGeneration === 'function' && typeof collectReply === 'function';
+    const subscriptions = [];
+    let run = null, timer = null, disposed = false, message = supported ? '等待酒馆生成和统一世界书条目' : '当前酒馆缺少统一联动所需的生成或世界书事件；不会自动接收更新';
+    const say = value => { message = value; try { report(value); } catch { /* Status UI cannot interrupt host generation. */ } };
+    const current = active => {
+        const ctx = getContext();
+        return !!active && !disposed && !active.signal?.aborted && ctx?.chatMetadata === active.metadata && chatIdentity(ctx) === active.identity;
+    };
+    function cancel(reason = '') {
+        clearTimeout(timer); timer = null; run = null;
+        try { cancelGeneration(reason); } catch { /* The next generation will capture a new baseline. */ }
+        if (reason) say(reason);
+    }
+    function start(type = 'normal', options = {}, dryRun = false) {
+        // A dry-run prompt inspection must not invalidate a live generation.
+        if (dryRun) return;
+        cancel();
+        if (!supported || disposed) return;
+        const ctx = getContext();
+        if (!readSettings(ctx).enabled || options?.signal?.aborted || !ctx?.chatMetadata) return;
+        const id = ctx.getCurrentChatId?.() ?? ctx.chatId;
+        if (id == null || id === '') return;
+        type ||= 'normal';
+        run = {
+            id: ++sequence, type, metadata: ctx.chatMetadata, identity: chatIdentity(ctx), signal: options?.signal,
+            purpose: type === 'quiet' ? 'tool' : 'story', write: storyTypes.has(type),
+            before: messageSnapshot(ctx), selected: null, prompt: '', captured: false,
+            candidate: null, ended: false, failed: false,
+        };
+    }
+    function loaded(payload) {
+        const ctx = getContext(), entries = [];
+        if (!payload || typeof payload !== 'object') return;
+        for (const bucket of buckets) if (Array.isArray(payload[bucket])) {
+            payload[bucket].forEach((entry, index) => entries.push({ list: payload[bucket], index, entry }));
+        }
+        // Suppress only Amin-owned old update rules for modules actually managed
+        // by this chat. Hand-written worldbook entries are never changed.
+        for (const row of entries) {
+            const module = legacyModule(row.entry);
+            if (module && manages(ctx, module)) row.list[row.index] = disabledCopy(row.entry);
+        }
+        const owned = entries.filter(row => isUnifiedEntry(row.entry));
+        for (const row of owned) row.list[row.index] = disabledCopy(row.entry);
+        const active = run;
+        if (!supported || !current(active) || !readSettings(ctx).enabled || active.type === 'quiet' && inToolScope(ctx)) return;
+        // Keep exactly one applicable owned entry across overlapping book bindings.
+        const selected = owned.find(({ entry }) => !entry.disable && hasUnifiedPlaceholder(entry.content)
+            && (!Array.isArray(entry.triggers) || !entry.triggers.length || entry.triggers.includes(active.type)));
+        if (!selected) { say(owned.length ? '统一条目未启用、触发器不匹配或占位无效；本轮不会接收自动更新' : '本轮未加载统一条目；请检查世界书绑定和预设'); return; }
+        try {
+            const prompt = buildPrompt(promptContext(ctx, active.type), { purpose: active.purpose, write: active.write });
+            if (typeof prompt !== 'string' || !prompt.trim()) return;
+            // Replace by callback so dollar sequences in state stay literal.
+            const expanded = {
+                ...selected.entry,
+                content: selected.entry.content.replace(LINKAGE_PLACEHOLDER, () => prompt),
+                amin_os_linkage_run: active.id,
+            };
+            selected.list[selected.index] = expanded;
+            active.selected = entryKey(expanded); active.prompt = prompt;
+            say(active.write ? '已展开当前聊天资料，等待酒馆确认条目实际激活' : '本次工具或续写仅提供只读资料');
+        } catch (error) { active.failed = true; say('统一条目未展开：' + error.message); }
+    }
+    async function activated(entries) {
+        const active = run;
+        if (!current(active) || active.failed || !active.write || active.captured || !Array.isArray(entries)) return;
+        if (!entries.some(entry => isUnifiedEntry(entry) && entry.amin_os_linkage_run === active.id && entryKey(entry) === active.selected)) return;
+        try {
+            const ctx = getContext();
+            if (!readSettings(ctx).enabled || buildPrompt(promptContext(ctx, active.type), { purpose: active.purpose, write: active.write }) !== active.prompt) {
+                throw Error('提示词组装期间联动资料或设置已变化');
+            }
+            // AFTER_COMMANDS is too early: the host may still append the user
+            // message or remove the previous reply for a regeneration afterward.
+            active.before = messageSnapshot(ctx);
+            const accepted = await captureGeneration(active.type);
+            if (accepted === false) throw Error('联动服务当前不能建立生成基线，请完成待保存操作后重试');
+            if (!current(active) || run !== active) return;
+            active.captured = true;
+            say('统一条目已激活，等待新的完整角色回复');
+        } catch (error) { active.failed = true; say('本轮更新基线未建立：' + error.message); }
+    }
+    function schedule() {
+        if (!run?.ended || run.candidate === null) return;
+        clearTimeout(timer);
+        // Some hosts emit ENDED before RECEIVED/STOPPED in the same event turn.
+        timer = setTimeout(() => { void finish(); }, 0);
+    }
+    function received(index, type) {
+        if (!run?.captured || !Number.isInteger(index) || type && !storyTypes.has(type)) return;
+        const stream = getContext()?.streamingProcessor;
+        run.candidate = index;
+        run.failed ||= !!(stream?.isStopped || stream?.abortController?.signal?.aborted);
+        schedule();
+    }
+    function ended() {
+        if (!run) return;
+        if (!run.write || !run.captured) { cancel(); return; }
+        run.ended = true; schedule();
+    }
+    async function finish() {
+        const active = run; run = null; timer = null;
+        if (!active?.captured) return;
+        try {
+            if (!current(active) || active.failed) throw Error('生成已停止或聊天已切换');
+            const ctx = getContext(), reply = ctx.chat?.[active.candidate], before = active.before[active.candidate];
+            if (!readSettings(ctx).enabled || active.candidate !== ctx.chat.length - 1 || !reply || reply.is_user || reply.is_system || !reply.gen_finished
+                || before?.ref === reply && before.text === reply.mes && before.swipe === (reply.swipe_id ?? 0)) {
+                throw Error('没有与本次生成对应的完整新回复');
+            }
+            await collectReply(active.candidate);
+            say('已检查本轮统一更新块；具体变更请查看联动更新页面');
+        } catch (error) { say('本轮统一更新未接收：' + error.message); }
+    }
+    const handlers = {
+        GENERATION_AFTER_COMMANDS: start, WORLDINFO_ENTRIES_LOADED: loaded, WORLD_INFO_ACTIVATED: activated,
+        MESSAGE_RECEIVED: received, GENERATION_ENDED: ended,
+        GENERATION_STOPPED: () => cancel('生成已停止，未接收本轮统一更新'),
+        CHAT_CHANGED: () => cancel('聊天已切换，等待当前聊天的统一条目'),
+    };
+    if (source?.on) for (const [key, handler] of Object.entries(handlers)) if (events[key]) {
+        const guarded = (...args) => {
+            try { return Promise.resolve(handler(...args)).catch(error => cancel('联动宿主适配已停止：' + error.message)); }
+            catch (error) { cancel('联动宿主适配已停止：' + error.message); }
+        };
+        source.on(events[key], guarded); subscriptions.push([events[key], guarded]);
+    }
+    return {
+        status: () => ({ supported, message, active: !!run, captured: !!run?.captured }),
+        reset: () => cancel(),
+        destroy() {
+            disposed = true; cancel();
+            for (const [event, handler] of subscriptions) {
+                if (source.removeListener) source.removeListener(event, handler); else source.off?.(event, handler);
+            }
+        },
+    };
+}

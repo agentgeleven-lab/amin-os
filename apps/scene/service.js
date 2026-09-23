@@ -1,9 +1,11 @@
-import { KEY, readStore, readCurrentScene, visibleEvents, chatPath, transition, appendEvent, mapReferences, currentPrompt, createSceneId } from './model.js';
+import { KEY, readStore, readCurrentScene, visibleEvents, chatPath, transition, appendEvent, mapReferences, characterReferences, assertReferences, scheduleForecast, absencePreview, floorGameTime, currentPrompt, createSceneId } from './model.js';
 import { acquireMetadataWrite, publishExternalMetadataChange, subscribeStateChanges } from '../shared/operations.js';
 export const PROMPT_KEY = 'amin-os-scene-time';
 const clone = value => structuredClone(value);
 const identity = ctx => JSON.stringify([ctx?.groupId != null ? ['group', ctx.groupId] : ['character', ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.characterId ?? null], ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null]);
 const loaded = ctx => ctx?.chatMetadata && typeof ctx.chatMetadata === 'object' && (ctx.getCurrentChatId?.() ?? ctx.chatId) != null && (ctx.getCurrentChatId?.() ?? ctx.chatId) !== '';
+const references = ctx => JSON.stringify([ctx?.chatMetadata?.amin_os_characters_v1 ?? null, ctx?.chatMetadata?.dynamicMapV1 ?? null]);
+const needsReferences = op => ['save-scene', 'save-schedule', 'confirm-presence'].includes(op);
 export function createSceneService(getContext = () => globalThis.SillyTavern?.getContext?.(), { createId = createSceneId, now = () => new Date().toISOString(), poll = false } = {}) {
     const listeners = new Set(), dirty = new WeakSet(), removers = [];
     let pending = null, busy = false, disposed = false, lastScope = null, lastMessage = '', epoch = 0, publishing = false;
@@ -13,23 +15,25 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         const ctx = getContext();
         if (disposed) throw Error('场景服务已关闭。');
         if (!loaded(ctx)) throw Error('请先打开一个聊天。');
-        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), epoch };
+        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx), epoch };
     }
-    function check(token, { checkBasis = true } = {}) {
+    function check(token, { checkBasis = true, checkReferences = false } = {}) {
         const current = capture();
         if (!token || token.identity !== current.identity || token.metadata !== current.metadata || token.path !== current.path || token.epoch !== current.epoch) throw Error('聊天或消息候选已变化，请在当前剧情重新预览。');
         if (checkBasis && token.basis !== current.basis) throw Error('场景资料已变化，请重新预览。');
+        if (checkReferences && token.references !== current.references) throw Error('人物或地图资料已变化，请重新预览。');
         return getContext();
     }
     function sync() {
         if (disposed) return;
-        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null) } : null;
-        const changed = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path || next?.basis !== lastScope?.basis;
+        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
+        const changed = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path || next?.basis !== lastScope?.basis || next?.references !== lastScope?.references;
         if (!changed) return;
         clearPrompt();
         const moved = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path;
         if (moved) { epoch++; if (pending) lastMessage = '聊天或消息候选已变化，待确认操作已取消。'; }
-        pending = null; lastScope = next; notify();
+        if (moved || next?.basis !== lastScope?.basis || needsReferences(pending?.op)) pending = null;
+        lastScope = next; notify();
     }
     async function persist(ctx, token, value) {
         check(token, { checkBasis: false });
@@ -40,8 +44,10 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     }
     function stage(op, data, token = capture()) {
         if (busy) throw Error('正在保存，请稍候。');
-        const ctx = check(token), at = now(), eventId = createId();
-        const result = transition(readCurrentScene(ctx), op, clone(data), { at, sceneId: op === 'save-scene' && !data.scene?.id ? createId() : undefined });
+        const ctx = check(token, { checkReferences: needsReferences(op) }), at = now(), eventId = createId();
+        assertReferences(ctx, op, data);
+        const result = transition(readCurrentScene(ctx), op, clone(data), { at, sceneId: op === 'save-scene' && !data.scene?.id ? createId() : undefined,
+            entryId: ['save-schedule', 'save-absence-rule'].includes(op) && !(data.schedule?.id || data.rule?.id) ? createId() : undefined });
         pending = { ...result, op, eventId, at, token };
         lastMessage = '请核对预览，确认后才更新当前剧情。'; notify(); return preview();
     }
@@ -49,7 +55,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     async function confirm() {
         if (busy) throw Error('正在保存，请稍候。');
         if (!pending) throw Error('没有待确认的操作。');
-        const operation = pending, ctx = check(operation.token);
+        const operation = pending, ctx = check(operation.token, { checkReferences: needsReferences(operation.op) });
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口。');
         const value = appendEvent(readStore(ctx), ctx.chat, operation, operation);
         const release = acquireMetadataWrite(getContext);
@@ -106,16 +112,18 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     }
     removers.push(subscribeStateChanges((detail, metadata) => {
         const ctx = getContext();
-        if (disposed || publishing || detail?.phase !== 'applied' || detail.identity !== identity(ctx) || (metadata && metadata !== ctx?.chatMetadata) || !detail.paths?.some(path => path[0] === KEY)) return;
+        if (disposed || publishing || detail?.phase !== 'applied' || detail.identity !== identity(ctx) || (metadata && metadata !== ctx?.chatMetadata) || !detail.paths?.some(path => [KEY, 'amin_os_characters_v1', 'dynamicMapV1'].includes(path[0]))) return;
+        if (!detail.paths.some(path => path[0] === KEY)) { sync(); return; }
         // A restore or travel operation can replace the scene without a host message event.
         epoch++; pending = null; clearPrompt();
-        lastScope = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null) } : null;
+        lastScope = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
         lastMessage = '场景与时间已由其他应用更新，待确认预览已取消。请重新核对当前剧情。'; notify();
     }));
     const timer = poll ? setInterval(sync, 800) : null;
     sync();
     return { context: getContext, capture, check, sync, stage, preview, confirm, retrySave, supported,
         read: () => readCurrentScene(getContext()), history: () => visibleEvents(getContext()), mapReferences: () => mapReferences(getContext()),
+        characterReferences: () => characterReferences(getContext()), forecast: clock => scheduleForecast(getContext(), clock), absencePreview: clock => absencePreview(readCurrentScene(getContext()), clock), floorGameTime: floor => floorGameTime(getContext(), floor),
         discard() { pending = null; lastMessage = '已取消预览。'; notify(); },
         status: () => lastMessage, busy: () => busy, dirty: () => !!getContext()?.chatMetadata && dirty.has(getContext().chatMetadata),
         subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },

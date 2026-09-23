@@ -1,4 +1,4 @@
-import { validateClock } from '../scene/model.js';
+import { validateClock, gameTimeMinutes, calendarKey } from '../scene/model.js';
 
 export const MAX_DURATION_MINUTES = 5256000;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -9,10 +9,7 @@ const duration = value => {
 
 // The scene clock is a game calendar. A real save timestamp is never a substitute.
 export function clockMinutes(input) {
-    const clock = validateClock(input), date = new Date(0);
-    date.setUTCFullYear(clock.year, clock.month - 1, clock.day);
-    date.setUTCHours(clock.hour, clock.minute, 0, 0);
-    return date.getTime() / 60000;
+    return gameTimeMinutes(validateClock(input));
 }
 
 export function validateTiming(input) {
@@ -25,6 +22,7 @@ export function validateTiming(input) {
         segmentStartedAt: input.segmentStartedAt === null ? null : validateClock(input.segmentStartedAt),
         pausedAt: input.pausedAt == null ? null : validateClock(input.pausedAt),
     };
+    if ([timing.segmentStartedAt, timing.pausedAt].some(value => value && calendarKey(value) !== calendarKey(timing.startedAt))) throw Error('效果计时记录使用了不同历法。');
     if (timing.segmentStartedAt && clockMinutes(timing.segmentStartedAt) < clockMinutes(timing.startedAt)) throw Error('效果计时片段不能早于发动时刻。');
     if ((timing.segmentStartedAt === null) !== (timing.pausedAt !== null)) throw Error('效果暂停时刻与计时片段不一致。');
     if (timing.pausedAt && clockMinutes(timing.pausedAt) < clockMinutes(timing.startedAt)) throw Error('效果暂停时刻不能早于发动时刻。');
@@ -40,6 +38,7 @@ export function timingStatus(effect, clock) {
     if (!effect.timing) return { state: effect.paused ? 'paused' : 'untimed', remainingMinutes: null, elapsedMinutes: null, label: effect.paused ? '已暂停 · 无游戏计时' : '按文字条件持续' };
     const timing = validateTiming(effect.timing);
     if (effect.paused && timing.segmentStartedAt !== null || !effect.paused && timing.segmentStartedAt === null) throw Error('效果暂停状态与计时记录不一致，原记录未改写。');
+    if (clock && calendarKey(clock) !== calendarKey(timing.startedAt)) return { state: 'unknown', remainingMinutes: null, elapsedMinutes: timing.elapsedMinutes, label: '游戏历法已改变，请核对时间并明确重设效果时长' };
     let elapsedMinutes = timing.elapsedMinutes;
     if (timing.segmentStartedAt) {
         if (!clock) return { state: 'unknown', remainingMinutes: null, elapsedMinutes, label: '游戏时间未设置 · 暂不附加此效果提醒' };

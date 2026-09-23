@@ -225,7 +225,9 @@ test('organization subpath writes preserve backups and library root is writable'
         { path: ['amin_os_information_library_v1'], value: [{ id: 'document' }] },
     ] });
     await t.service.confirm(); assert.deepEqual(t.ctx.chatMetadata.amin_os_organizations_v1.backups, [{ keep: 1 }]);
-    for (const path of [['amin_os_organizations_v1'], ['amin_os_organizations_v1', 'backups']]) assert.throws(() => t.service.stage({ label: '覆盖', patches: [{ path, value: {} }] }), code('FORBIDDEN_PATH'));
+    for (const path of [['amin_os_organizations_v1'], ['amin_os_organizations_v1', 'settings']]) assert.throws(() => t.service.stage({ label: '覆盖', patches: [{ path, value: {} }] }), code('FORBIDDEN_PATH'));
+    t.service.stage({label:'追加势力备份',patches:[{path:['amin_os_organizations_v1','backups'],value:[{keep:1},{next:2}]}]});
+    await t.service.confirm();assert.deepEqual(t.ctx.chatMetadata.amin_os_organizations_v1.backups,[{keep:1},{next:2}]);
     t.service.dispose();
 });
 

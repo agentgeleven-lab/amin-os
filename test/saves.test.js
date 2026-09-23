@@ -14,6 +14,8 @@ import * as Org from '../apps/organizations/model.js';
 import { createDemoDocument } from '../apps/map/src/core/demo.js';
 import { rollBatch,formatRoll } from '../apps/dice/engine.js';
 import { registerMapRuntime } from '../apps/map/src/integrations/runtime.js';
+import * as Linkage from '../apps/linkage/policy.js';
+import { chatIdentity, chatPath } from '../apps/shared/operations.js';
 
 const at='2026-09-23T00:00:00.000Z';
 function fixture({populated=true}={}){
@@ -131,4 +133,53 @@ test('restoring into a clean initial map view may establish saved map metadata',
     const source=fixture(),saved=await save(source),target=fixture({populated:false});
     const release=registerMapRuntime({context:()=>target.ctx,persistence:{ensureActive(){},saving:()=>false},draft:{status:()=>({dirty:false})},store:{snapshot:()=>createDemoDocument()}});
     target.api.stageRestore(saved);await target.api.confirm();assert.deepEqual(target.ctx.chatMetadata.dynamicMapV1.document,saved.modules.map);release();source.api.dispose();target.api.dispose();
+});
+
+test('linked appearance, schedule, memories, relationship reminders and effect rules survive one complete restore',async()=>{
+    const h=fixture();
+    const characters=Characters.readCharacters(h.ctx);characters.characters[0].appearance={description:'旅行装束',hairstyle:'短发',features:'左眼旁有疤'};
+    h.ctx.chatMetadata[Characters.KEY]=Characters.buildRestore(h.ctx,characters,{id:'appearance',at});
+    const inventory=Inventory.readInventory(h.ctx);inventory.items.push({id:'coat',ownerId:'hero',name:'长外套',quantity:1,equipped:true,notes:'',wear:{slot:'torso',layer:'outer',description:'蓝色羊毛'},condition:{wetness:20,dirt:10,damage:5,notes:'袖口微湿'}});
+    h.ctx.chatMetadata[Inventory.KEY]=Inventory.buildRestoreStore(h.ctx,inventory,{id:'coat',at});
+    const relations=Relations.readRelationships(h.ctx);relations.thresholdRules=[{id:'trust-rule',relationshipId:'trust',operator:'gte',value:3,message:'关系已改善',enabled:true,repeat:'once'}];
+    const improved=structuredClone(relations);improved.relationships[0].strength=4;improved.relationships[0].evidence={origin:'linkage',reason:'履行了承诺',sources:Relations.sourceReferences(h.ctx.chat,[0])};
+    const relationshipState=Relations.evaluateThresholds(relations,improved,{operationId:'reminder',at});
+    h.ctx.chatMetadata[Relations.KEY]=Relations.buildRestore(h.ctx,relationshipState,{id:'relationship-rules',at});
+    const scene=Scene.readCurrentScene(h.ctx);scene.clock={year:24,month:1,day:23,hour:8,minute:0,calendarLabel:'旅人历',calendar:{monthLengths:[30,30],monthNames:['风月','雨月'],weekDays:['甲日','乙日'],epochWeekday:0}};
+    const map=h.ctx.chatMetadata.dynamicMapV1.document,mapId=Object.keys(map.maps)[0],nodeId=Object.keys(map.maps[mapId].nodes)[0];
+    scene.schedules=[{id:'work',characterId:'innkeeper',title:'旅店值班',startMinute:480,endMinute:960,mapId,nodeId,notes:'日常作息',enabled:true,weekdays:[0,1]}];
+    scene.scenes.room.participantIds=['hero'];scene.absenceRules=[{id:'rain',sceneId:'room',title:'雨水渗漏',field:'notes',value:'窗边积水',intervalMinutes:30,enabled:true,settledAt:null}];
+    h.ctx.chatMetadata[Scene.KEY]=Scene.appendEvent(Scene.readStore(h.ctx),h.ctx.chat,{state:scene,op:'restore',reason:'增加日程与历法',details:{}},{eventId:'schedule',at});
+    let effects=Effects.readStore(h.ctx);effects.skills.push({id:'poison',name:'轻度中毒',reminder:'周期损失力量',book:'',entryId:'',ui:{targetMode:'direct'}});
+    effects=Effects.change(effects,h.ctx.chat,'create',{skillId:'poison',holder:'旅人',targetMode:'direct',scope:'身体',condition:'每五分钟',stacking:{mode:'stack',key:'poison',maxStacks:3,stacks:1},periodic:{intervalMinutes:5,scaleWithStacks:true,operations:[{kind:'stat',characterId:'hero',statId:'strength',delta:-1}]}},{clock:scene.clock});h.ctx.chatMetadata[Effects.KEY]=effects;
+    let journal=Journal.readStore(h.ctx);const sources=Journal.sourceFromRange(h.ctx.chat,0,0);
+    journal=Journal.change(journal,h.ctx.chat,'create',{id:'fact-door',kind:'fact',title:'门后有路',body:'店主提到暗门通往庭院',truth:'confirmed',sources,enabled:true},'fact',at);
+    journal=Journal.change(journal,h.ctx.chat,'create',{id:'memory-door',kind:'knowledge',title:'旅人听说暗门',body:'',factId:'fact-door',characterId:'hero',learnedFromId:'innkeeper',state:'rumor',confidence:60,belief:'暗门可能仍可通行',learnedAtText:'清晨',sources,enabled:true},'memory',at);
+    journal=Journal.configureAuto(journal,{enabled:true,every:2,start:0,instruction:'按事实整理'});
+    journal=Journal.putAutoDraft(journal,h.ctx.chat,{id:'draft-one',title:'初到旅店',body:'听说了庭院的暗门',sources},'draft',at);h.ctx.chatMetadata[Journal.KEY]=journal;
+    const saved=await save(h,'完整联动');
+    h.ctx.chat.push({name:'角色',mes:'稍后',swipe_id:0});
+    h.ctx.chatMetadata[Characters.KEY]=Characters.buildRestore(h.ctx,Characters.emptyState(),{id:'cleared-chars',at});
+    h.ctx.chatMetadata[Inventory.KEY]=Inventory.buildRestoreStore(h.ctx,Inventory.emptyState(),{id:'cleared-inventory',at});
+    h.api.stageRestore(saved.id);await h.api.confirm();const restored=materialize(h.ctx);
+    assert.deepEqual(restored.characters,saved.modules.characters);assert.deepEqual(restored.inventory,saved.modules.inventory);
+    assert.deepEqual(restored.relationships,saved.modules.relationships);assert.deepEqual(restored.scene,saved.modules.scene);
+    assert.deepEqual(restored.effects,saved.modules.effects);assert.deepEqual(restored.journal,saved.modules.journal);
+    const bad=structuredClone(saved);bad.modules.scene.schedules[0].startMinute=-1;const before=structuredClone(h.ctx.chatMetadata);
+    assert.throws(()=>h.api.stageRestore(bad),/日程开始/);assert.deepEqual(h.ctx.chatMetadata,before);h.api.dispose();
+});
+
+test('linkage restore archives imported receipts, retains current live receipts and keeps legacy missing settings',async()=>{
+    const h=fixture({populated:false});
+    const receipt=id=>({id,at,source:{identity:chatIdentity(h.ctx),path:chatPath(h.ctx.chat),index:0,swipe:0,text:h.ctx.chat[0].mes},changes:[]});
+    h.ctx.chatMetadata[Linkage.KEY]={...Linkage.emptyLinkageState(),enabled:true,mode:'auto',extraRules:'只更新已发生事实',modules:{characters:{enabled:true,read:true,write:true}},applied:[receipt('old-receipt')]};
+    const saved=await save(h,'统一联动');
+    h.ctx.chatMetadata[Linkage.KEY]={...Linkage.emptyLinkageState(),applied:[receipt('current-receipt')]};
+    const preview=h.api.stageRestore(saved.id);assert.ok(preview.summary.warnings.some(value=>value.includes('归档历史')));await h.api.confirm();
+    const restored=Linkage.readLinkageState(h.ctx);assert.equal(restored.enabled,true);assert.equal(restored.mode,'auto');
+    assert.equal(restored.applied.find(value=>value.id==='old-receipt').archived,true);assert.equal(restored.applied.find(value=>value.id==='current-receipt').archived,undefined);
+    const legacy=structuredClone(saved);delete legacy.modules.linkage;const before=structuredClone(h.ctx.chatMetadata[Linkage.KEY]);
+    h.api.stageRestore(legacy);await h.api.confirm();assert.deepEqual(h.ctx.chatMetadata[Linkage.KEY],before);
+    const empty=structuredClone(saved);empty.modules.linkage=null;h.api.stageRestore(empty);await h.api.confirm();
+    assert.equal(Linkage.readLinkageState(h.ctx).enabled,false);assert.equal(Linkage.readLinkageState(h.ctx).applied.length,2);h.api.dispose();
 });

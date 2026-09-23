@@ -3,6 +3,7 @@ import {activeEffects,change,directEffect,effectTarget} from './model.js';
 import {abilityGroup,groupNames} from './library.js';
 import {mountCheckView} from './check-view.js';
 import {durationFields,appendTiming,timingLabel} from './timing-view.js';
+import {ruleFields,appendRules} from './rules-view.js';
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function appearance(skill){return {icon:'✦',size:'medium',tone:'accent',group:'能力',scope:skill.name,condition:'直到主动解除；其他条件按能力规则确认。',command:'',targetMode:'targeted',...skill.ui};}
 // Retained for compatibility with previously saved layouts; dropdown order uses this order.
@@ -62,7 +63,7 @@ export function renderConsole({body,api,state,say,render,manage,groups,editSkill
   effectList.append(el('h3','当前效果 · '+current.length,'amin-section-heading'));
   if(!current.length)effectList.append(el('p','当前选择还没有持续效果。','amin-empty'));
   for(const e of current){
-   const c=el('section',null,'amin-card');c.append(el('h3',e.skill.name),el('p',timingLabel(e),'amin-meta'),el('p',effectTarget(e)+' · '+e.scope),el('p','使用者：'+e.holder),el('p',e.command||'未指定指令'));appendTiming(c,e);
+   const c=el('section',null,'amin-card');c.append(el('h3',e.skill.name),el('p',timingLabel(e),'amin-meta'),el('p',effectTarget(e)+' · '+e.scope),el('p','使用者：'+e.holder),el('p',e.command||'未指定指令'));appendTiming(c,e);appendRules(c,e);
    const actions=el('div',null,'amin-toolbar');c.append(actions);
    button(actions,'调整指令 / 时长',()=>adjust(e));const pause=operationButton(actions,e.paused?'恢复':'暂停',async()=>{await mutate(token,'pause',{id:e.id,paused:!e.paused});render();});pause.dataset.expired=String(e.timingStatus?.state==='expired');pause.disabled=!!api.dirty?.()||e.timingStatus?.state==='expired';if(e.timingStatus?.state==='expired')c.append(el('p','效果已到期；可调整时长重新计时，或解除记录。','amin-meta'));
    button(actions,'解除',()=>end(e));operationButton(actions,'删除生效记录',()=>remove(e),'amin-danger');effectList.append(c);
@@ -77,7 +78,8 @@ export function renderConsole({body,api,state,say,render,manage,groups,editSkill
   const row=el('label','具体指令','amin-field'),input=el('textarea');input.rows=5;input.value=ui.command;input.setAttribute('aria-label','具体指令');input.placeholder='这次希望能力产生什么效果？';row.append(input);c.append(row);
   const details=el('details');details.append(el('summary','作用范围与持续条件'));c.append(details);const fields=el('div',null,'amin-form-grid');details.append(fields);const scope=label(fields,'作用层面',ui.scope),condition=label(fields,'持续或解除条件',ui.condition);
   const duration=durationFields(c,{clock:api.gameClock?.(),onChange:()=>checkView?.refresh()});
-  const selection=()=>({skillId:skill.id,holder:user,targetMode,target:targetName,scope:scope.value,command:input.value,condition:condition.value,durationMinutes:duration.read()});
+  const rules=ruleFields(c,{ctx:api.context(),onChange:()=>checkView?.refresh()});
+  const selection=()=>({skillId:skill.id,holder:user,targetMode,target:targetName,scope:scope.value,command:input.value,condition:condition.value,durationMinutes:duration.read(),...rules.read()});
   const checkSection=el('section',null,'amin-card amin-stack');checkSection.append(el('h3','可选：先进行能力检定','amin-section-heading'),el('p','选择人物绑定的数值，在插件内掷骰。检定结果可追加到聊天草稿；是否发动效果由你另外确认。','amin-meta'));c.append(checkSection);
   checkView=mountCheckView(checkSection,{getSelection:selection,onApplied:()=>{render();say('已按检定结果确认发动：'+skill.name);}});
   for(const control of [input,scope,condition])control.addEventListener('input',()=>checkView?.refresh());

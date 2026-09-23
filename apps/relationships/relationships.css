@@ -17,3 +17,5 @@
 .amin-relationships .amin-relationship-direction {white-space:pre-wrap;font-weight:600;overflow-wrap:anywhere}
 .amin-relationships .amin-relationship-notes {white-space:pre-wrap}
 .amin-relationships .amin-relationship-editor {scroll-margin-block:12px}
+.amin-relationships pre {max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto}
+.amin-relationships .amin-form-grid>* {min-width:0}

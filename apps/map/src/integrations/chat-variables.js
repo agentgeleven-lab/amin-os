@@ -1,4 +1,5 @@
 import { uuid } from '../../../../uuid.js';
+import { managesModule } from '../../../linkage/policy.js';
 import { chatIdentity, STORAGE_KEY } from '../adapters/chat.js';
 import { mapPath } from '../core/hierarchy.js';
 import { connectionDetails, prepareDocument } from '../core/spatial.js';
@@ -23,6 +24,7 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
  const currentSummary=()=>{try{const ctx=bound();return ctx?integrationSummary(store.snapshot(),ctx.chatMetadata[STORAGE_KEY].updatedAt):null;}catch{return null;}};
  function status(){return {message:[message,movement].filter(Boolean).join(' · '),littleWhiteBox:!!getLwb()?.applyText,statusHud:globalThis.WorldStatusHudMapBridge?.version===1,...settings()};}
  function requestMove(request){
+  if(managesModule(getContext(),'map'))throw Error('地图已由统一联动管理，旧移动请求不会重复执行');
   if(!settings().allowMoves)throw new Error('未开启 AI 位置更新');const ctx=bound();if(!ctx)throw new Error('请先保存当前聊天地图');
   if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).some(k=>!['请求ID','地图版本','地图ID','地点ID'].includes(k))||typeof request.请求ID!=='string'||!request.请求ID.trim()||request.请求ID.length>160||typeof request.地图ID!=='string'||typeof request.地点ID!=='string')throw new Error('移动请求格式无效');
   if(request.地图版本!==ctx.chatMetadata[STORAGE_KEY].updatedAt)throw new Error('地图版本已变化，请按最新摘要重新请求');

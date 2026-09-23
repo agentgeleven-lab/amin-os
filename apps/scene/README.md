@@ -4,11 +4,15 @@
 
 ## 使用
 
-- 在「时钟」填写起始日期、时间与原因，预览准确结果后确认。日期使用公历月长和闰年；历法名称可以自定义，暂不支持自定义月长。
+- 在「时钟」填写起始日期、时间与原因，预览准确结果后确认。可选择公历，或自定义 1–24 个月的固定月长、月份名称、每周 1–14 天的名称和元年首日星期。自定义月长不自动添加闰日。每条时间都保留当时历法，改历法不会重新解释历史时间。
 - 用分钟、小时或休息按钮预览推进；确认一次只提交一个时间事件。休息仅推进时间，不结算生命、物品或持续效果。
 - 在「场景」保存名称、在场人物、环境、场景物件和其他已确认资料。保存资料与进入场景是两个动作；也可选择「保存并进入」。返回场景会沿用该处已保存的资料，游戏时间仍保持当前故事时刻。
 - 地图引用保存 `mapId/nodeId`，可明确选择引用地图当前位置；不创建地图、移动角色或同步背包。未发现地点不出现在地图候选中。
+- 「日程」通过人物卡 ID 和已发现的地图地点 ID 保存作息，支持每天、指定星期、跨夜和停用。预计位置只作为建议；「场景」勾选的人物卡是明确在场，优先于作息预测。删除人物或地点后保留缺失 ID 提示，不按重名对象重新绑定。
+- 「离场」设置离场一段游戏时间后建议修改的天气、场景物件或备注。到期先显示旧值、新值与周期数，确认后才生效；返场前的待确认变化保留，返场后的时间不继续累积离场周期。多周期也只应用一次填写的新值。读页面、读模型上下文或推进时钟不执行结算。
+- 「记录」可选择消息楼层查看该楼层之后已确认的游戏时间和场景；历史记录与回复候选路径对应，查看不补记操作。
 - 「设置」可以编辑时段边界，并开启模型读取。默认不注入；启用后只注入当前时钟与当前场景的已保存字段。
+- 「设置」还可调整一次对话、短休、长休和无路线旅行的分钟数。「时钟」按这些规则预览推进。有地图路线时，旅行仍使用道路规则或本次手动输入；重生成和续写不会自动重复计时。
 - 所有变更先预览再确认。保存失败时选择「重试保存」，沿用同一条事件，不再次推进时间。
 
 ## 存储与分支
@@ -45,9 +49,13 @@ const prompt = currentPrompt(SillyTavern.getContext());
   periods: [{ name: '深夜', startMinute: 0 }],
   scenes: {
     // [id]: { id, name, participants, weather, objects, notes,
-    //         mapId, nodeId, updatedAt, gameTime }
+    //         mapId, nodeId, updatedAt, gameTime, participantIds,
+    //         absenceSettledAt, leftAt, returnedAt }
   },
   activeSceneId: null,
+  schedules: [], // {id, characterId, title, startMinute, endMinute, mapId, nodeId, weekdays, enabled, notes}
+  timeRules: { dialogue: 1, shortRest: 60, longRest: 480, travel: 30 },
+  absenceRules: [], // {id, sceneId, title, intervalMinutes, field, value, enabled, settledAt}
   settings: { enabled: true, includeInContext: false }
 }
 ```
@@ -58,9 +66,15 @@ const prompt = currentPrompt(SillyTavern.getContext());
 
 服务公开 `capture/check` 防止异步操作跨聊天或覆盖已变化的资料；`stage(op,data,token?)` 仅建立预览，`confirm()` 一次性消费，`retrySave()` 只保存，`discard()` 取消。`read/history/mapReferences` 为当前聊天读取；`subscribe` 返回取消订阅函数。共享服务通过宿主事件和轻量轮询重新读取当前分支，关闭单个应用窗口只移除订阅，不销毁共享服务。
 
+新读取接口 `characterReferences/forecast/absencePreview/floorGameTime` 都不写元数据。日程和人物在场操作的预览同时捕获人物与地图版本，引用变化后需重新预览；普通时间操作不因无关人物改名而作废。
+
+`apps/linkage/adapters/scene.js` 提供纯更新适配器，负责校验当前分支引用并返回一个场景事件 patch，由统一联动协调器与其他应用原子提交。世界书条目只接收场景自有数据与引用 ID，外部人物或地点内容由其所属模块的读取权限决定。启用统一联动后原场景提示键停止单独注入，避免重复上下文。
+
+人物卡可 `await AminOS.openApp('scene')` 后派发 `document.dispatchEvent(new CustomEvent('amin:select-character', {detail:{characterId, app:'scene'}}))`，进入该人物日程页。
+
 ## 验证
 
-`node --test test/scene-model.test.js test/scene-service.test.js`
+`node --test test/scene-model.test.js test/scene-service.test.js test/scene-schedule.test.js`
 
 `node apps/scene/browser-smoke.mjs` 运行独立 Edge/Chromium 数据夹具，检查真实 DOM 的预览、确认、场景进入、上下文开关、切聊天草稿清理及 390px 四页布局。可用 `AMIN_BROWSER` 指定浏览器路径。
 

@@ -1,9 +1,10 @@
 import { uuid } from '../../uuid.js';
 import { createInventoryService, getSharedInventoryService } from './service.js';
+import { WEAR_SLOTS, WEAR_LAYERS } from './model.js';
 
 const mounted = new WeakMap();
-const TABS = { items: '物品', balances: '资源与货币', ledger: '变更账本' };
-const OP_LABELS = { 'save-item': '登记 / 编辑物品', 'delete-item': '移除空物品记录', 'consume-item': '消耗物品', 'transfer-item': '转交物品', 'equip-item': '调整装备', 'save-balance': '登记 / 编辑资源', 'delete-balance': '移除空资源账户', 'adjust-balance': '资源收支', 'transfer-balance': '转交资源', restore: '恢复存档' };
+const TABS = { items: '物品', wear: '穿戴与外观', balances: '资源与货币', ledger: '变更账本' };
+const OP_LABELS = { 'save-item': '登记 / 编辑物品', 'delete-item': '移除空物品记录', 'consume-item': '消耗物品', 'transfer-item': '转交物品', 'equip-item': '调整装备', 'set-condition': '更新物品状态', 'save-balance': '登记 / 编辑资源', 'delete-balance': '移除空资源账户', 'adjust-balance': '资源收支', 'transfer-balance': '转交资源', restore: '恢复存档' };
 
 /** Every write uses the shared preview/confirm operation; reopening never repeats it. */
 export function mount(target, options = {}) {
@@ -28,6 +29,7 @@ export function mount(target, options = {}) {
     const busy = () => working || !!api.busy();
     const dirty = () => !!api.dirty();
     const pending = () => !!api.preview();
+    const itemTab = () => selected === 'items' || selected === 'wear';
     const ownerLabel = id => characters.find(person => person.id === id)?.name ?? `已删除或不在当前分支的人物（${id}）`;
     function card(title, parent = body, className = 'amin-card amin-stack') {
         const box = make('section', '', className); if (title) box.append(make('h3', title)); parent.append(box); return box;
@@ -176,6 +178,13 @@ export function mount(target, options = {}) {
         button(actions, '取消编辑', () => { api.discard(); form = null; render(); say('已取消编辑。'); }, { kind: 'cancel' });
     }
     function reasonField(parent) { return field(parent, '变更原因', '', { maxLength: 1000, full: true }); }
+    function conditionFields(parent, value = {}) {
+        const wetness = field(parent, '湿润程度（0–100）', value.wetness ?? 0, { type: 'number', min: 0, max: 100, step: 1 });
+        const dirt = field(parent, '污渍程度（0–100）', value.dirt ?? 0, { type: 'number', min: 0, max: 100, step: 1 });
+        const damage = field(parent, '破损程度（0–100）', value.damage ?? 0, { type: 'number', min: 0, max: 100, step: 1 });
+        const notes = field(parent, '物品状态说明', value.notes ?? '', { multi: true, maxLength: 1000 });
+        return () => ({ wetness: numeric(wetness, '湿润程度'), dirt: numeric(dirt, '污渍程度'), damage: numeric(damage, '破损程度'), notes: notes.value });
+    }
     function editItem(item = null) {
         startForm(item ? '编辑物品' : '登记新物品', (box, fields) => {
             const name = field(fields, '物品名称', item?.name ?? '', { maxLength: 120 });
@@ -183,10 +192,21 @@ export function mount(target, options = {}) {
             if (item) { disable(owner); box.append(make('p', '所属人物通过“转交物品”调整，以保留双方账目。', 'amin-help')); }
             const quantity = field(fields, '数量', item?.quantity ?? 1, { type: 'number', min: 0, max: 1e9, step: 1 });
             const equipped = checkbox(fields, '已装备', item?.equipped ?? false);
-            const notes = field(fields, '物品备注（可选）', item?.notes ?? '', { multi: true, maxLength: 4000 }), reason = reasonField(fields);
-            box.append(make('p', '数量使用非负整数。装备状态只登记当前选择；规则效果需要在能力面板单独确认。', 'amin-help'));
-            finishForm(box, '预览保存物品', () => stage('save-item', { ...(item ? { id: item.id } : {}), name: name.value, ownerId: owner.value, quantity: numeric(quantity, '数量'), equipped: equipped.checked, notes: notes.value, reason: reason.value }));
+            const notes = field(fields, '物品备注（可选）', item?.notes ?? '', { multi: true, maxLength: 4000 });
+            const slot = select(fields, '穿戴部位', [['', '未指定（普通物品）'], ...Object.entries(WEAR_SLOTS)], item?.wear?.slot ?? '');
+            const layer = select(fields, '穿戴层次', Object.entries(WEAR_LAYERS), item?.wear?.layer ?? 'outer');
+            const description = field(fields, '衣物外观', item?.wear?.description ?? '', { multi: true, maxLength: 2000 });
+            const condition = conditionFields(fields, item?.condition), reason = reasonField(fields);
+            box.append(make('p', '指定部位的衣物逐件登记，数量为 0 或 1。同一部位和层次只能穿戴一件；换装先卸下。0 表示干燥、干净或完好，100 表示完全浸湿、严重污损或完全破损。人物卡直接读取这里的穿戴。', 'amin-help'));
+            finishForm(box, '预览保存物品', () => stage('save-item', { ...(item ? { id: item.id } : {}), name: name.value, ownerId: owner.value, quantity: numeric(quantity, '数量'), equipped: equipped.checked, notes: notes.value, wear: { slot: slot.value, layer: layer.value, description: description.value }, condition: condition(), reason: reason.value }));
             name.focus();
+        });
+    }
+    function editCondition(item) {
+        startForm(`物品状态：${item.name}`, (box, fields) => {
+            const condition = conditionFields(fields, item.condition), reason = reasonField(fields);
+            box.append(make('p', '只更新同一件物品的湿润、污渍和破损，不改变数量、归属或穿戴部位。', 'amin-help'));
+            finishForm(box, '预览物品状态', () => stage('set-condition', { id: item.id, condition: condition(), reason: reason.value }));
         });
     }
     function itemAction(item, op) {
@@ -197,7 +217,7 @@ export function mount(target, options = {}) {
             if (op === 'consume-item' || op === 'transfer-item') quantity = field(fields, '操作数量', 1, { type: 'number', min: 1, max: item.quantity, step: 1 });
             if (op === 'transfer-item') {
                 owner = select(fields, '接收人物', ownerChoices().filter(([id]) => id !== item.ownerId));
-                box.append(make('p', '转交会同时扣除原人物的数量并增加接收人物的记录；接收的物品默认未装备。', 'amin-help'));
+                box.append(make('p', item.wear?.slot ? '这件衣物保留原有编号和湿污破损状态，更改持有人并卸下装备。' : '转交会同时扣除原人物的数量并增加接收人物的记录；接收的物品默认未装备。', 'amin-help'));
             }
             if (op === 'delete-item') box.append(make('p', '仅能移除数量为 0 的物品记录，已有变更账本保留。'));
             const reason = reasonField(fields);
@@ -251,15 +271,21 @@ export function mount(target, options = {}) {
             if (!entries.length) list.append(make('p', '还没有符合筛选的变更记录。确认物品或资源操作后会自动记账。', 'amin-empty'));
             for (const entry of entries.slice(0, filters.count)) drawLedgerEntry(entry, list);
         } else {
-            const entries = (selected === 'items' ? state.items : state.balances).filter(matches);
-            if (!entries.length) list.append(make('p', selected === 'items' ? '没有符合筛选的物品。先在人物应用登记人物，再添加随身物品。' : '没有符合筛选的资源账户。可登记金币、补给或其他需要记账的资源。', 'amin-empty'));
+            const entries = (itemTab() ? state.items : state.balances).filter(matches).filter(entry => selected !== 'wear' || entry.wear?.slot || entry.equipped);
+            if (!entries.length) list.append(make('p', itemTab() ? '没有符合筛选的物品。先在人物应用登记人物，再添加随身物品；衣物可指定穿戴部位。' : '没有符合筛选的资源账户。可登记金币、补给或其他需要记账的资源。', 'amin-empty'));
             for (const entry of entries) {
                 const box = card(entry.name, list), heading = make('div', '', 'amin-section-heading');
-                heading.append(make('strong', selected === 'items' ? `数量 ${entry.quantity}${entry.equipped ? ' · 已装备' : ''}` : `余额 ${entry.amount}${entry.unit ? ' ' + entry.unit : ''}`), make('span', ownerLabel(entry.ownerId), 'amin-meta')); box.append(heading);
+                heading.append(make('strong', itemTab() ? `数量 ${entry.quantity}${entry.equipped ? ' · 已装备' : ''}` : `余额 ${entry.amount}${entry.unit ? ' ' + entry.unit : ''}`), make('span', ownerLabel(entry.ownerId), 'amin-meta')); box.append(heading);
                 if (entry.notes) box.append(make('p', entry.notes));
+                if (entry.wear?.slot) box.append(make('p', `${WEAR_SLOTS[entry.wear.slot]} · ${WEAR_LAYERS[entry.wear.layer]}${entry.wear.description ? ' · ' + entry.wear.description : ''}`, 'amin-meta'));
+                if (entry.condition) {
+                    box.append(make('p', `湿润 ${entry.condition.wetness}/100 · 污渍 ${entry.condition.dirt}/100 · 破损 ${entry.condition.damage}/100`, 'amin-meta'));
+                    if (entry.condition.notes) box.append(make('p', entry.condition.notes));
+                }
                 const actions = toolbar(box);
-                if (selected === 'items') {
+                if (itemTab()) {
                     button(actions, '编辑物品', () => editItem(entry));
+                    button(actions, '物品状态', () => editCondition(entry));
                     if (entry.quantity > 0) button(actions, entry.equipped ? '卸下装备' : '装备物品', () => itemAction(entry, 'equip-item'));
                     if (entry.quantity > 0) { button(actions, '消耗', () => itemAction(entry, 'consume-item')); button(actions, '转交物品', () => itemAction(entry, 'transfer-item')); }
                     else button(actions, '移除空记录', () => itemAction(entry, 'delete-item'), { danger: true });
@@ -278,10 +304,12 @@ export function mount(target, options = {}) {
         if (!Array.isArray(characters)) characters = characters?.characters ?? [];
         if (selected !== 'ledger') {
             const actions = toolbar(body);
-            const add = button(actions, selected === 'items' ? '登记新物品' : '登记资源账户', () => selected === 'items' ? editItem() : editBalance(), { primary: true, kind: 'top' });
+            const add = button(actions, itemTab() ? '登记新物品' : '登记资源账户', () => itemTab() ? editItem() : editBalance(), { primary: true, kind: 'top' });
             if (!characters.length) { add.disabled = true; bodyControls.find(row => row.control === add).base = true; body.append(make('p', '当前分支还没有人物。先在人物应用登记人物，即可将新物品与资源归到具体人物。', 'amin-empty')); }
         }
         const filter = grid(body), refs = new Set([...state.items, ...state.balances, ...state.ledger.flatMap(entry => entry.entries ?? [])].map(entry => entry.ownerId));
+        if (filters.owner) refs.add(filters.owner);
+        if (selected === 'wear') body.append(make('p', '衣物与已装备物品使用背包中的同一条记录，人物卡会随穿戴和状态变化同步显示。', 'amin-help'));
         const owners = [['', '全部人物'], ...characters.map(person => [person.id, person.name]), ...[...refs].filter(id => id && !characters.some(person => person.id === id)).map(id => [id, ownerLabel(id)])];
         const owner = select(filter, '筛选所属人物', owners, filters.owner, 'filter');
         const query = field(filter, '搜索名称、人物或备注', filters.query, { kind: 'filter', maxLength: 200 });
@@ -309,6 +337,12 @@ export function mount(target, options = {}) {
         }
         if (!form && !working) render(); else updateDisabled();
     });
-    const view = { open() { render(); }, dispose() { if (disposed) return; disposed = true; unsubscribe?.(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
+    const selectCharacter = event => {
+        if (event.detail?.app !== 'inventory' || !event.detail.characterId || disposed) return;
+        if (busy() || !canLeaveEditor()) return;
+        filters.owner = event.detail.characterId; filters.query = ''; selected = 'wear'; render();
+    };
+    doc.addEventListener?.('amin:select-character', selectCharacter);
+    const view = { open() { render(); }, dispose() { if (disposed) return; disposed = true; doc.removeEventListener?.('amin:select-character', selectCharacter); unsubscribe?.(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); render(); return view;
 }

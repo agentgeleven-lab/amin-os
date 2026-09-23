@@ -1,6 +1,8 @@
 import { uuid } from '../../uuid.js';
 import { createOperationService, subscribeStateChanges } from '../shared/operations.js';
 import { KEY, STATUS_PATH, readStore, readCharacters, resolveStat, bindings, validateCharacter, appendSnapshot, withStatValue } from './model.js';
+import { KEY as INVENTORY_KEY } from '../inventory/model.js';
+import { readCharacterAppearance } from './appearance.js';
 
 const relevantPaths = [[KEY], [...STATUS_PATH]];
 export function createCharactersService(getContext = () => globalThis.SillyTavern?.getContext?.(), { createId = uuid, now = () => new Date().toISOString(), poll = false } = {}) {
@@ -12,7 +14,7 @@ export function createCharactersService(getContext = () => globalThis.SillyTaver
     function sync() {
         if (disposed) return;
         const ctx = getContext();
-        const next = JSON.stringify([ctx?.getCurrentChatId?.() ?? ctx?.chatId, ctx?.characterId, ctx?.groupId, ctx?.chat?.map(message => [message.name, message.is_user, message.mes, message.swipe_id]), ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.variables?.状态栏]);
+        const next = JSON.stringify([ctx?.getCurrentChatId?.() ?? ctx?.chatId, ctx?.characterId, ctx?.groupId, ctx?.chat?.map(message => [message.name, message.is_user, message.mes, message.swipe_id]), ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[INVENTORY_KEY], ctx?.chatMetadata?.variables?.状态栏]);
         if (next !== lastScope || ctx?.chatMetadata !== lastMetadata) { lastScope = next; lastMetadata = ctx?.chatMetadata; notify(); }
     }
     function stageCharacter(input, token = capture()) {
@@ -49,7 +51,7 @@ export function createCharactersService(getContext = () => globalThis.SillyTaver
     }
     const timer = poll ? setInterval(sync, 800) : null;
     sync();
-    return { context: getContext, capture, check, read: () => readCharacters(getContext()), bindings: () => bindings(getContext()), resolveStat: (characterId, statId) => resolveStat(getContext(), characterId, statId),
+    return { context: getContext, capture, check, read: () => readCharacters(getContext()), bindings: () => bindings(getContext()), resolveStat: (characterId, statId) => resolveStat(getContext(), characterId, statId), appearance: characterId => readCharacterAppearance(getContext(), characterId),
         stageCharacter, saveCharacter, stageDeleteCharacter, deleteCharacter, stageStatValue, setStatValue, sync,
         preview: operations.preview, confirm: operations.confirm, retrySave: operations.retrySave, discard: operations.discard, status: operations.status, busy: operations.busy, dirty: operations.dirty,
         subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },

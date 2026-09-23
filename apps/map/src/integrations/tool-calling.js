@@ -4,6 +4,7 @@ import { prepareDocument } from '../core/spatial.js';
 import { autoLayout } from '../core/auto-layout.js';
 import { layoutTiles } from '../core/tiles.js';
 import { STORAGE_KEY } from '../adapters/chat.js';
+import { managesModule } from '../../../linkage/policy.js';
 
 const names=['dynamic_map_query','dynamic_map_update'];
 const visible=n=>n?.discovered&&n.ai.includeInContext;
@@ -49,7 +50,7 @@ export function compileMapUpdate(document,request,{allowDelete=false}={}){
 export function createMapTools({store,draft,persistence,getContext}){
     let disposed=false,registered=false,lease=null,ownedDraft=null,message='尚未调用地图工具';
     const settings=()=>({enabled:false,textMode:false,autoSave:false,allowDelete:false,...getContext()?.extensionSettings?.dynamicMapTools});
-    function ready(mode=false){persistence.ensureActive();if(!getContext()?.chatMetadata?.[STORAGE_KEY])throw Error('请先保存初始地图');if(!settings().enabled||settings().textMode!==mode||disposed)throw Error('地图工具未启用');}
+    function ready(mode=false){if(managesModule(getContext(),'map'))throw Error('地图已由 Amin OS 统一联动管理，请使用 amin_update 更新');persistence.ensureActive();if(!getContext()?.chatMetadata?.[STORAGE_KEY])throw Error('请先保存初始地图');if(!settings().enabled||settings().textMode!==mode||disposed)throw Error('地图工具未启用');}
     function token(){return `${persistence.token()}:${draft.token()}:${JSON.stringify(store.snapshot())}`;}
     function query(args={},mode=false){
         ready(mode);exact(args,['mapId']);if(args.mapId!==undefined)text(args.mapId);

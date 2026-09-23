@@ -5,6 +5,9 @@ import {installReplyFloorButtons} from './apps/reply/floor-ui.js';
 import {initializeAppearance,installAppearance} from './settings/appearance.js';
 import {initializeAI} from './ai/service.js';
 import { createShell } from './shell.js';
+import { getSharedService as getLinkageService } from './apps/linkage/service.js';
+import { createLinkageHost } from './apps/linkage/host.js';
+import { buildUnifiedPrompt } from './apps/linkage/prompt.js';
 
 let instance;
 export function initialize() {
@@ -30,6 +33,13 @@ export function initialize() {
     ctx.extensionSettings.dynamicMapNamespace ||= uuid();
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
+    const linkage = getLinkageService();
+    const linkageHost = createLinkageHost(() => globalThis.SillyTavern?.getContext?.(), {
+        buildPrompt: buildUnifiedPrompt, captureGeneration: linkage.captureGeneration,
+        collectReply: linkage.collectReply, cancelGeneration: linkage.cancelGeneration,
+        report: linkage.reportHost,
+    });
+    linkage.reportHost(linkageHost.status().message);
     const apps={
         characters:()=>import('./apps/characters/view.js').then(m=>m.mount(shell.panes.characters)),
         inventory:()=>import('./apps/inventory/view.js').then(m=>m.mount(shell.panes.inventory)),
@@ -65,7 +75,7 @@ export function initialize() {
     for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.13.8',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.14.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 

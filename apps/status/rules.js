@@ -66,12 +66,15 @@ export function compileRules(ctx, settingsKey, scope, expandNames = true) {
   return text;
 }
 
-export function createRulesPage({ context, settingsKey, node, check, syncWorldbook }) {
+export function createRulesPage({ context, settingsKey, node, check, syncWorldbook, isUnified = () => false }) {
   const page = node('section', undefined, 'wsh-generation-page wsh-rules-page');
   const cardKey = ruleCardKey(context());
   let collection = 'character';
   let rules = readRules(context(), settingsKey);
-  const status = node('p', '修改自动保存；生成和更新会合并全体规则与当前角色规则。', 'wsh-quick-status'); status.setAttribute('role', 'status');
+  const initialNotice = () => isUnified() ? '修改自动保存；允许模型更新世界状态时，统一条目动态读取启用的更新规则。' : '修改自动保存；生成和更新会合并全体规则与当前角色规则。';
+  const savedNotice = () => isUnified() ? '已保存。生成和更新立即使用；统一联动会动态读取启用的更新规则，可到“联动更新”查看条目预览。' : '已保存。生成和更新立即使用；日常聊天需点击“同步到世界书”更新已写入的规则。';
+  let lastInitialNotice=initialNotice(),lastSavedNotice=savedNotice();
+  const status = node('p', lastInitialNotice, 'wsh-quick-status'); status.setAttribute('role', 'status');
   const collectionLabel = node('label', '规则分类'), collectionPicker = node('select', undefined, 'text_pole');
   for (const [value, label] of [['global', '全体规则 · 所有角色共用'], ['character', '角色规则 · 仅当前角色']]) { const option = node('option', label); option.value = value; collectionPicker.append(option); }
   collectionPicker.value = collection; collectionLabel.append(collectionPicker);
@@ -82,7 +85,7 @@ export function createRulesPage({ context, settingsKey, node, check, syncWorldbo
     if (collection === 'global') settings.globalRules = JSON.parse(JSON.stringify(rules));
     else settings.rulesByCharacter = { ...settings.rulesByCharacter, [cardKey]: JSON.parse(JSON.stringify(rules)) };
     ctx.saveSettingsDebounced();
-    status.textContent = '已保存。生成和更新立即使用；日常聊天需点击“同步到世界书”更新已写入的规则。';
+    status.textContent = savedNotice();
   }
   function protect(fn) { return () => { try { check(); fn(); } catch (e) { status.textContent = e.message; } }; }
   collectionPicker.onchange = protect(() => {
@@ -126,7 +129,15 @@ export function createRulesPage({ context, settingsKey, node, check, syncWorldbo
       card.append(titleLabel, enabledLabel, scopeLabel, contentLabel, remove); list.append(card);
     }
   }
-  page.append(node('h3', '状态规则库'), node('p', '全体规则与当前角色规则共同参与按设定生成、补充和更新；冲突时提示模型优先遵守角色规则。支持 {{user}} 和 {{char}}。日常聊天需同步到各角色绑定的世界书。', 'wsh-note'), collectionLabel, actions, status,
-    node('p', '规则是模型提示，不是代码强制约束。1D3 不代表插件实际掷骰。示例按原文保留：正向最后一档为 101～120。多个角色共用同一本世界书时，最近同步的更新规则也会被其他绑定角色使用。', 'wsh-note'), list);
+  const introduction=node('p','','wsh-note'),scopeNotice=node('p','','wsh-note');
+  page.refreshLinkageMode=()=>{
+    introduction.textContent='全体规则与当前角色规则共同参与按设定生成、补充和更新；冲突时提示模型优先遵守角色规则。支持 {{user}} 和 {{char}}。'+(isUnified()?'日常聊天由联动更新统一管理；允许更新世界状态时动态读取本页启用的更新规则。':'日常聊天需同步到各角色绑定的世界书。');
+    scopeNotice.textContent='规则是模型提示，不是代码强制约束。1D3 不代表插件实际掷骰。示例按原文保留：正向最后一档为 101～120。'+(isUnified()?'统一条目按当前聊天和角色展开；全体规则仍适用于所有角色。':'多个角色共用同一本世界书时，最近同步的更新规则也会被其他绑定角色使用。');
+    const previous=status.textContent;
+    if(previous===lastInitialNotice)status.textContent=initialNotice();else if(previous===lastSavedNotice)status.textContent=savedNotice();
+    lastInitialNotice=initialNotice();lastSavedNotice=savedNotice();
+  };
+  page.append(node('h3', '状态规则库'), introduction, collectionLabel, actions, status,scopeNotice, list);
+  page.refreshLinkageMode();
   render(); return page;
 }

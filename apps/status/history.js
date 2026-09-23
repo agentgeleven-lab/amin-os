@@ -110,7 +110,12 @@ export function createHistory({ context, read, write, changed = () => {}, before
     }
     messages(now => {
       const tail = now.at(-1);
-      if (tail) store.records[key(tail)] = { ...store.records[key(tail)], state: value, savedAt: Date.now() };
+      // A coordinated writer may already have included this exact history
+      // snapshot in its atomic patches. Preserve its timestamp and metadata:
+      // rewriting them during the applied notification invalidates its save token.
+      if (tail && JSON.stringify(store.records[key(tail)]?.state) !== serialized) {
+        store.records[key(tail)] = { ...store.records[key(tail)], state: value, savedAt: Date.now() };
+      }
       metadata = c.chatMetadata;
       chatId = c.getCurrentChatId();
       previous = now;

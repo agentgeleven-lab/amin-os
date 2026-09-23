@@ -1,5 +1,6 @@
 import {KEY,read,path,compile,LIBRARY_KEY,library,archive} from './model.js';
 import {acquireMetadataWrite,captureContext,subscribeStateChanges,metadataWriteStatus} from '../shared/operations.js';
+import {managesModule} from '../linkage/policy.js';
 export const PROMPT_KEY='amin-os-information-panel';
 export function createInformation(context){
  let busy=false,disposed=false,message='尚未注入剧情提醒';const listeners=new Set();const notify=()=>{for(const fn of listeners)try{fn();}catch{}};
@@ -28,7 +29,7 @@ export function createInformation(context){
  }
  async function save(token,update,updateLibrary){return write(token,c=>{const next=update(read(c));return [[KEY,next],...(updateLibrary?[[LIBRARY_KEY,updateLibrary(library(c),next)]]:[])];});}
  async function saveRecord(token,record,search){return write(token,c=>[[LIBRARY_KEY,archive(library(c),record,search)]],{archiveOnly:true});}
- function start(type='normal',params={},dry=false){clear();if(dry||params?.signal?.aborted||!['normal','continue','regenerate','swipe'].includes(type))return;try{const shared=metadataWriteStatus(context);if(busy||shared.busy||shared.dirty)throw Error('当前聊天资料正在保存或等待重试，本轮未注入');const c=context();let chat=c.chat??[];if(['regenerate','swipe'].includes(type)&&chat.length&&!chat.at(-1).is_user)chat=chat.slice(0,-1);const text=compile(read(c),chat);c.setExtensionPrompt(PROMPT_KEY,text,1,0,false);message=text?'已附加当前信息面板设定':'没有需要附加的已确认设定';}catch(e){message=e.message;}notify();}
+ function start(type='normal',params={},dry=false){clear();if(dry||params?.signal?.aborted||!['normal','continue','regenerate','swipe'].includes(type)||managesModule(context(),'information'))return;try{const shared=metadataWriteStatus(context);if(busy||shared.busy||shared.dirty)throw Error('当前聊天资料正在保存或等待重试，本轮未注入');const c=context();let chat=c.chat??[];if(['regenerate','swipe'].includes(type)&&chat.length&&!chat.at(-1).is_user)chat=chat.slice(0,-1);const text=compile(read(c),chat);c.setExtensionPrompt(PROMPT_KEY,text,1,0,false);message=text?'已附加当前信息面板设定':'没有需要附加的已确认设定';}catch(e){message=e.message;}notify();}
  const c=context(),events=c?.eventTypes??c?.event_types??{},source=c?.eventSource,supported=!!(source?.on&&c.setExtensionPrompt&&events.GENERATION_AFTER_COMMANDS&&events.CHAT_CHANGED);
  const handlers={GENERATION_AFTER_COMMANDS:start,GENERATION_ENDED:clear,GENERATION_STOPPED:clear,CHAT_CHANGED:()=>{clear();message='已切换聊天';notify();},MESSAGE_DELETED:clear,MESSAGE_UPDATED:clear,MESSAGE_SWIPED:clear};
  if(supported)for(const [key,fn]of Object.entries(handlers))if(events[key])source.on(events[key],fn);

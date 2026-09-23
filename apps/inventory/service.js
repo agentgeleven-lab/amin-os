@@ -7,6 +7,7 @@ const clone = value => structuredClone(value);
 const labels = {
     'save-item': '登记或调整物品', 'delete-item': '删除零数量物品', 'consume-item': '消耗物品',
     'transfer-item': '转移物品', 'equip-item': '修改装备状态', 'save-balance': '登记或校正资源账户',
+    'set-condition': '更新物品状态',
     'delete-balance': '删除零余额账户', 'adjust-balance': '记录资源收支', 'transfer-balance': '转移资源',
 };
 
@@ -66,6 +67,7 @@ export function createInventoryService(getContext = () => globalThis.SillyTavern
         consumeItem: (data, token) => stage('consume-item', data, token),
         transferItem: (data, token) => stage('transfer-item', data, token),
         equipItem: (data, token) => stage('equip-item', data, token),
+        setCondition: (data, token) => stage('set-condition', data, token),
         saveBalance: (data, token) => stage('save-balance', data, token),
         adjustBalance: (data, token) => stage('adjust-balance', data, token),
         transferBalance: (data, token) => stage('transfer-balance', data, token),

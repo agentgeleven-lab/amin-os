@@ -1,4 +1,5 @@
 import { waitForSignal } from '../apps/map/src/core/generation-job.js';
+import { withLinkageToolScope } from '../apps/linkage/host.js';
 
 // SillyTavern's ConnectionManagerRequestService routes through its own server and
 // secret store. Its profile preset supplies generation parameters, not the
@@ -155,7 +156,7 @@ export async function runHostGeneration({ ctx, route, request, messages, sharedP
         if ((live.mainApi || '') !== route.mainApi || hostPreset(live) !== route.presetName) {
             throw Error('酒馆当前连接或预设已变化，请重新发起生成');
         }
-        return await live.generateQuietPrompt({ quietPrompt: quietPrompt(request, messages, sharedPrompt), responseLength: maxTokens });
+        return await withLinkageToolScope(current, () => live.generateQuietPrompt({ quietPrompt: quietPrompt(request, messages, sharedPrompt), responseLength: maxTokens }));
     });
     // Keep the slot occupied until SillyTavern itself settles, even if Amin's
     // caller stopped waiting: generateQuietPrompt has no AbortSignal option.

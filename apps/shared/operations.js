@@ -13,6 +13,7 @@ export const PATCH_ROOTS = Object.freeze([
     'amin_os_saves_v1', 'amin_os_scene_v1', 'amin_os_effects_v1', 'amin_os_dice_v1',
     'amin_os_journal_v1', 'amin_os_information_v1', 'amin_os_information_library_v1', 'dynamicMapV1',
     'world_status_hud_history_v1', 'amin_os_organizations_history_v1', 'dynamicMapPositionHistoryV1',
+    'amin_os_linkage_v1',
 ]);
 const roots = new Set(PATCH_ROOTS), variableRoots = new Set(['状态栏', '势力资料']);
 
@@ -32,8 +33,9 @@ function safePath(path) {
 }
 function writablePath(path) {
     safePath(path);
-    const organizationField = path[0] === 'amin_os_organizations_v1' && path.length >= 2 && ['locks', 'assessment'].includes(path[1]);
-    if (!(roots.has(path[0]) || organizationField || (path[0] === 'variables' && path.length >= 2 && variableRoots.has(path[1])))) {
+    const organizationField = path[0] === 'amin_os_organizations_v1' && path.length >= 2 && ['locks', 'assessment', 'backups'].includes(path[1]);
+    const stateCheckpoint = path.length === 3 && path[0] === 'extensions' && path[1] === 'LittleWhiteBox' && path[2] === 'stateCkptV2';
+    if (!(roots.has(path[0]) || organizationField || stateCheckpoint || (path[0] === 'variables' && path.length >= 2 && variableRoots.has(path[1])))) {
         fail('FORBIDDEN_PATH', '此操作无权修改该聊天资料路径。');
     }
 }

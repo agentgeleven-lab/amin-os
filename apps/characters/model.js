@@ -34,6 +34,10 @@ export function validateStat(input) {
     if (Object.hasOwn(input, 'value')) throw Error('属性不能另存数值，请绑定世界状态中的现有字段。');
     return stat;
 }
+export function validateAppearance(input) {
+    if (!object(input) || Object.keys(input).some(key => !['description', 'hairstyle', 'features'].includes(key))) throw Error('人物外观格式无效。');
+    return { description: text(input.description ?? '', '整体外观'), hairstyle: text(input.hairstyle ?? '', '发型', 500), features: text(input.features ?? '', '外貌特征', 2000) };
+}
 export function validateCharacter(input) {
     if (!object(input) || !validId(input.id)) throw Error('人物编号无效。');
     const character = { ...copy(input), id: input.id, name: text(input.name, '人物名称', 120), notes: text(input.notes ?? '', '人物备注') };
@@ -42,6 +46,7 @@ export function validateCharacter(input) {
     if (!Array.isArray(input.stats) || input.stats.length > LIMITS.stats) throw Error(`每个人物最多保存 ${LIMITS.stats} 项属性。`);
     character.stats = input.stats.map(validateStat);
     if (new Set(character.stats.map(stat => stat.id)).size !== character.stats.length) throw Error('人物属性编号重复。');
+    if (input.appearance !== undefined) character.appearance = validateAppearance(input.appearance);
     return character;
 }
 export function validateState(input) {

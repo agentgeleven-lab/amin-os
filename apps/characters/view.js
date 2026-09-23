@@ -93,6 +93,11 @@ export function mount(target, options = {}) {
         const name = field(fields, '人物名称', character?.name ?? ''); name.maxLength = 120;
         const kind = select(fields, '人物类型', [['pc', '玩家角色（PC）'], ['npc', '非玩家角色（NPC）']], character?.kind ?? 'pc');
         const notes = field(fields, '人物备注', character?.notes ?? '', true); notes.maxLength = 4000;
+        const appearancePanel = card(panel, '人物外观'), appearanceFields = grid(appearancePanel);
+        const description = field(appearanceFields, '整体外观', character?.appearance?.description ?? '', true); description.maxLength = 4000;
+        const hairstyle = field(appearanceFields, '发型', character?.appearance?.hairstyle ?? ''); hairstyle.maxLength = 500;
+        const features = field(appearanceFields, '外貌特征', character?.appearance?.features ?? '', true); features.maxLength = 2000;
+        appearancePanel.append(make('p', '这里记录人物自身外貌。当前穿戴直接读取背包中已装备的物品；换装和衣物湿污破损在背包修改。', 'amin-help'));
         const stats = card(panel, '属性与技能绑定'), rows = make('div', '', 'amin-stack');
         stats.append(make('p', '绑定世界状态中已有的数值。D20 使用绑定值作为修正值；若要使用力量等属性的修正，请绑定对应的修正字段。', 'amin-help'), rows);
         let bindings = []; try { bindings = api.bindings(); } catch (error) { say(error.message, 'error'); }
@@ -121,7 +126,7 @@ export function mount(target, options = {}) {
         const actions = toolbar(panel);
         button(actions, '保存人物卡', async () => {
             api.check(token);
-            const input = { id: state.id, name: name.value, kind: kind.value, notes: notes.value,
+            const input = { id: state.id, name: name.value, kind: kind.value, notes: notes.value, appearance: { description: description.value, hairstyle: hairstyle.value, features: features.value },
                 stats: statRows.map(row => ({ id: row.id, label: row.label.value, binding: row.binding.value, component: row.component.value, check: row.check.value })) };
             try { await api.saveCharacter(input, token); }
             catch (error) { state.committed = !!api.dirty?.(); throw error; }
@@ -219,7 +224,31 @@ export function mount(target, options = {}) {
         const panel = card(body, `${character.name} · ${character.kind === 'npc' ? 'NPC' : 'PC'}`), actions = toolbar(panel);
         button(actions, '编辑人物卡', () => openCharacter(character), { blocked: writable });
         button(actions, '删除人物卡', () => deleteCharacter(character), { danger: true, blocked: writable });
+        const related = toolbar(panel);
+        for (const [app, label] of [['relationships', '人物关系'], ['journal', '人物记忆'], ['scene', '个人日程'], ['inventory', '资产与穿戴']]) button(related, label, async () => {
+            const openApp = options.openApp ?? globalThis.AminOS?.openApp;
+            if (!openApp) throw Error('请在 Amin OS 中打开关联应用。');
+            await openApp(app);
+            const EventType = doc.defaultView?.CustomEvent ?? globalThis.CustomEvent;
+            doc.dispatchEvent?.(new EventType('amin:select-character', { detail: { characterId: character.id, app } }));
+        });
         if (character.notes) panel.append(make('p', character.notes));
+        const appearancePanel = card(panel, '外观与当前穿戴');
+        try {
+            const appearance = api.appearance?.(character.id) ?? { appearance: character.appearance ?? {}, worn: [] };
+            for (const [key, label] of [['description', '整体外观'], ['hairstyle', '发型'], ['features', '外貌特征']]) if (appearance.appearance[key]) appearancePanel.append(make('p', `${label}：${appearance.appearance[key]}`));
+            if (!Object.values(appearance.appearance).some(Boolean)) appearancePanel.append(make('p', '尚未登记人物外观，可在编辑人物卡中填写。', 'amin-help'));
+            for (const item of appearance.worn) {
+                const row = card(appearancePanel, `${item.slotLabel}${item.layerLabel ? ' · ' + item.layerLabel : ''}：${item.name}`);
+                row.dataset.itemId = item.itemId;
+                if (item.description) row.append(make('p', item.description));
+                const condition = item.condition;
+                row.append(make('p', `湿润 ${condition.wetness}/100 · 污渍 ${condition.dirt}/100 · 破损 ${condition.damage}/100`, 'amin-meta'));
+                if (condition.notes) row.append(make('p', condition.notes));
+            }
+            if (!appearance.worn.length) appearancePanel.append(make('p', '背包中尚无已装备物品。', 'amin-empty'));
+            appearancePanel.append(make('p', '穿戴与物品状态实时引用同一背包记录。', 'amin-help'));
+        } catch (error) { appearancePanel.append(make('p', `穿戴暂时无法读取：${error.message}`, 'amin-help')); }
         if (!character.stats.length) panel.append(make('p', '还没有绑定属性或技能。编辑人物卡可添加世界状态字段。', 'amin-empty'));
         for (const stat of character.stats) {
             const item = card(panel, stat.label), row = make('p', '', 'amin-meta');
@@ -291,11 +320,18 @@ export function mount(target, options = {}) {
         if (!disposed && deferredRefresh && !editingInput()) refresh();
     }));
     contextStamp = stamp();
+    const selectCharacter = event => {
+        if (event.detail?.app !== 'characters' || !event.detail.characterId || disposed) return;
+        if (form || running) { say('请先完成当前人物编辑，再跳转人物。'); return; }
+        if (!api.read().characters.some(character => character.id === event.detail.characterId)) { say(`引用人物已不存在：${event.detail.characterId}`, 'error'); return; }
+        selected = event.detail.characterId; filter = ''; render();
+    };
+    doc.addEventListener?.('amin:select-character', selectCharacter);
     const unsubscribe = api.subscribe?.(refresh) ?? (() => {}), unsubscribeDice = dice.subscribe?.(() => { if (!disposed) { drawRecovery(); reflect(); } }) ?? (() => {});
     const result = {
         open: refresh, refresh,
         dispose() {
-            if (disposed) return; disposed = true; releasePreview(form); unsubscribe(); unsubscribeDice();
+            if (disposed) return; disposed = true; releasePreview(form); unsubscribe(); unsubscribeDice(); doc.removeEventListener?.('amin:select-character', selectCharacter);
             if (ownsService) api.dispose(); if (ownsDice) dice.dispose(); controls.clear(); page.remove(); mounted.delete(target);
         },
     };

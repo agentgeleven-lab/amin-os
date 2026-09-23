@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mount } from '../apps/saves/view.js';
+import { createSavesService } from '../apps/saves/service.js';
 
 class Node {
     constructor(tag, ownerDocument = null) {
@@ -134,7 +135,7 @@ test('create and restore remain previews until explicit confirmation and restore
     await click(f.root, '确认创建存档'); assert.equal(f.store.saves.length, 2); assert.equal(f.api.stats().createApplies, 1);
     await click(f.root, '预览恢复'); assert.equal(f.store.backups.length, 0); assert.equal(f.api.stats().restoreApplies, 0);
     assert.match(f.root.textContent, /确认时创建的安全备份/); assert.match(f.root.textContent, /此备份尚未写入/); assert.match(f.root.textContent, /最近 5 份/);
-    assert.match(f.root.textContent, /聊天消息、回复候选和正文不会回退或删除/); assert.match(f.root.textContent, /SillyTavern 原生“创建分支”或“检查点”/);
+    assert.match(f.root.textContent, /聊天消息、回复候选和正文不会回退或删除/); assert.match(f.root.textContent, /从此处新开分支/);
     assert.match(f.root.textContent, /场景与时间/); assert.match(f.root.textContent, /当前：黄昏 · 门厅/); assert.match(f.root.textContent, /应用后：清晨 · 古堡外/);
     assert.match(f.root.textContent, /数量摘要相同，但模块内容有变化/); assert.match(f.root.textContent, /characters\.char-1\.stats\.hp/);
     assert.match(f.root.textContent, /当前值：生命 8/); assert.match(f.root.textContent, /应用后：生命 12/); assert.match(f.root.textContent, /另有 2 条未显示/);
@@ -168,4 +169,21 @@ test('failed persistence exposes retry and retry does not repeat the confirmed a
     assert.equal(f.store.saves.length, 2); assert.equal(f.api.stats().createApplies, 1); assert.match(f.root.textContent, /保存尚未完成/); assert.match(f.root.textContent, /重试不会再次恢复、导入或删除/);
     await click(f.root, '重试保存'); assert.equal(f.store.saves.length, 2); assert.equal(f.api.stats().createApplies, 1); assert.equal(f.api.stats().retryCalls, 1);
     assert.match(f.root.textContent, /已重新保存/); f.view.dispose();
+});
+
+test('real checkpoint view records current floor, stages retention changes and exposes branch confirmation separately', async () => {
+    let seq=0;
+    const ctx={chatId:'view-chat',getCurrentChatId(){return this.chatId;},chat:[{name:'角色',mes:'当前剧情',swipe_id:0}],chatMetadata:{},async saveMetadata(){}};
+    const api=createSavesService(()=>ctx,{autoCheckpoints:false,createId:()=>`view-${++seq}`});
+    const doc={createElement:tag=>new Node(tag,doc)},root=new Node('main',doc),view=mount(root,{api,document:doc});
+    await click(root,'楼层检查点');assert.match(root.textContent,/旧历史不会补造检查点/);
+    await click(root,'立即记录当前楼层');assert.equal(api.read().checkpoints.length,1);assert.match(root.textContent,/第 1 楼 · 候选 1/);
+    await click(root,'从此处新开分支');assert.equal(api.preview().summary.kind,'branch');assert.ok(byButton(root,'确认新建并恢复分支'));
+    assert.match(root.textContent,/原聊天仍保留/);await click(root,'取消预览');
+    const enabled=byField(root,'启用自动楼层检查点');enabled.checked=false;await enabled.dispatch('change');
+    await type(root,'自动检查点保留数量','4');await click(root,'预览检查点设置');assert.equal(api.read().checkpointSettings.enabled,true);
+    await click(root,'确认检查点设置');assert.deepEqual(api.read().checkpointSettings,{enabled:false,limit:4});
+    const record=api.read().checkpoints[0];ctx.chat[0].swipe_id=1;view.refresh();
+    const branch=byButton(root,'从此处新开分支');assert.equal(branch.disabled,true);assert.match(branch.title,/候选/);assert.ok(byButton(root,'预览恢复'));
+    assert.equal(api.read().checkpoints[0].id,record.id);view.dispose();api.dispose();
 });

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mount } from '../apps/journal/view.js';
-import { KEY, empty, change, currentEntries, compile, sourceFromRange, exportRecords } from '../apps/journal/model.js';
+import { KEY, empty, change, currentEntries, compile, sourceFromRange, exportRecords, currentDrafts } from '../apps/journal/model.js';
+import * as Characters from '../apps/characters/model.js';
 
 class Node {
     constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parent = null; this.attributes = {}; this.dataset = {}; this.listeners = new Map(); this._text = ''; this.value = ''; this.hidden = false; this.disabled = false; this.checked = false; }
@@ -107,4 +108,40 @@ test('list filtering and status changes retain unrelated records', async () => {
     let store = empty(); for (const [id, title, actor] of [['a', '钥匙', '向导'], ['b', '足迹', '猎人']]) store = change(store, chat, 'create', { id, title, kind: 'hook', body: '线索', status: 'open', actors: [actor], sources: sourceFromRange(chat, 0, 0) });
     f.ctx().chatMetadata[KEY] = store; f.view.open(); input(f.root, '搜索标题、正文或人物', '向导'); assert.match(f.root.textContent, /钥匙/); assert.doesNotMatch(f.root.textContent, /足迹/);
     await click(f.root, '标为已回收'); const entries = currentEntries(f.ctx().chatMetadata[KEY], chat); assert.equal(entries.find(entry => entry.id === 'a').status, 'resolved'); assert.equal(entries.find(entry => entry.id === 'b').status, 'open'); f.view.dispose();
+});
+
+test('fact and memory forms use stable people and retain the fact when a memory is forgotten', async () => {
+    const f = fixture();
+    f.ctx().chatMetadata[Characters.KEY] = Characters.appendSnapshot(Characters.emptyStore(), [], { version: 1, characters: [{ id: 'guide', name: '向导', kind: 'npc', stats: [], notes: '' }] }, { id: 'seed-people' });
+    await click(f.root, '事实与记忆'); await click(f.root, '新增事实'); input(f.root, '事实标题', '钥匙的位置'); input(f.root, '事实内容', '钥匙原来挂在墙上。', 'textarea');
+    await click(f.root, '保存事实'); const [fact] = currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat); assert.equal(fact.kind, 'fact'); assert.equal(fact.enabled, false);
+    await click(f.root, '新增人物记忆'); input(f.root, '人物', 'guide', 'select'); input(f.root, '关联事实', fact.id, 'select'); input(f.root, '认知状态', 'rumor', 'select');
+    input(f.root, '人物理解或传闻内容（可选）', '只听说墙上有钥匙。', 'textarea'); input(f.root, '可信程度（0–100）', '30'); input(f.root, '获知时间', '昨天夜里');
+    await click(f.root, '保存人物记忆'); let records = currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat), memory = records.find(entry => entry.kind === 'knowledge');
+    assert.equal(memory.characterId, 'guide'); assert.equal(memory.factId, fact.id); assert.equal(memory.confidence, 30); assert.equal(memory.learnedAtText, '昨天夜里');
+    await click(f.root, '标记遗忘'); records = currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat); memory = records.find(entry => entry.kind === 'knowledge');
+    assert.equal(memory.state, 'forgotten'); assert.equal(records.find(entry => entry.kind === 'fact').body, '钥匙原来挂在墙上。');
+    f.view.open({ characterId: 'guide' }); assert.equal(find(f.root, '筛选人物记忆', 'select').value, 'guide'); f.view.dispose();
+});
+
+test('automatic draft UI requires settings save, AI completion and explicit confirmation before creating a chronicle', async () => {
+    const f = fixture(); await click(f.root, '自动整理');
+    const enabled = find(f.root, '启用自动编年史', 'input'); assert.equal(enabled.checked, false); enabled.checked = true; enabled.dispatch('change');
+    input(f.root, '每多少楼整理一次', '2'); input(f.root, '从第几楼开始累计', '1'); await click(f.root, '保存自动整理设置');
+    assert.equal(f.ctx().chatMetadata[KEY].autoChronicle.enabled, true); await click(f.root, '生成下一段待确认草稿'); assert.equal(f.calls.length, 1);
+    await f.respond('旅人抵达古堡，向导指出钥匙。'); assert.equal(currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat).length, 0);
+    assert.equal(currentDrafts(f.ctx().chatMetadata[KEY], f.ctx().chat).length, 1); await click(f.root, '审核草稿'); input(f.root, '草稿正文', '审核后：向导指出了墙上的钥匙。', 'textarea');
+    await click(f.root, '确认保存编年史'); const [record] = currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat); assert.equal(record.body, '审核后：向导指出了墙上的钥匙。'); assert.equal(record.enabled, false);
+    assert.equal(find(f.root, '审核草稿'), undefined); f.view.dispose();
+});
+
+test('prequel import requires selecting entries and explicit source confirmation, then a separate reference choice', async () => {
+    const f = fixture(), chat = f.ctx().chat, store = change(empty(), chat, 'create', { id: 'previous-record', kind: 'chronicle', title: '前作结尾', body: '向导离开了古堡。', sources: sourceFromRange(chat, 0, 0) });
+    await click(f.root, '前作参考'); input(f.root, '前作名称', '第一卷'); input(f.root, '前作剧情档案 JSON', exportRecords(store, chat), 'textarea');
+    await click(f.root, '预览并选择前作条目'); await click(f.root, '确认保存选中的前作条目'); assert.match(notice(f.root), /勾选前作来源确认/); assert.equal(f.ctx().chatMetadata[KEY], undefined);
+    const chosen = find(f.root, '选用：前作结尾', 'input'), confirm = find(f.root, '我已核对前作来源，仅选用勾选的条目作为背景', 'input'); chosen.checked = true; chosen.dispatch('change'); confirm.checked = true; confirm.dispatch('change');
+    await click(f.root, '确认保存选中的前作条目'); let [prior] = currentEntries(f.ctx().chatMetadata[KEY], chat); assert.equal(prior.kind, 'prior'); assert.equal(prior.enabled, false); assert.equal(prior.sources, null);
+    await click(f.root, '核对并设置引用'); const check = find(f.root, '我已核对来源，将这些内容仅作为前作背景参考', 'input'), reference = find(f.root, '启用后续生成引用（当前分支）', 'input');
+    check.checked = true; check.dispatch('change'); reference.checked = true; reference.dispatch('change'); await click(f.root, '确认前作引用范围');
+    [prior] = currentEntries(f.ctx().chatMetadata[KEY], chat); assert.equal(prior.enabled, true); assert.match(compile(f.ctx().chatMetadata[KEY], chat), /第一卷/); f.view.dispose();
 });

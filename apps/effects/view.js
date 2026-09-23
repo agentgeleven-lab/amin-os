@@ -8,6 +8,7 @@ import {hostWorldSettings} from '../reply/world-context.js';
 import {activeEffects,anchor,belongs,change,compile,splitEffect,directEffect,effectTarget} from './model.js';
 import {getSharedService} from './service.js';
 import {durationFields,appendTiming,timingLabel} from './timing-view.js';
+import {ruleFields,appendRules} from './rules-view.js';
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function mount(target,options={}){
  const instanceId='amin-'+uuid();
@@ -30,10 +31,10 @@ export function mount(target,options={}){
  recovery.append(node('p','效果变更已应用到当前内存，聊天存储尚未完成。重试只保存这次结果，不会重复发动、暂停或延长效果。'));
  button(recovery,'重试保存',async()=>{await api.retrySave();finish('已保存之前的效果变更');},true);
  function syncRecovery(){const dirty=!!api.dirty?.();recovery.hidden=!dirty;for(const b of page.querySelectorAll('[data-effect-mutation]'))b.disabled=dirty||b.dataset.expired==='true';}
- const tabButtons=['能力面板','能力管理','生效中','变更记录','提示预览'].map((name,i)=>{
+ const tabButtons=['能力面板','能力管理','生效中','周期结算','变更记录','提示预览'].map((name,i)=>{
   const b=button(tabs,name,()=>navigate(()=>{selected=name;render();}));b.id=instanceId+'-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;
  });
- tabs.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();let i=tabButtons.findIndex(b=>b.textContent===selected);i=e.key==='Home'?0:e.key==='End'?4:(i+(e.key==='ArrowRight'?1:4))%5;navigate(()=>{selected=tabButtons[i].textContent;render();tabButtons[i].focus();});};
+ tabs.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();let i=tabButtons.findIndex(b=>b.textContent===selected),n=tabButtons.length;i=e.key==='Home'?0:e.key==='End'?n-1:(i+(e.key==='ArrowRight'?1:n-1))%n;navigate(()=>{selected=tabButtons[i].textContent;render();tabButtons[i].focus();});};
  function field(parent,label,value='',multiline=false){const row=node('label',label,'amin-field'+(multiline?' amin-span-full':'')),input=node(multiline?'textarea':'input');input.value=value;input.setAttribute('aria-label',label);if(multiline)input.rows=4;row.append(input);parent.append(row);return input;}
  function select(parent,label,options){const row=node('label',label,'amin-field'),input=node('select');input.setAttribute('aria-label',label);for(const [value,text]of options){const o=node('option',text);o.value=value;input.append(o);}row.append(input);parent.append(row);return input;}
  function card(title,parent=body){const c=node('section',null,'amin-card amin-stack');c.append(node('h3',title,'amin-section-heading'));parent.append(c);return c;}
@@ -83,8 +84,8 @@ export function mount(target,options={}){
   const reflect=()=>{targetField.parentElement.hidden=mode.value==='direct';targetField.required=mode.value!=='direct';};mode.onchange=reflect;reflect();
   if(skill){group.onchange=()=>{skill.replaceChildren();for(const [id,text]of [['','请选择能力'],...store.skills.filter(s=>!group.value||abilityGroup(s)===group.value).map(s=>[s.id,s.name])]){const o=node('option',text);o.value=id;skill.append(o);}skill.value='';};skill.onchange=()=>{mode.value=store.skills.find(s=>s.id===skill.value)?.ui?.targetMode??'targeted';reflect();};}
   const command=field(fields,'当前指令',effect?.command??'',true),condition=field(fields,'持续或解除条件',effect?.condition??'直到主动解除或转让；其他条件按技能规则人工确认。',true);
-  if(effect)appendTiming(c,effect);const duration=durationFields(c,{effect,clock:api.gameClock?.()});
-  const actions=toolbar(c);operationButton(actions,'确认保存',async()=>{await mutate(token,effect?'update':'create',{id:effect?.id,skillId:skill?.value,holder:holder.value,targetMode:mode.value,target:mode.value==='direct'?'':targetField.value,scope:scope.value,command:command.value,condition:condition.value,durationMinutes:duration.read()});finish('生效记录已保存');},true);button(actions,'取消',render);
+  if(effect)appendTiming(c,effect);const duration=durationFields(c,{effect,clock:api.gameClock?.()});const rules=ruleFields(c,{effect,ctx:api.context()});
+  const actions=toolbar(c);operationButton(actions,'确认保存',async()=>{await mutate(token,effect?'update':'create',{id:effect?.id,skillId:skill?.value,holder:holder.value,targetMode:mode.value,target:mode.value==='direct'?'':targetField.value,scope:scope.value,command:command.value,condition:condition.value,durationMinutes:duration.read(),...rules.read()});finish('生效记录已保存');},true);button(actions,'取消',render);
  }
  function groupManager(){
   stopDraft();formOpen=false;formDirty=false;clearBody();const store=api.read();card('能力分组').append(node('p','分组跨角色和聊天共享。删除分组只将能力移回“未分组”，不删除能力或历史效果。'));
@@ -103,6 +104,12 @@ export function mount(target,options={}){
  function endForm(effect){openForm();const token=api.capture();clearBody();const c=card('解除：'+effectTarget(effect)+' / '+effect.scope),reason=field(c,'解除依据','',true);operationButton(c,'确认解除',async()=>{await mutate(token,'end',{id:effect.id,reason:reason.value});finish('已解除此项效果');},true);button(c,'取消',render);}
  function splitForm(effect){openForm();const token=api.capture();clearBody();const c=card('分割：'+effectTarget(effect)+' / '+effect.scope);c.append(node('p','每行填写“作用层面 | 持有者”。保存后原关系结束，由子记录接替；请完整列出需要保留的范围。'));
   const parts=field(c,'分割与分配','',true);operationButton(c,'确认分割',async()=>{const rows=parts.value.split('\n').filter(x=>x.trim()).map(x=>x.split('|').map(v=>v.trim()));if(rows.length<2||rows.some(x=>x.length!==2||!x[0]||!x[1]))throw Error('至少填写两行，格式为：右手 | 持有者');const assignments=rows.map(([scope,holder])=>({scope,holder}));if(api.split)await api.split(token,effect.id,assignments);else await api.save(token,s=>splitEffect(s,api.context().chat,effect.id,assignments));finish('已分割，子记录保留原规则快照与剩余时长');},true);button(c,'取消',render);
+ }
+ function settlementForm(ids){
+  openForm();const token=api.capture();let preview;try{preview=api.stageSettlement(token,ids);}catch(error){formOpen=false;throw error;}clearBody();
+  const c=card('确认周期结算');c.append(node('p',preview.summary),node('p','以下变更与已结算时刻一起保存；任何数值越界或资源不足都会阻止整组操作。','amin-meta'));
+  for(const row of preview.rows){const section=node('section',null,'amin-card');section.append(node('h3',row.name+' · '+row.target),node('p',`${row.ticks} 个周期${row.stacks>1?' × '+row.stacks+' 层':''}`));for(const change of row.changes)section.append(node('p',`${change.label}：${change.before} → ${change.after}`));c.append(section);}
+  const actions=toolbar(c);operationButton(actions,'确认结算',async()=>{await api.confirmSettlement();finish('周期结算已保存，重复预览不会再次扣除');},true);button(actions,'取消结算',()=>{api.discardSettlement?.();render();});
  }
  function render(){
   formOpen=false;formDirty=false;
@@ -133,10 +140,14 @@ export function mount(target,options={}){
    }else if(selected==='生效中'){
     button(toolbar(body),'建立生效记录',()=>effectForm(),true).disabled=!store.skills.length;
     const effects=api.timedEffects?.()??activeEffects(store,chat);if(!effects.length)body.append(node('p',store.skills.length?'当前分支没有持续效果。选择能力并确认发动后，会显示在这里。':'先在能力管理中添加能力，再建立生效记录。','amin-empty'));
-    for(const e of effects){const c=card(e.skill.name+' · '+effectTarget(e));c.append(node('p',timingLabel(e),'amin-meta'),node('p','持有者：'+e.holder+' ｜ 层面：'+e.scope),node('p','当前指令：'+(e.command||'未指定')),node('p','持续条件：'+e.condition));appendTiming(c,e);const actions=toolbar(c);button(actions,'调整 / 转让 / 时长',()=>effectForm(e));const pause=operationButton(actions,e.paused?'恢复效果':'暂停效果',async()=>{const token=api.capture();await mutate(token,'pause',{id:e.id,paused:!e.paused});finish(e.paused?'已恢复效果':'已暂停效果');});pause.dataset.expired=String(e.timingStatus?.state==='expired');pause.disabled=!!api.dirty?.()||e.timingStatus?.state==='expired';if(e.timingStatus?.state==='expired')c.append(node('p','效果已到期；可调整时长重新计时，或解除记录。','amin-meta'));button(actions,'分割',()=>splitForm(e));button(actions,'解除',()=>endForm(e));operationButton(actions,'删除生效记录',()=>deleteEffect(e),'amin-danger');}
+    for(const e of effects){const c=card(e.skill.name+' · '+effectTarget(e));c.append(node('p',timingLabel(e),'amin-meta'),node('p','持有者：'+e.holder+' ｜ 层面：'+e.scope),node('p','当前指令：'+(e.command||'未指定')),node('p','持续条件：'+e.condition));appendTiming(c,e);appendRules(c,e);const actions=toolbar(c);button(actions,'调整 / 转让 / 时长',()=>effectForm(e));const pause=operationButton(actions,e.paused?'恢复效果':'暂停效果',async()=>{const token=api.capture();await mutate(token,'pause',{id:e.id,paused:!e.paused});finish(e.paused?'已恢复效果':'已暂停效果');});pause.dataset.expired=String(e.timingStatus?.state==='expired');pause.disabled=!!api.dirty?.()||e.timingStatus?.state==='expired';if(e.timingStatus?.state==='expired')c.append(node('p','效果已到期；可调整时长重新计时，或解除记录。','amin-meta'));button(actions,'分割',()=>splitForm(e));button(actions,'解除',()=>endForm(e));operationButton(actions,'删除生效记录',()=>deleteEffect(e),'amin-danger');}
+   }else if(selected==='周期结算'){
+    const forecast=api.periodicPreview?.();const intro=card('周期效果与资源结算');intro.append(node('p','推进游戏时间只产生待结算周期。请先预览生命、资源与物品变更，再确认整组保存。读取剧情提示不会执行伤害或消耗。','amin-meta'));
+    if(!forecast)intro.append(node('p','当前服务暂不支持周期结算，请刷新扩展。','amin-empty'));
+    else{if(forecast.pending.length)operationButton(toolbar(intro),'预览全部周期结算',()=>settlementForm(),true);if(!forecast.records.length)intro.append(node('p','尚未设置周期规则。可在建立或调整效果时展开“叠加与周期规则”。','amin-empty'));for(const record of forecast.records){const c=card(record.name+' · '+record.target);c.append(node('p',record.label));if(record.lastSettledAt){const at=record.lastSettledAt;c.append(node('p',`上次结算剧情时刻：${at.year}/${at.month}/${at.day} ${String(at.hour).padStart(2,'0')}:${String(at.minute).padStart(2,'0')}`,'amin-meta'));}if(record.pendingTicks)operationButton(toolbar(c),'预览此效果结算',()=>settlementForm([record.id]));}}
    }else if(selected==='变更记录'){
     const now=anchor(chat);if(!store.events.length)body.append(node('p','发动、调整或解除能力后，这里会保留变更记录。','amin-empty'));
-    for(const e of [...store.events].reverse()){const active=belongs(e,now),c=card(`${e.floor} 楼 · ${{create:'建立',update:'调整 / 转让',end:'解除',delete:'删除生效记录',pause:e.paused?'暂停':'恢复'}[e.op]}`);c.append(node('p',active?'属于当前分支':'原分支记录 · 当前不生效','amin-meta'),node('p',e.at));const detail=node('details');detail.append(node('summary','查看变更详情'),node('pre',JSON.stringify(e.effect??e.patch??{原因:e.reason},null,2)));c.append(detail);}
+    for(const e of [...store.events].reverse()){const active=belongs(e,now),c=card(`${e.floor} 楼 · ${{create:'建立',update:'调整 / 转让',end:'解除',delete:'删除生效记录',pause:e.paused?'暂停':'恢复',settle:'周期结算',refresh:'刷新计时',stack:'叠层',restore:'恢复存档'}[e.op]}`);c.append(node('p',active?'属于当前分支':'原分支记录 · 当前不生效','amin-meta'),node('p',e.at));const detail=node('details');detail.append(node('summary','查看变更详情'),node('pre',JSON.stringify(e.effect??e.patch??{原因:e.reason},null,2)));if(e.changes)detail.append(node('pre',JSON.stringify(e.changes,null,2)));c.append(detail);}
    }else{
     const token=api.capture(),settings=card('剧情提醒设置');const toggle=node('label',null,'amin-check'),check=node('input');check.type='checkbox';check.checked=store.enabled;toggle.append(check,node('span','生成时附加持续提醒'));settings.append(toggle);
     const limit=field(settings,'提醒字符上限（1000–200000）',String(store.limit));limit.type='number';limit.min=1000;limit.max=200000;

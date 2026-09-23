@@ -87,6 +87,16 @@ test('malformed existing history is not reset and failed reads do not overwrite 
     }
 });
 
+test('history subscriber preserves an already included atomic snapshot and cannot dirty a successful linked save', async () => {
+    const ctx={chatMetadata:{variables:{状态栏:'{"hp":8}'}},chat:[{mes:'floor',extra:{wsh_message_id:'floor'}}],getCurrentChatId:()=> 'a',saveChat:async()=>{},saveMetadata:async()=>{}};
+    const history=createHistory({context:()=>ctx,read:()=>JSON.parse(ctx.chatMetadata.variables.状态栏),write:()=>{throw Error('must not restore');}});
+    const off=subscribeStateChanges(detail=>{if(detail.phase==='applied')history.adoptExternal();});
+    const operation=createOperationService(()=>ctx),record={state:{hp:4},savedAt:1,protected:'preserved'};
+    operation.stage({label:'周期结算',patches:[{path:['variables','状态栏'],value:'{"hp":4}'},{path:[HISTORY_KEY],value:{records:{'floor:0':record}}}]});
+    await operation.confirm();assert.equal(operation.dirty(),false);assert.deepEqual(ctx.chatMetadata[HISTORY_KEY].records['floor:0'],record);
+    off();history.dispose();operation.dispose();
+});
+
 test('configured organization history supports group chats without changing default group restriction', () => {
     const t = fixture({ allowGroups: true, historyKey: 'org_history', messageKey: 'org_id' }); t.ctx.groupId = 1;
     assert.equal(t.history.adoptExternal(), true); assert.ok(t.ctx.chat[0].extra.org_id); assert.ok(t.ctx.chatMetadata.org_history.records[t.ctx.chat[0].extra.org_id + ':0']); assert.equal(t.saves, 0);

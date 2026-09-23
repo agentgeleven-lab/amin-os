@@ -4,6 +4,8 @@ import { getSharedDiceService } from '../dice/service.js';
 import { readCurrentScene } from '../scene/model.js';
 import { anchor, consumedActionIds, readStore } from './model.js';
 import { getSharedService } from './service.js';
+import { validatePeriodicConfig, validateStacking } from './rules.js';
+import { operationReference } from './settlement.js';
 
 const copy = value => structuredClone(value);
 const stamp = value => JSON.stringify(value);
@@ -27,6 +29,8 @@ function selectionData(selection, actor) {
         target: mode === 'direct' ? '' : text(selection.target, '目标'),
         scope: text(selection.scope, '作用层面'), command: text(selection.command ?? '', '具体指令', false),
         condition: text(selection.condition, '持续或解除条件'), durationMinutes: duration,
+        ...(selection.stacking ? { stacking: validateStacking(selection.stacking) } : {}),
+        ...(selection.periodic ? { periodic: validatePeriodicConfig(selection.periodic) } : {}),
     };
 }
 
@@ -64,7 +68,8 @@ export function createAbilityCheckService(getContext = () => globalThis.SillyTav
         if (!skill || stamp(skill) !== item.skillStamp) throw Error('能力规则已变化，请重新预览检定。');
         const resolved = resolveStat(ctx, item.characterId, item.statId);
         if (stamp(resolved) !== item.statStamp) throw Error('人物、属性绑定或当前数值已变化，请重新预览检定。');
-        if (item.selection.durationMinutes !== null && stamp(readCurrentScene(ctx).clock) !== item.clockStamp) throw Error('游戏时间已变化，请重新预览持续时间和检定。');
+        if ((item.selection.durationMinutes !== null || item.selection.periodic) && stamp(readCurrentScene(ctx).clock) !== item.clockStamp) throw Error('游戏时间已变化，请重新预览持续时间和检定。');
+        if (item.selection.periodic && stamp(item.selection.periodic.operations.map(operation => operationReference(ctx, operation))) !== item.periodicStamp) throw Error('周期绑定或相关数值已变化，请重新预览检定。');
         if (item.record) {
             const stored = dice.history().find(record => record.id === item.record.id);
             if (!stored || rollStamp(stored) !== rollStamp(item.record)) throw Error('固定骰点记录已变化或不存在，请到骰子历史检查后重新预览。');
@@ -87,11 +92,12 @@ export function createAbilityCheckService(getContext = () => globalThis.SillyTav
         const skill = readStore(ctx).skills.find(entry => entry.id === selection?.skillId);
         if (!skill) throw Error('所选能力已不存在，请重新选择。');
         const normalized = selectionData(selection, resolved.character), config = buildCheckConfig(resolved, skill, options);
-        const clock = normalized.durationMinutes === null ? null : readCurrentScene(ctx).clock;
-        if (normalized.durationMinutes !== null && !clock) throw Error('请先在场景与时间中设置游戏时间，再使用限时效果。');
+        const clock = normalized.durationMinutes === null && !normalized.periodic ? null : readCurrentScene(ctx).clock;
+        if ((normalized.durationMinutes !== null || normalized.periodic) && !clock) throw Error('请先在场景与时间中设置游戏时间，再使用限时或周期效果。');
         pending = { meta: ctx.chatMetadata, chatId: chatId(ctx), path: stamp(anchor(ctx.chat)),
             characterId: resolved.character.id, statId: resolved.stat.id, selection: normalized,
             skillStamp: stamp(skill), statStamp: stamp(resolved), clockStamp: stamp(clock), config,
+            periodicStamp: normalized.periodic ? stamp(normalized.periodic.operations.map(operation => operationReference(ctx, operation))) : '',
             record: null, applied: false, invalidated: '', public: {
                 character: copy(resolved.character), stat: copy(resolved.stat), value: resolved.value,
                 skill: copy(skill), config: copy(config), selection: copy(normalized), options: copy(options), clock: copy(clock),

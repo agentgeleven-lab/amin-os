@@ -1,0 +1,67 @@
+import { validateDocument } from '../../map/src/core/protocol.js';
+import { prepareDocument } from '../../map/src/core/spatial.js';
+import { compileMapUpdate } from '../../map/src/integrations/tool-calling.js';
+
+const KEY = 'dynamicMapV1', HISTORY = 'dynamicMapPositionHistoryV1';
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const clone = value => structuredClone(value);
+const visible = node => node?.discovered && node.ai?.includeInContext;
+const fields = {
+    add_node: ['mapId', 'name', 'description', 'type'], update_node: ['mapId', 'name', 'description', 'type'],
+    add_edge: ['mapId', 'from', 'to', 'name', 'type', 'direction', 'distance', 'bidirectional'],
+    update_edge: ['mapId', 'name', 'type', 'direction', 'distance', 'bidirectional'], move: ['mapId'],
+};
+function document(ctx) {
+    const raw = ctx?.chatMetadata?.[KEY];
+    if (raw === undefined) return null;
+    if (!object(raw) || !Number.isFinite(raw.updatedAt) || !object(raw.document)) throw Error('地图存储格式无效，原始资料未改写。');
+    return clone(validateDocument(raw.document));
+}
+function positionPatch(ctx, doc) {
+    const raw = ctx?.chatMetadata?.[HISTORY];
+    if (raw !== undefined && (!object(raw) || !object(raw.records) || raw.sequence !== undefined && (!Array.isArray(raw.sequence) || raw.sequence.some(value => typeof value !== 'string')))) throw Error('地图位置历史格式无效，未写入。');
+    const sequence = (ctx?.chat ?? []).map(message => {
+        const id = message.extra?.dynamic_map_message_id;
+        if (id !== undefined && (typeof id !== 'string' || !id)) throw Error('地图楼层标识无效。');
+        return id ? id + ':' + String(message.swipe_id ?? 0) : null;
+    });
+    if (sequence.some(value => value === null) || !sequence.length) return [];
+    const next = clone(raw ?? { records: {} }); next.sequence = sequence;
+    next.records[sequence.at(-1)] = { mapId: doc.activeMap, nodeId: doc.maps[doc.activeMap].currentLocation };
+    return [{ path: [HISTORY], value: next }];
+}
+
+export const adapter = {
+    id: 'map', label: '地图',
+    paths: [[KEY], [HISTORY]],
+    contract: '仅限已有地图。target 为地点/道路稳定 ID，data 必须含 mapId。add_node: data={mapId,name,description?,type?}; update_node: data={mapId,name?,description?,type?}; add_edge: data={mapId,from,to,name?,type?,direction?,distance?,bidirectional?}; update_edge: data={mapId,name?,type?,direction?,distance?,bidirectional?}; move: data={mapId}, target=已到达地点 ID。type 只能用该地图已有类型，distance 为非负数或 null，direction 为地图方向值或 null。新增 ID 使用字母开头、字母数字下划线连字符且≤80字符。只能更新已发现并允许模型读取的地点/道路；不删除、不创建地图、不更改地图类型、层级、坐标、锁定方向或通行规则。',
+    read(ctx) {
+        const source = document(ctx);
+        if (!source) return { version: 1, activeMap: null, maps: {} };
+        const doc = prepareDocument(source);
+        return { version: 1, activeMap: doc.activeMap, maps: Object.fromEntries(Object.values(doc.maps).map(map => [map.id, {
+            id: map.id, name: map.name, type: map.type, parentMap: map.parentMap, parentNode: map.metadata.parentNode ?? null,
+            currentLocation: visible(map.nodes[map.currentLocation]) ? map.currentLocation : null,
+            nodeTypes: map.metadata.nodeTypes, roadTypes: map.metadata.roadTypes, rules: map.metadata.rules,
+            nodes: Object.fromEntries(Object.values(map.nodes).filter(visible).map(({ id, name, type, description }) => [id, { id, name, type, description }])),
+            edges: map.edges.filter(edge => edge.discovered && visible(map.nodes[edge.from]) && visible(map.nodes[edge.to])).map(({ id, from, to, name, type, direction, distance, bidirectional, metadata }) => ({ id, from, to, name, type, direction, distance, bidirectional, directionLocked: metadata.directionLocked === true })),
+        }])) };
+    },
+    apply(ctx, change, { operationId, now } = {}) {
+        if (change?.module !== 'map' || !Object.hasOwn(fields, change.action)) throw Error('不支持的地图联动操作。');
+        if (!object(change.data) || Object.keys(change.data).some(key => !fields[change.action].includes(key))) throw Error('地图更新包含未知字段。');
+        if (typeof change.target !== 'string' || !change.target.trim() || ['__proto__', 'constructor', 'prototype'].includes(change.target)) throw Error('地图目标 ID 无效。');
+        if (change.action.startsWith('add_') && !/^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(change.target)) throw Error('新地点或道路需要安全、唯一的稳定 ID。');
+        const before = document(ctx);
+        if (!before) throw Error('地图尚未建立，请先在地图应用保存初始地图。');
+        const mapId = change.data.mapId;
+        if (typeof mapId !== 'string' || !Object.hasOwn(before.maps, mapId)) throw Error('目标地图不存在。');
+        if (change.action.startsWith('update_') && Object.keys(change.data).length < 2) throw Error('地图更新没有提供待修改字段。');
+        const edge = before.maps[mapId].edges.find(item => item.id === change.target);
+        if (change.action === 'update_edge' && edge?.metadata.directionLocked && Object.hasOwn(change.data, 'direction') && change.data.direction !== edge.direction) throw Error('道路方向已锁定，模型不能修改。');
+        const next = compileMapUpdate(before, { token: operationId, reason: change.reason, operations: [{ op: change.action, id: change.target, ...clone(change.data) }] });
+        const timestamp = typeof now === 'number' ? now : Date.parse(now);
+        if (!Number.isFinite(timestamp)) throw Error('联动更新时间无效。');
+        return { patches: [{ path: [KEY], value: { ...clone(ctx.chatMetadata[KEY]), updatedAt: Math.max(timestamp, ctx.chatMetadata[KEY].updatedAt + 1), document: next } }, ...positionPatch(ctx, next)], summary: `地图 ${before.maps[mapId].name}：${change.action} ${change.target}` };
+    },
+};
