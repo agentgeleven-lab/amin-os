@@ -66,14 +66,30 @@ export async function checkTileGrid({send,evaluate,waitFor,delay,artifacts,check
     assert.equal(await evaluate("tileGrid().scrollWidth<=tileGrid().clientWidth+1"),true,'grid fits 320px');
     const screenshot=async name=>{const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(artifacts,name+'.png'),Buffer.from(r.data,'base64'));};
     await screenshot('tile-grid-edit-320');
+    await evaluate("tileField('网格列数','4')");
+    assert.equal(await evaluate("getComputedStyle(tileGrid()).gridTemplateColumns.split(' ').length"),4,'four-column grid');
+    assert.equal(await evaluate("tileRead().every(t=>t.x>=0&&t.x+(t.size==='wide'?4:t.size==='compactWide'?3:t.size==='small'?1:2)<=4)"),true,'narrow grid preserves bounded positions');
+    const gridWidth=await evaluate('tileGrid().clientWidth');
+    await evaluate("const range=document.querySelector('[aria-label=\"磁贴整体大小\"]');range.value='80';range.dispatchEvent(new Event('input',{bubbles:true}))");
+    await delay(80);
+    const scaledWidth=await evaluate('tileGrid().clientWidth');
+    assert.ok(Math.abs(scaledWidth/gridWidth-.8)<.02,'overall grid scales to 80 percent');
+    assert.deepEqual(await evaluate("(await import('/tile-layout.js')).loadTileGrid(localStorage)"),{columns:4,scale:80},'grid settings persist');
+    assert.equal(await evaluate("tileRead().find(t=>t.id==='map').backgroundColor"),'#123456','reflow retains custom colors');
+    await evaluate("tileGrid().scrollIntoView({block:'start'})");
+    await screenshot('tile-grid-four-80-320');
+    await evaluate("tileField('网格列数','6')");
+    assert.equal(await evaluate("getComputedStyle(tileGrid()).gridTemplateColumns.split(' ').length"),6,'switch back to six columns');
+    await evaluate("const range=document.querySelector('[aria-label=\"磁贴整体大小\"]');range.value='100';range.dispatchEvent(new Event('input',{bubbles:true}))");
+
     await evaluate("document.querySelector('.amin-edit-tiles').click();document.querySelector('.amin-home').scrollTop=0");
     await screenshot('tile-grid-320');
     await send('Emulation.setTouchEmulationEnabled',{enabled:false});
     await send('Emulation.setDeviceMetricsOverride',{width:1280,height:1000,deviceScaleFactor:1,mobile:false});
-    await evaluate("window.dispatchEvent(new Event('resize'));window.dispatchEvent(new Event('amin-os:reset-tiles'));document.querySelector('.amin-home').scrollTop=0");
+    await evaluate("window.dispatchEvent(new Event('resize'));(await import('/tile-layout.js')).resetTileLayout();document.querySelector('.amin-home').scrollTop=0");
     await delay(150);await screenshot('tile-grid-default-1280');
     await evaluate("tileButton('dice').scrollIntoView({block:'center'})");
     const launch=await center('dice');await mouse('mousePressed',launch);await mouse('mouseReleased',launch);
     await waitFor("!pane('dice').hidden&&!!pane('dice').querySelector('.amin-dice')",'tile still opens app outside edit mode');
-    checks.push('Tile grid: exact top-left mouse/touch drop, full valid/invalid preview, collisions/bounds reject without reflow, 3x2 and 2x3 resizing, independent colors/reload, mobile long press and six-column layout');
+    checks.push('Tile grid: exact top-left mouse/touch drop, full valid/invalid preview, collisions/bounds reject without reflow, 3x2 and 2x3 resizing, independent colors/reload, four/six columns and 80% overall sizing with persisted settings, mobile long press and six-column layout');
 }

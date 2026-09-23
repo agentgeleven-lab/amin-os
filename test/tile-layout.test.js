@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaultTiles,normalizeTiles,moveTile,migrateTiles,loadTiles,saveTiles,TILE_KEY,LEGACY_TILE_KEY,PREVIOUS_TILE_KEY,TILE_COLUMNS,TILE_SPANS,moveTileToCell,canPlaceTile} from '../tile-layout.js';
+import {defaultTiles,normalizeTiles,moveTile,migrateTiles,loadTiles,saveTiles,TILE_KEY,LEGACY_TILE_KEY,PREVIOUS_TILE_KEY,TILE_COLUMNS,TILE_SPANS,moveTileToCell,canPlaceTile,loadTileGrid,saveTileGrid,normalizeTileGrid} from '../tile-layout.js';
 test('release applications appear once while later user removals remain removed',()=>{
  const data=new Map([[TILE_KEY,JSON.stringify({version:2,tiles:[{id:'mine',target:'map',label:'我的地图',size:'wide'}]})]]),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
  const migrated=loadTiles(storage);assert.deepEqual(migrated.map(t=>t.target),['map','characters','inventory','relationships','saves']);assert.equal(migrated[0].label,'我的地图');
@@ -79,4 +79,32 @@ test('version2 migrates custom identities images colors and order without changi
  const old=JSON.stringify({version:2,knownTargets:defaultTiles().map(t=>t.target),tiles});const data=new Map([[PREVIOUS_TILE_KEY,old]]),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
  const layout=loadTiles(storage);assert.deepEqual(layout.map(t=>t.id),['mine','other']);assert.equal(layout[0].backgroundColor,'#12abEF');assert.equal(layout[0].image,tiles[0].image);assert.equal(layout[1].backgroundColor,undefined);assert.equal(layout[1].textColor,undefined);assert.equal(layout[1].iconColor,undefined);assert.equal(data.get(PREVIOUS_TILE_KEY),old);assert.equal(JSON.parse(data.get(TILE_KEY)).version,3);assert.deepEqual(loadTiles(storage),layout);
  data.set(TILE_KEY,'broken');assert.deepEqual(loadTiles(storage),layout);
+});
+
+
+test('four columns fit full-width tiles and narrowing preserves payloads without collisions',()=>{
+ const input=normalizeTiles([{id:'fixed',target:'dice',size:'small',x:0,y:0},{id:'wide',target:'map',size:'wide',x:2,y:3,label:'Route',backgroundColor:'#123456',iconColor:'#abcdef',textColor:'#fedcba',image:'/map.png'},{id:'right',target:'scene',size:'compactTall',x:4,y:0}]);
+ const narrowed=normalizeTiles(input,4);
+ assert.deepEqual(narrowed.map(({x,y,...tile})=>tile),input.map(({x,y,...tile})=>tile));
+ assert.deepEqual([narrowed[0].x,narrowed[0].y],[0,0]);assert.equal(narrowed.find(t=>t.id==='wide').x,0);
+ for(const tile of narrowed){assert.equal(canPlaceTile(narrowed,tile.id,tile.x,tile.y,undefined,4),true);assert.ok(tile.x+TILE_SPANS[tile.size].w<=4);}
+ assert.deepEqual(normalizeTiles(narrowed,4),narrowed);assert.equal(defaultTiles(4).length,defaultTiles().length);
+ const wideOnly=normalizeTiles([{id:'wide',target:'map',size:'wide'}],4);
+ assert.equal(moveTileToCell(wideOnly,'wide',0,4,4).success,true);assert.equal(moveTileToCell(wideOnly,'wide',1,4,4).reason,'bounds');assert.equal(moveTileToCell(wideOnly,'wide',2,4,6).success,true);
+});
+test('grid settings persist alongside colors and remain preserved during ordinary tile saves',()=>{
+ const data=new Map(),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
+ assert.deepEqual(loadTileGrid(storage),{columns:6,scale:100});
+ const tiles=[{id:'custom',target:'map',size:'compactWide',backgroundColor:'#aabbcc',textColor:'#112233',iconColor:'#445566',x:1,y:2}];
+ saveTiles(storage,tiles,{columns:4,scale:80});assert.deepEqual(loadTileGrid(storage),{columns:4,scale:80});assert.deepEqual(loadTiles(storage),normalizeTiles(tiles,4));
+ saveTiles(storage,[{...loadTiles(storage)[0],label:'Changed'}]);assert.deepEqual(loadTileGrid(storage),{columns:4,scale:80});assert.equal(loadTiles(storage)[0].backgroundColor,'#aabbcc');
+ const before=loadTiles(storage);saveTileGrid(storage,{columns:6,scale:95});assert.deepEqual(loadTileGrid(storage),{columns:6,scale:95});assert.deepEqual(loadTiles(storage),before);
+});
+test('legacy layouts default to six columns and invalid grid settings fall back independently',()=>{
+ const data=new Map([[PREVIOUS_TILE_KEY,JSON.stringify({version:2,knownTargets:defaultTiles().map(t=>t.target),tiles:[{id:'custom',target:'dice',size:'small'}]})]]),storage={getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)};
+ loadTiles(storage);assert.deepEqual(loadTileGrid(storage),{columns:6,scale:100});
+ assert.deepEqual(normalizeTileGrid({columns:5,scale:85}),{columns:6,scale:85});
+ for(const scale of [0,69,101,NaN,Infinity,'80',null])assert.deepEqual(normalizeTileGrid({columns:4,scale}),{columns:4,scale:100});
+ assert.deepEqual(normalizeTileGrid({columns:4,scale:70.4}),{columns:4,scale:70});
+ saveTiles(storage,loadTiles(storage),{columns:4,scale:75});const saved=JSON.parse(data.get(TILE_KEY));assert.deepEqual(saved.grid,{columns:4,scale:75});assert.equal(saved.version,3);
 });
