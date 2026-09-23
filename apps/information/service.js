@@ -1,6 +1,7 @@
 import {KEY,read,path,compile,LIBRARY_KEY,library,archive} from './model.js';
 import {acquireMetadataWrite,captureContext,subscribeStateChanges,metadataWriteStatus} from '../shared/operations.js';
 import {managesModule} from '../linkage/policy.js';
+import {prepareState2ManualWrite} from '../state2/runtime.js';
 export const PROMPT_KEY='amin-os-information-panel';
 export function createInformation(context){
  let busy=false,disposed=false,message='尚未注入剧情提醒';const listeners=new Set();const notify=()=>{for(const fn of listeners)try{fn();}catch{}};
@@ -11,10 +12,11 @@ export function createInformation(context){
  function clear(){context()?.setExtensionPrompt?.(PROMPT_KEY,'',1,0,false);}
  async function write(token,prepare,{archiveOnly=false}={}){
   if(busy)throw Error('正在保存，请稍候');const c=check(token);if(typeof c.saveMetadata!=='function')throw Error('当前前端缺少聊天保存接口');
-  const release=acquireMetadataWrite(context,captureContext(context,[[KEY],[LIBRARY_KEY]]));let changes=[],saved=false;busy=true;
+  const release=acquireMetadataWrite(context,captureContext(context,[[KEY],[LIBRARY_KEY]]));let changes=[],nativeRollback,saved=false;busy=true;
   try{
    changes=prepare(c).map(([key,value])=>({key,value,old:c.chatMetadata[key],existed:Object.hasOwn(c.chatMetadata,key),applied:JSON.stringify([true,value])}));
    for(const change of changes)c.chatMetadata[change.key]=change.value;
+   nativeRollback=prepareState2ManualWrite(c,changes.map(change=>[change.key]));
    clear();await c.saveMetadata();saved=true;
    const current=context(),expected=new Map([[KEY,token.basis],[LIBRARY_KEY,token.libraryBasis]]);for(const change of changes)expected.set(change.key,change.applied);
    if(current?.chatMetadata!==c.chatMetadata||identity(current)!==token.identity||JSON.stringify(path(current?.chat))!==token.path||[...expected].some(([key,value])=>basis(c,key)!==value))throw Error('保存期间聊天、楼层或面板资料已变化，请返回原聊天检查已保存资料');
@@ -23,7 +25,11 @@ export function createInformation(context){
    if(archiveOnly)token.libraryBasis=basis(c,LIBRARY_KEY);
    message=archiveOnly?'资料已收纳，不影响正文':'已保存，后续剧情采用已确认的设定';
   }catch(e){
-   if(!saved)for(const change of changes)if(basis(c,change.key)===change.applied){if(change.existed)c.chatMetadata[change.key]=change.old;else delete c.chatMetadata[change.key];}
+   if(!saved){
+    const allOwned=changes.every(change=>basis(c,change.key)===change.applied);
+    for(const change of changes)if(basis(c,change.key)===change.applied){if(change.existed)c.chatMetadata[change.key]=change.old;else delete c.chatMetadata[change.key];}
+    if(allOwned)nativeRollback?.();
+   }
    message=(saved?'保存已完成，但需要重新核对：':'保存失败：')+e.message;throw e;
   }finally{busy=false;release();notify();}
  }

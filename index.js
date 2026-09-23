@@ -1,3 +1,4 @@
+import { initializeState2 } from './apps/state2/runtime.js';
 import { uuid } from './uuid.js';
 import {cleanupRetiredData} from './retired-data.js';
 import {installExtraFloorButtons} from './apps/extra-floor-ui.js';
@@ -34,9 +35,10 @@ export function initialize() {
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const linkage = getLinkageService();
+    const state2 = initializeState2(() => globalThis.SillyTavern?.getContext?.(), { report: linkage.reportHost });
     const linkageHost = createLinkageHost(() => globalThis.SillyTavern?.getContext?.(), {
-        buildPrompt: buildUpdateRules, buildDataPrompt, captureGeneration: linkage.captureGeneration,
-        collectReply: linkage.collectReply, cancelGeneration: linkage.cancelGeneration,
+        buildPrompt: buildUpdateRules, buildDataPrompt, beforeGeneration: state2.prepareGeneration, captureGeneration: () => true,
+        collectReply: state2.collectReply, cancelGeneration: linkage.cancelGeneration,
         report: linkage.reportHost,
     });
     linkage.reportHost(linkageHost.status().message);
@@ -75,7 +77,7 @@ export function initialize() {
     for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.15.5',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.16.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 

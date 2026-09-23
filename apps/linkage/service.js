@@ -1,3 +1,4 @@
+import { nativeState2Status, getState2Runtime } from '../state2/runtime.js';
 import { uuid } from '../../uuid.js';
 import { createOperationService, subscribeStateChanges, chatIdentity, chatPath } from '../shared/operations.js';
 import { checkpointState } from '../status/state-checkpoint.js';
@@ -169,6 +170,8 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     const unsubscribe = operation.subscribe(notify);
     const unsubscribeState = subscribeStateChanges((_event, metadata) => { if (metadata === getContext()?.chatMetadata) notify(); });
     return {
+        nativeState2Status:()=>nativeState2Status(context()),
+        migrateState2:()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量 2.0 运行时尚未初始化，请刷新插件。');return runtime.migrate();},
         settings:()=>readLinkageSettings(context()), saveSettings,
         modules:()=>{const ctx=context();return adapters.map(a=>({id:a.id,label:a.label,available:moduleAvailable(ctx,a.id),...modulePolicy(ctx,a.id)}));},
         prompt:()=>buildUpdateRules(context()), dataPrompt:()=>buildDataPrompt(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),

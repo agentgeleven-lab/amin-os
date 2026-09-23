@@ -4,6 +4,7 @@ import { draftChronicle } from './draft.js';
 import { getAI } from '../../ai/service.js';
 import { acquireMetadataWrite, chatIdentity, subscribeStateChanges } from '../shared/operations.js';
 import { managesModule } from '../linkage/policy.js';
+import { prepareState2ManualWrite } from '../state2/runtime.js';
 
 export const PROMPT_KEY = 'amin-os-journal';
 
@@ -36,13 +37,14 @@ export function createJournal(getContext, { ai = getAI } = {}) {
         const ctx = check(token);
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前前端缺少聊天保存接口');
         const release = acquireMetadataWrite(getContext), metadata = ctx.chatMetadata, before = metadata[KEY];
-        let next, persisted = false, failed = false;
+        let next, nativeRollback, persisted = false, failed = false;
         busy = true;
         try {
             next = update(readStore(ctx), ctx);
             if (!next || next.version !== 1 || !Array.isArray(next.events)) throw Error('待保存档案格式无效');
             const after = { ...token, baseline: JSON.stringify(next) };
             metadata[KEY] = next;
+            nativeRollback = prepareState2ManualWrite(ctx, [[KEY]]);
             await ctx.saveMetadata();
             persisted = true;
             check(after);
@@ -53,6 +55,7 @@ export function createJournal(getContext, { ai = getAI } = {}) {
             failed = true;
             if (!persisted && next !== undefined && metadata[KEY] === next) {
                 if (before === undefined) delete metadata[KEY]; else metadata[KEY] = before;
+                nativeRollback?.();
             }
             message = persisted ? '档案已保存到原聊天，但聊天或来源已变化，请重新打开档案。' : '保存失败：' + error.message;
             throw error;

@@ -1,5 +1,6 @@
 import { KEY, readStore, readCurrentScene, visibleEvents, chatPath, transition, appendEvent, mapReferences, characterReferences, assertReferences, scheduleForecast, absencePreview, floorGameTime, currentPrompt, createSceneId } from './model.js';
 import { acquireMetadataWrite, publishExternalMetadataChange, subscribeStateChanges } from '../shared/operations.js';
+import { prepareState2ManualWrite } from '../state2/runtime.js';
 export const PROMPT_KEY = 'amin-os-scene-time';
 const clone = value => structuredClone(value);
 const identity = ctx => JSON.stringify([ctx?.groupId != null ? ['group', ctx.groupId] : ['character', ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.characterId ?? null], ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null]);
@@ -62,7 +63,17 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         // Consume before persistence: failure retries only saving, never the transition.
         pending = null; busy = true;
         try {
-            ctx.chatMetadata[KEY] = value; dirty.add(ctx.chatMetadata); clearPrompt();
+            const previous = ctx.chatMetadata[KEY], existed = Object.hasOwn(ctx.chatMetadata, KEY);
+            ctx.chatMetadata[KEY] = value;
+            try { prepareState2ManualWrite(ctx, [[KEY]]); }
+            catch (error) {
+                if (ctx.chatMetadata[KEY] === value) {
+                    if (existed) ctx.chatMetadata[KEY] = previous; else delete ctx.chatMetadata[KEY];
+                }
+                pending = operation;
+                throw error;
+            }
+            dirty.add(ctx.chatMetadata); clearPrompt();
             lastScope = { ...operation.token, basis: JSON.stringify(value) };
             // Time-derived effects refresh immediately, including while disk persistence is pending.
             publishing = true;

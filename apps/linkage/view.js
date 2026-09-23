@@ -25,17 +25,18 @@ export function mount(target, options = {}) {
     const context = make('div', '', 'amin-context'), notice = make('p', '', 'amin-notice');
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     const settingsPanel = make('section', '', 'amin-card amin-stack'), retryPanel = make('section', '', 'amin-stack');
+    const nativePanel = make('section', '', 'amin-card amin-stack');
     const reviewPanel = make('section', '', 'amin-stack'), suggestionsPanel = make('section', '', 'amin-card amin-stack');
     const promptPanel = make('details', '', 'amin-card amin-stack'), referencesPanel = make('details', '', 'amin-card amin-stack');
     const manualPanel = make('details', '', 'amin-card amin-stack'), dataPanel = make('details', '', 'amin-card amin-stack');
-    page.append(context, notice, retryPanel, reviewPanel, settingsPanel, suggestionsPanel, promptPanel, dataPanel, referencesPanel, manualPanel); target.append(page);
+    page.append(context, notice, nativePanel, retryPanel, reviewPanel, settingsPanel, suggestionsPanel, promptPanel, dataPanel, referencesPanel, manualPanel); target.append(page);
     const generationView = mountGeneration(page, { joint: true, getContext, document, service: options.generationService, ai: options.ai });
     let disposed = false, unavailable = false, localBusy = false, message = '', failed = false;
     let lastServiceStatus = '';
     let saved = null, draft = null, settingsDirty = false, moduleRows = [], inputNodes = [], draftNotice, saveButton;
     let dataValue, dataStatus, dataCache = '', dataError = '';
     let promptValue, promptStatus, worldbookStatus, installButton, inspectButton, pasted = '';
-    let moduleControls = [], modeControl, extraControl;
+    let moduleControls = [], extraControl;
     let modulesSignature = '';
     let promptCache = '', promptError = '', worldbookTemplate = null, worldbookMessage = '尚未检查当前聊天的绑定世界书。';
     let manualFrom = '', manualTo = '', manualLabel = '';
@@ -82,7 +83,7 @@ export function mount(target, options = {}) {
         const block = locked(); page.setAttribute('aria-busy', String(busy()));
         for (const element of page.querySelectorAll?.('[data-linkage-lock]') ?? []) {
             const lock = element.dataset.linkageLock;
-            element.disabled = lock === 'busy' ? busy() || unavailable : lock === 'confirm' ? busy() || unavailable || api.dirty() || !api.preview() : block || (lock === 'links' && settingsDirty);
+            element.disabled = lock === 'busy' ? busy() || unavailable : lock === 'confirm' ? busy() || unavailable || api.dirty() || !api.preview() : block || ((lock === 'links' || lock === 'migration') && settingsDirty);
         }
         for (const input of inputNodes) input.disabled = block;
         for (const controls of moduleControls) {
@@ -93,17 +94,18 @@ export function mount(target, options = {}) {
         }
         if (saveButton) saveButton.disabled = block || !settingsDirty;
         if (installButton) installButton.disabled = block || settingsDirty || !saved?.enabled;
-        if (dataStatus) dataStatus.textContent = settingsDirty ? '正在显示已保存配置允许注入的资料；未保存的修改尚未生效。' : dataError || (dataCache ? `按已保存的模块读取权限生成 · ${dataCache.length} 字符。` : '当前没有允许注入的资料。');
+        if (dataStatus) dataStatus.textContent = settingsDirty ? '正在显示已保存配置的资料来源；未保存的修改尚未生效。' : dataError || (saved?.dataSource === 'external' ? '已选择由预设／世界书提供资料；Amin 不再插入重复资料。请确认外部宏覆盖全部已选模块。' : dataCache ? `按已保存的模块读取权限生成 · ${dataCache.length} 字符。` : '当前没有允许注入的资料。');
         if (promptStatus) promptStatus.textContent = settingsDirty ? '正在显示已保存设置生成的条目；先保存设置，再更新世界书。' : promptError || (saved?.enabled ? `${worldbookTemplate === null ? '变量更新规则；检查绑定世界书后可合并条目手写前后文' : '已合并上次检查的世界书前后文；在世界书中修改后请重新检查'} · ${promptCache.length} 字符。` : '联动总开关已关闭，当前不会提供联动资料或接受模型更新。');
     }
     function renderSettings() {
-        settingsPanel.replaceChildren(make('h3', '联动范围与更新权限'), make('p', '世界书提供变量更新规则；插件将允许读取的应用资料插入发给 AI 的消息上下文。资料使用稳定 ID 相互引用；关闭模块不会删除已有记录。', 'amin-meta'));
+        settingsPanel.replaceChildren(make('h3', '联动范围与更新权限'), make('p', '小白变量 2.0 根据世界书规则自动执行 <state> 更新；Amin 从同一份变量刷新应用。资料使用稳定 ID 相互引用；关闭模块不会删除已有记录。', 'amin-meta'));
         inputNodes = []; moduleControls = [];
         const enabled = checkbox('启用统一联动更新', draft.enabled === true, value => { draft.enabled = value; }); inputNodes.push(enabled.input); settingsPanel.append(enabled.row);
-        const modeRow = make('label', '', 'amin-field'); modeControl = make('select'); modeControl.setAttribute('aria-label', '更新处理方式');
-        for (const [value, label] of [['review', '预览后确认'], ['auto', '校验通过后自动应用']]) { const option = make('option', label); option.value = value; modeControl.append(option); }
-        modeControl.value = draft.mode === 'auto' ? 'auto' : 'review'; modeControl.addEventListener('change', () => { draft.mode = modeControl.value; markDraft(); }); inputNodes.push(modeControl);
-        modeRow.append(make('span', '更新处理方式'), modeControl, make('small', '默认先预览。自动模式也会检查权限、引用和数据格式；未通过的更新不会部分写入。')); settingsPanel.append(modeRow);
+        const sourceRow = make('label', '', 'amin-field'), sourceControl = make('select'); sourceControl.setAttribute('aria-label', '资料发送来源');
+        for (const [value, label] of [['amin', 'Amin 插入消息上下文'], ['external', '预设／世界书自行提供']]) { const option = make('option', label); option.value = value; sourceControl.append(option); }
+        sourceControl.value = draft.dataSource === 'external' ? 'external' : 'amin';
+        sourceControl.addEventListener('change', () => { draft.dataSource = sourceControl.value; markDraft(); }); inputNodes.push(sourceControl);
+        sourceRow.append(make('span', '资料发送来源'), sourceControl, make('small', '选择外部来源后，Amin 不再插入当前剧情资料。请确认预设或世界书的小白变量宏提供所有选中模块的资料；统一世界书更新规则仍照常使用。')); settingsPanel.append(sourceRow);
         const modules = make('div', '', 'amin-linkage-modules');
         for (const module of moduleRows) {
             const current = moduleConfig(module), card = make('section', '', 'amin-linkage-module amin-stack'); card.dataset.module = module.id;
@@ -120,7 +122,7 @@ export function mount(target, options = {}) {
         const rulesRow = make('label', '', 'amin-field'); extraControl = make('textarea'); extraControl.rows = 5; extraControl.maxLength = 40000; extraControl.value = draft.extraRules ?? ''; extraControl.setAttribute('aria-label', '额外联动规则');
         extraControl.placeholder = '例如：只有正文明确发生的变化才能更新；传闻不得直接写成已确认事实。';
         extraControl.addEventListener('input', () => { draft.extraRules = extraControl.value; markDraft(); }); inputNodes.push(extraControl);
-        rulesRow.append(make('span', '额外联动规则'), extraControl, make('small', '随当前聊天保存。自动刷新统一条目时保留；不能越过上面的更新权限和数据校验。')); settingsPanel.append(rulesRow);
+        rulesRow.append(make('span', '额外联动规则'), extraControl, make('small', '随当前聊天保存，并写入统一世界书条目。请保持与上面的模块更新权限一致。')); settingsPanel.append(rulesRow);
         draftNotice = make('p', '', 'amin-meta');
         saveButton = button('保存联动设置', async () => {
             await api.saveSettings(clone(draft)); saved = clone(api.settings()); draft = clone(saved); draft.modules ??= {}; settingsDirty = false;
@@ -129,13 +131,27 @@ export function mount(target, options = {}) {
         const reset = button('放弃未保存修改', () => { saved = clone(api.settings()); draft = clone(saved); draft.modules ??= {}; settingsDirty = false; renderSettings(); say('已恢复当前聊天中保存的联动设置。'); });
         const actions = make('div', '', 'amin-toolbar'); actions.append(saveButton, reset); settingsPanel.append(draftNotice, actions); markDraft();
     }
+    function renderNativeState2() {
+        const status = api.nativeState2Status?.();
+        const available = status?.available === true, migrated = status?.migrated === true;
+        nativePanel.replaceChildren(make('h3', '剧情变量 · 小白变量 2.0'), make('p', '回复中的 <state> 由小白变量 2.0 自动执行；Amin 读取结果并刷新人物、背包、场景等应用。', 'amin-meta'));
+        nativePanel.append(make('p', status?.message || (available ? migrated ? '当前剧情资料已迁移到变量 2.0。' : '可初始化或迁移当前聊天的剧情变量。' : '请先启用小白盒子的变量 2.0，再刷新本页。'), available ? 'amin-meta' : 'amin-notice'));
+        if (!available) nativePanel.append(make('p', '在小白盒子中启用变量 2.0 后，Amin 才能读取并更新当前聊天的剧情资料。', 'amin-meta'));
+        if (available && typeof api.migrateState2 === 'function') {
+            nativePanel.append(button('初始化／迁移剧情变量', async () => {
+                if (settingsDirty) throw Error('请先保存或放弃上方的联动设置修改。');
+                const result = await api.migrateState2();
+                say(result?.message || (result?.changed ? '剧情变量已迁移。' : '剧情变量已是最新状态。'));
+            }, { primary: !migrated, lock: 'migration' }), make('p', '迁移前会保留备份和旧记录；发现已有变量冲突会提示，不直接覆盖。', 'amin-meta'));
+        }
+    }
     function refreshPrompt() {
         try { const dynamic = text(api.prompt()); promptCache = dynamic && worldbookTemplate !== null ? worldbookTemplate.replace('{{amin_os_linkage}}', () => dynamic) : dynamic; promptError = ''; }
         catch (error) { promptCache = ''; promptError = error?.message ?? String(error); }
         if (promptValue) promptValue.value = promptCache;
     }
     function createPromptPanel() {
-        promptPanel.append(make('summary', '统一世界书条目与预览'), make('p', '统一世界书条目仅用于变量更新：包含更新格式、允许的操作和规则。应用资料由插件另行插入发给 AI 的消息上下文，可在下方“消息内资料预览”查看。此处使用已保存配置；检查绑定世界书后会合并条目手写前后文。', 'amin-meta'));
+        promptPanel.append(make('summary', '统一世界书条目与预览'), make('p', '统一世界书条目提供小白变量 2.0 的 <state> 更新格式和规则。当前资料按上方“资料发送来源”设置提供，Amin 模式的内容可在下方“消息内资料预览”查看。此处使用已保存配置；检查绑定世界书后会合并条目手写前后文。', 'amin-meta'));
         promptStatus = make('p', '', 'amin-meta'); promptValue = make('textarea', '', 'amin-linkage-code'); promptValue.readOnly = true; promptValue.rows = 14; promptValue.setAttribute('aria-label', '统一条目预览内容');
         const actions = make('div', '', 'amin-toolbar');
         actions.append(button('刷新条目预览', () => { refreshPrompt(); if (promptError) throw Error(promptError); say('已刷新统一条目预览。'); }, { lock: 'busy' }), button('复制条目预览', async () => {
@@ -159,7 +175,7 @@ export function mount(target, options = {}) {
             worldbookStatus.textContent = worldbookMessage; say(worldbookMessage, !!result.warning);
         }, { primary: true });
         const worldbookActions = make('div', '', 'amin-toolbar'); worldbookActions.append(inspectButton, installButton);
-        promptPanel.append(promptStatus, promptValue, actions, worldbookStatus, worldbookActions, make('p', '世界书模板在生成时只展开变量更新规则，不包含插件生成的当前应用资料。再次安装保留条目的停用、位置、触发设置及自定义规则。额外联动规则按聊天保存。', 'amin-meta'));
+        promptPanel.append(promptStatus, promptValue, actions, worldbookStatus, worldbookActions, make('p', '世界书模板在生成时只展开变量 2.0 更新规则，不包含插件生成的当前应用资料。再次安装保留条目的停用、位置、触发设置及自定义规则。额外联动规则按聊天保存。', 'amin-meta'));
     }
     function refreshData() {
         try { dataCache = text(api.dataPrompt?.() ?? ''); dataError = ''; }
@@ -167,13 +183,13 @@ export function mount(target, options = {}) {
         if (dataValue) dataValue.value = dataCache;
     }
     function createDataPanel() {
-        dataPanel.append(make('summary', '消息内资料预览'), make('p', '插件按模块的“提供资料给模型”权限，将当前资料插入发给 AI 的消息上下文；不写入世界书，也不保存到可见聊天正文。此预览独立于世界书检查，使用已保存的配置。', 'amin-meta'));
+        dataPanel.append(make('summary', '消息内资料预览'), make('p', '选择 Amin 作为资料来源时，插件按模块的“提供资料给模型”权限，将当前资料插入发给 AI 的消息上下文；不写入世界书，也不保存到可见聊天正文。选择预设／世界书来源时，Amin 停止注入。此预览使用已保存的配置。', 'amin-meta'));
         dataStatus = make('p', '', 'amin-meta'); dataValue = make('textarea', '', 'amin-linkage-code'); dataValue.readOnly = true; dataValue.rows = 14; dataValue.setAttribute('aria-label', '消息内资料预览内容');
         dataPanel.append(dataStatus, dataValue, button('刷新消息内资料预览', () => { refreshData(); if (dataError) throw Error(dataError); say('已刷新消息内资料预览。'); }, { lock: 'busy' }));
     }
     function renderReview() {
         reviewPanel.replaceChildren(); const pending = api.preview(); reviewPanel.hidden=!pending;if (!pending) return;
-        const card = make('section', '', 'amin-card amin-stack amin-result'); card.append(make('h3', pending.label || '待确认 · 跨应用更新'));
+        const card = make('section', '', 'amin-card amin-stack amin-result'); card.append(make('h3', pending.label || '历史 Amin 更新待确认'));
         if (pending.summary) card.append(make('p', Array.isArray(pending.summary) ? pending.summary.join('\n') : text(pending.summary), 'amin-linkage-text'));
         if (pending.source) card.append(make('p', '来源：' + sourceLabel(pending.source), 'amin-meta'));
         const changes = values(pending.changes ?? pending.operations);
@@ -194,12 +210,14 @@ export function mount(target, options = {}) {
         const confirm = button('确认整组更新一次', async () => { await api.confirm(); say('整组关联更新已应用并保存。'); }, { primary: true, lock: 'confirm' });
         if (values(pending.errors).length || pending.valid === false) confirm.dataset.linkageInvalid = 'true';
         actions.append(confirm, button('放弃这组更新', () => { api.discard(); say('已放弃待确认更新，当前资料保持原值。'); }, { lock: 'busy' }));
-        card.append(make('p', '本次关联变更作为一组处理。确认前不会写入各应用；请核对人物、物品与数值的对应关系。', 'amin-meta'), actions); reviewPanel.append(card);
+        card.append(make('p', '这是旧版 Amin 更新建议。确认前不会写入各应用；请核对人物、物品与数值的对应关系。新回复由小白变量 2.0 处理。', 'amin-meta'), actions); reviewPanel.append(card);
     }
     function renderSuggestions() {
-        suggestionsPanel.replaceChildren(make('h3', '收到的剧情更新建议'));
+        suggestionsPanel.replaceChildren(make('h3', '历史 Amin 更新建议'));
         const suggestions = values(api.suggestions());
-        if (!suggestions.length) { suggestionsPanel.append(make('p', saved?.enabled ? '暂时没有待查看的更新建议。' : '启用并保存统一联动后，可接收模型返回的更新建议。', 'amin-empty')); return; }
+        suggestionsPanel.hidden = !suggestions.length;
+        if (!suggestions.length) return;
+        suggestionsPanel.append(make('p', '仅用于处理升级前收到的 <amin_update> 建议；新回复由小白变量 2.0 自动更新。', 'amin-meta'));
         for (const suggestion of suggestions) {
             const row = make('article', '', 'amin-linkage-suggestion amin-stack');
             row.append(make('strong', sourceLabel(suggestion.source)), make('p', suggestion.label || '一组关联更新', 'amin-meta'));
@@ -254,10 +272,10 @@ export function mount(target, options = {}) {
         } catch (error) { referencesPanel.append(make('p', error?.message ?? String(error), 'amin-notice')); }
     }
     function createManualPanel() {
-        manualPanel.append(make('summary', '手动导入更新建议'));
+        manualPanel.append(make('summary', '手动导入旧版 Amin 更新建议'));
         const input = make('textarea'); input.rows = 6; input.setAttribute('aria-label', '待校验的统一更新内容'); input.placeholder = '粘贴模型返回的统一更新块，再校验并预览。';
         input.addEventListener('input', () => { pasted = input.value; });
-        manualPanel.append(input, button('校验并预览粘贴内容', async () => { if (!pasted.trim()) throw Error('请先粘贴更新内容。'); await api.stage(pasted); say('已校验更新内容，请检查整组变更。'); }), make('p', '导入也遵守当前聊天保存的模块权限。粘贴内容不会直接写入应用。', 'amin-meta'));
+        manualPanel.append(input, button('校验并预览粘贴内容', async () => { if (!pasted.trim()) throw Error('请先粘贴更新内容。'); await api.stage(pasted); say('已校验更新内容，请检查整组变更。'); }), make('p', '此入口仅供处理旧版 <amin_update>。新回复的 <state> 由小白变量 2.0 执行；粘贴内容不会直接写入应用。', 'amin-meta'));
     }
     function render() {
         if (disposed) return;
@@ -268,8 +286,8 @@ export function mount(target, options = {}) {
             if (!saved || (changed && !settingsDirty)) { saved = clone(current); draft = clone(current); draft.modules ??= {}; settingsDirty = false; renderSettings(); }
             else if (changed) { saved = clone(current); markDraft(); }
             else if(modulesChanged)renderSettings();
-            context.textContent = `统一联动 · 当前聊天 · ${current.enabled ? current.mode === 'auto' ? '自动应用' : '预览后确认' : '尚未启用'} · 已选 ${moduleRows.filter(row => row.enabled).length} 个模块`;
-            refreshPrompt(); refreshData(); renderReview(); renderSuggestions(); renderReferences(); retryPanel.replaceChildren();retryPanel.hidden=!api.dirty();
+            context.textContent = `统一联动 · 当前聊天 · ${current.enabled ? '小白变量 2.0' : '尚未启用'} · 已选 ${moduleRows.filter(row => row.enabled).length} 个模块`;
+            renderNativeState2(); refreshPrompt(); refreshData(); renderReview(); renderSuggestions(); renderReferences(); retryPanel.replaceChildren();retryPanel.hidden=!api.dirty();
             if (api.dirty()) retryPanel.append(make('h3', '保存尚未完成'), make('p', '已确认变更保留在当前聊天内存中。重试只保存这组结果，不再执行一次更新。', 'amin-meta'), button('重试保存整组更新', async () => { await api.retrySave(); say('此前确认的整组更新已保存。'); }, { primary: true, lock: 'busy' }));
             const status = api.status(), serviceStatus = typeof status === 'string' ? status : status?.message || '';
             if(serviceStatus!==lastServiceStatus){lastServiceStatus=serviceStatus;if(!localBusy){message='';failed=false;}}
@@ -290,7 +308,7 @@ export function mount(target, options = {}) {
     const view = { element: page, open(section) {
         if(disposed)return;render();
         if(section==='prompt'){promptPanel.open=true;revealWithinPanel(promptPanel);promptPanel.querySelectorAll?.('summary')?.[0]?.focus?.({preventScroll:true});}
-        else if(section==='updates')revealWithinPanel(api.preview()?reviewPanel:suggestionsPanel);
+        else if(section==='updates')revealWithinPanel(api.preview()?reviewPanel:nativePanel);
     }, dispose() { if (disposed) return; disposed = true; generationView.dispose(); unsubscribe?.(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); return view;
 }

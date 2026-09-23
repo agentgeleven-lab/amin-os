@@ -13,9 +13,17 @@ export const PATCH_ROOTS = Object.freeze([
     'amin_os_saves_v1', 'amin_os_scene_v1', 'amin_os_effects_v1', 'amin_os_dice_v1',
     'amin_os_journal_v1', 'amin_os_information_v1', 'amin_os_information_library_v1', 'dynamicMapV1',
     'world_status_hud_history_v1', 'amin_os_organizations_history_v1', 'dynamicMapPositionHistoryV1',
-    'amin_os_linkage_v1',
+    'amin_os_linkage_v1', 'amin_os_state2_v1', 'amin_os_state2_backup_v1',
 ]);
-const roots = new Set(PATCH_ROOTS), variableRoots = new Set(['状态栏', '势力资料']);
+const roots = new Set(PATCH_ROOTS), variableRoots = new Set(['状态栏', '势力资料', 'AminOS人物', 'AminOS背包', 'AminOS关系', 'AminOS场景', 'AminOS剧情', 'AminOS效果', 'AminOS地图', 'AminOS信息', 'AminOS骰子']);
+
+let patchExpansion = null, patchDependencies = null, patchPreparation = null, preparing = false;
+/** Register the native variable transaction bridge; only the app initializer installs it. */
+export function registerOperationPatchExpansion(expand, dependencies = null, prepare = null) {
+    if (typeof expand !== 'function') throw TypeError('Patch expansion must be a function');
+    patchExpansion = expand; patchDependencies = dependencies; patchPreparation = prepare;
+    return () => { if (patchExpansion === expand) { patchExpansion = null; patchDependencies = null; patchPreparation = null; } };
+}
 
 export class OperationError extends Error {
     constructor(code, message, details = {}) {
@@ -34,8 +42,9 @@ function safePath(path) {
 function writablePath(path) {
     safePath(path);
     const organizationField = path[0] === 'amin_os_organizations_v1' && path.length >= 2 && ['locks', 'assessment', 'backups'].includes(path[1]);
-    const stateCheckpoint = path.length === 3 && path[0] === 'extensions' && path[1] === 'LittleWhiteBox' && path[2] === 'stateCkptV2';
-    if (!(roots.has(path[0]) || organizationField || stateCheckpoint || (path[0] === 'variables' && path.length >= 2 && variableRoots.has(path[1])))) {
+    const stateCheckpoint = path.length === 3 && path[0] === 'extensions' && path[1] === 'LittleWhiteBox' && ['stateCkptV2','stateLogV2'].includes(path[2]);
+    const diceRule = path.length === 2 && path[0] === 'LWB_RULES_V2' && (path[1] === 'AminOS骰子' || path[1].startsWith('AminOS骰子.'));
+    if (!(roots.has(path[0]) || organizationField || stateCheckpoint || diceRule || (path[0] === 'variables' && path.length >= 2 && variableRoots.has(path[1])))) {
         fail('FORBIDDEN_PATH', '此操作无权修改该聊天资料路径。');
     }
 }
@@ -107,11 +116,16 @@ export function pathBelongs(anchor, path) {
 }
 function currentContext(getContext) {
     if (typeof getContext !== 'function') fail('INVALID_CONTEXT', '缺少聊天上下文接口。');
+    if (patchPreparation && !preparing) {
+        preparing = true;
+        try { patchPreparation(getContext()); } finally { preparing = false; }
+    }
     const ctx = getContext(), id = ctx?.getCurrentChatId?.() ?? ctx?.chatId;
     if (!plain(ctx?.chatMetadata) || id == null || id === '') fail('NO_CHAT', '请先打开一个聊天。');
     return ctx;
 }
 function makeToken(ctx, paths) {
+    if (patchDependencies) paths = distinctPaths([...paths, ...patchDependencies(ctx)]);
     const data = { metadata: ctx.chatMetadata, identity: chatIdentity(ctx), path: JSON.stringify(chatPath(ctx.chat)), paths, bases: paths.map(path => basis(ctx.chatMetadata, path)) };
     const token = Object.freeze({ metadata: data.metadata, identity: data.identity, path: data.path, paths: Object.freeze(paths.map(path => Object.freeze([...path]))), bases: Object.freeze([...data.bases]) });
     tokens.set(token, data); return token;
@@ -256,10 +270,11 @@ export function createOperationService(getContext = () => globalThis.SillyTavern
     function stage(input, token) {
         ensureOpen();
         if (!plain(input) || typeof input.label !== 'string' || !input.label.trim() || input.label.length > 200) fail('INVALID_OPERATION', '操作需要有效的名称。');
-        const patches = validatePatches(input.patches);
+        let patches = validatePatches(input.patches);
         if (input.summary !== undefined) safeJSON(input.summary);
         const ctx = token ? check(token) : currentContext(getContext), state = observe(ctx.chatMetadata);
         available(state);
+        if (patchExpansion) patches = validatePatches(patchExpansion(ctx, patches));
         // An editor may capture extra read dependencies. Preserve them when adding write bases.
         const paths = distinctPaths([...(token ? tokens.get(token).paths : []), ...patches.map(patch => patch.path)]);
         const checkedToken = makeToken(ctx, paths);

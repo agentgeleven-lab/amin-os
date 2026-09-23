@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createStore } from '../src/core/store.js';
 import { createDemoDocument } from '../src/core/demo.js';
 import { bindChatStore, STORAGE_KEY } from '../src/adapters/chat.js';
+import { BACKUP_KEY, MIGRATION_KEY, ROOTS } from '../../state2/storage.js';
 
 function setup(save) {
     const records = new Map(), a = {}, b = {}; let metadata = a, id = 'a';
@@ -55,9 +56,34 @@ test('save failure retains local recovery data and reports failure', async () =>
     delete s.a[STORAGE_KEY]; s.bridge.switchChat();
     assert.equal(s.store.snapshot().maps.world.currentLocation, 'qingyun_sect');
 });
+test('retry saves the same unsynced map revision', async () => {
+    let fail = true;
+    const s = setup(async () => { if (fail) throw new Error('offline'); });
+    s.store.applyUpdate([{ type: 'setCurrentLocation', nodeId: 'qingyun_sect' }]);
+    await new Promise(r => setImmediate(r));
+    const revision = s.a[STORAGE_KEY].updatedAt;
+    fail = false;
+    await s.bridge.retry();
+    assert.equal(s.a[STORAGE_KEY].updatedAt, revision);
+    assert.equal(s.store.snapshot().maps.world.currentLocation, 'qingyun_sect');
+});
 test('a successfully synced cache does not resurrect a deleted chat with reused name', async () => {
     const s = setup(); s.store.applyUpdate([{ type: 'setCurrentLocation', nodeId: 'qingyun_sect' }]);
     await new Promise(r => setImmediate(r)); delete s.a[STORAGE_KEY]; s.bridge.switchChat();
+    assert.equal(s.store.snapshot().maps.world.currentLocation, 'longmen_city');
+});
+test('migrated State 2.0 map keeps projected chat state above newer or malformed browser cache', () => {
+    const s = setup(), key = `dynamic-map.chat.test.${s.bridge.scope()}`;
+    const projected = createDemoDocument(), stale = structuredClone(projected);
+    stale.maps.world.currentLocation = 'qingyun_sect';
+    s.a[MIGRATION_KEY] = { version: 1, owner: 'amin-os/state2-v1', roots: Object.values(ROOTS), createdAt: '2026-09-23T00:00:00Z' };
+    s.a[BACKUP_KEY] = { version: 1, roots: {}, source: {} };
+    s.a[STORAGE_KEY] = { updatedAt: 1, document: projected };
+    s.records.set(key, JSON.stringify({ updatedAt: 99, document: stale, synced: false }));
+    s.bridge.switchChat();
+    assert.equal(s.store.snapshot().maps.world.currentLocation, 'longmen_city');
+    s.records.set(key, '{broken');
+    s.bridge.switchChat();
     assert.equal(s.store.snapshot().maps.world.currentLocation, 'longmen_city');
 });
 

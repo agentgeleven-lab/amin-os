@@ -1,5 +1,6 @@
 import { LIMITS, normalizeConfig, rollBatch, formatRoll } from './engine.js';
 import { chatIdentity, subscribeStateChanges, createOperationService, acquireMetadataWrite, metadataWriteStatus } from '../shared/operations.js';
+import { prepareState2ManualWrite } from '../state2/runtime.js';
 export const SETTINGS_KEY = 'amin_os_dice_presets_v1';
 export const HISTORY_KEY = 'amin_os_dice_v1';
 const clone = value => structuredClone(value);
@@ -82,7 +83,20 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         const c = getContext(); if (!loaded(c)) return [];
         return readHistory(c).map(r => ({ ...r, linked: !!r.sent && c.chat?.[r.sent.messageIndex]?.is_user === true && c.chat[r.sent.messageIndex].mes === r.sent.messageText }));
     }
-    function write(ctx, records) { assertHistoryWritable(ctx); ctx.chatMetadata[HISTORY_KEY] = { ...ctx.chatMetadata[HISTORY_KEY], version: 1, rolls: records }; dirty.add(ctx.chatMetadata); }
+    function write(ctx, records) {
+        assertHistoryWritable(ctx);
+        const metadata = ctx.chatMetadata, existed = Object.hasOwn(metadata, HISTORY_KEY), before = metadata[HISTORY_KEY];
+        const next = { ...before, version: 1, rolls: records };
+        metadata[HISTORY_KEY] = next;
+        try { prepareState2ManualWrite(ctx, [[HISTORY_KEY]]); }
+        catch (error) {
+            if (metadata[HISTORY_KEY] === next) {
+                if (existed) metadata[HISTORY_KEY] = before; else delete metadata[HISTORY_KEY];
+            }
+            throw error;
+        }
+        dirty.add(metadata);
+    }
     async function persist(ctx, token) {
         check(token); assertHistoryWritable(ctx);
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口；骰点仍保留在本聊天内存中。');
@@ -129,9 +143,13 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
             const text = selected.map(r => r.text).join('\n\n');
             if (selected.some(r => String(input?.value ?? '').includes(r.text))) throw Error('所选骰点已经在草稿中，请选择其他记录。');
             const appendInfo = appendToDraft({ input, text, expectedDraft, check: () => check(token) });
+            const links = [];
+            for (const r of selected) { const target = list.find(v => v.id === r.id); target.status = 'appended'; target.pending = { chatKey: token.key, firstIndex: c.chat?.length ?? 0 }; links.push([r.id, { token, text: r.text, firstIndex: target.pending.firstIndex }]); }
+            try { write(c, list); }
+            catch (error) { if (input.value === appendInfo.after) { input.value = appendInfo.before; emitInput(input); } throw error; }
             lastAppend = { ...appendInfo, token, ids: selected.map(r => r.id) };
-            for (const r of selected) { const target = list.find(v => v.id === r.id); target.status = 'appended'; target.pending = { chatKey: token.key, firstIndex: c.chat?.length ?? 0 }; pending.set(r.id, { token, text: r.text, firstIndex: target.pending.firstIndex }); }
-            write(c, list); message = '已追加固定骰点。继续编辑行动正文，然后使用聊天发送按钮一起发出。'; notify();
+            for (const [id, link] of links) pending.set(id, link);
+            message = '已追加固定骰点。继续编辑行动正文，然后使用聊天发送按钮一起发出。'; notify();
             await persist(c, token); check(token);
         } catch (e) { message = e.message; throw e; } finally { busy = false; release(); notify(); }
     }
@@ -143,9 +161,11 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         if (undo.ids.some(id => !pending.has(id))) throw Error('骰点可能已经发送，无法撤销。');
         const release = acquireWrite(undo.token); busy = true;
         try {
-            const list = readHistory(c); undo.input.value = undo.before; emitInput(undo.input); lastAppend = null;
-            for (const r of list) if (undo.ids.includes(r.id)) { r.status = 'rolled'; delete r.pending; pending.delete(r.id); }
-            write(c, list);
+            const list = readHistory(c); undo.input.value = undo.before; emitInput(undo.input);
+            for (const r of list) if (undo.ids.includes(r.id)) { r.status = 'rolled'; delete r.pending; }
+            try { write(c, list); }
+            catch (error) { if (undo.input.value === undo.before) { undo.input.value = undo.after; emitInput(undo.input); } throw error; }
+            lastAppend = null; for (const id of undo.ids) pending.delete(id);
             await persist(c, undo.token); message = '已撤销刚才的追加，骰点记录仍然保留。';
         } catch (e) { message = e.message; throw e; } finally { busy = false; release(); notify(); }
     }
@@ -177,7 +197,7 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         let release;
         try { release = acquireWrite(token); }
         catch (error) { deferredSent = true; message = `用户消息已发送，等待当前资料保存后关联骰点：${error.message}`; notify(); return; }
-        const list = readHistory(c); let changed = false;
+        const list = readHistory(c), matchedIds = []; let changed = false;
         for (const [id, p] of pending) {
             if (p.token.key !== token.key || p.token.metadata !== token.metadata) continue;
             const numeric = typeof index === 'number' || typeof index === 'string' && /^\d+$/.test(index) ? Number(index) : null;
@@ -185,10 +205,10 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
             // An event alone is insufficient; require exactly one new matching user message.
             if (candidates.length !== 1) continue;
             const record = list.find(r => r.id === id); if (!record) { pending.delete(id); continue; }
-            const { m, i } = candidates[0]; record.status = 'sent'; record.sent = { messageIndex: i, messageText: m.mes, at: now() }; delete record.pending; pending.delete(id); changed = true;
+            const { m, i } = candidates[0]; record.status = 'sent'; record.sent = { messageIndex: i, messageText: m.mes, at: now() }; delete record.pending; matchedIds.push(id); changed = true;
         }
         if (!changed) { release(); return; }
-        try { write(c, list); lastAppend = null; message = '骰点已随用户消息发送；重试或续写会沿用消息中的固定结果。'; notify(); }
+        try { write(c, list); for (const id of matchedIds) pending.delete(id); lastAppend = null; message = '骰点已随用户消息发送；重试或续写会沿用消息中的固定结果。'; notify(); }
         catch (error) { release(); message = error.message; notify(); return; }
         // Host callbacks must not throw. The record survives a failed save for explicit retry.
         void persist(c, token).catch(e => { message = e.message; notify(); }).finally(release);

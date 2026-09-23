@@ -35,16 +35,17 @@ test('prompt and update shortcuts scroll only the owned panel and never pan the 
         let focusOptions;summary.focus=options=>{focusOptions=options;f.document.activeElement=summary;};
         f.view.open('prompt');assert.equal(prompt.open,true);assert.equal(f.root.scrollTop,768);
         assert.equal(outer.scrollTop,145);assert.deepEqual(focusOptions,{preventScroll:true});assert.equal(f.document.activeElement,summary);
-        const suggestions=find(f.root,'收到的剧情更新建议','h3').parent;suggestions.getBoundingClientRect=()=>({top:450});
+        const native=find(f.root,'剧情变量 · 小白变量 2.0','h3').parent;native.getBoundingClientRect=()=>({top:450});
         f.view.open('updates');assert.equal(f.root.scrollTop,1016);assert.equal(outer.scrollTop,145);
     } finally { f.view.dispose(); }
 });
 
-function fixture({ enabled = false, dataPreview = true } = {}) {
+function fixture({ enabled = false, dataPreview = true, nativeAvailable = true, nativeMigrated = false } = {}) {
     const listeners = new Set(), calls = [], availability = { status: true, inventory: true, scene: false, dice: true };
     const labels = { status: '世界状态', inventory: '背包与账本', scene: '场景与时间', dice: '固定骰点（只读）' };
-    let settings = { version: 1, enabled, mode: 'review', modules: { status: { enabled: true, read: true, write: true }, inventory: { enabled: true, read: true, write: true }, scene: { enabled: false, read: false, write: false }, dice: { enabled: true, read: true, write: false } }, extraRules: '' };
+    let settings = { version: 1, enabled, mode: 'review', dataSource: 'amin', modules: { status: { enabled: true, read: true, write: true }, inventory: { enabled: true, read: true, write: true }, scene: { enabled: false, read: false, write: false }, dice: { enabled: true, read: true, write: false } }, extraRules: '' };
     let pending = null, dirty = false, failSave = false, failCheck = false, count = 0, suggestions = [], status = '';
+    let native = { available: nativeAvailable, migrated: nativeMigrated, message: nativeAvailable ? nativeMigrated ? '剧情变量已迁移。' : '可以迁移剧情变量。' : '未检测到小白变量 2.0。' };
     const emit = () => { for (const listener of listeners) listener(); };
     const proposal = { label: '跨应用剧情更新', summary: ['已饮用药剂', '恢复生命'], changes: [
         { module: 'inventory', action: 'consume', target: '药剂', reason: '已饮用', before: { count: 2 }, after: { count: 1 } },
@@ -55,7 +56,9 @@ function fixture({ enabled = false, dataPreview = true } = {}) {
         async saveSettings(value) { calls.push('settings'); settings = structuredClone(value); emit(); },
         async saveLinks(links) { calls.push('links'); settings = { ...settings, links: structuredClone(links) }; emit(); },
         prompt: () => settings.enabled ? '统一条目\n' + settings.extraRules + '\n' + JSON.stringify(settings.modules) : '',
-        ...(dataPreview ? { dataPrompt: () => settings.enabled && settings.modules.inventory.enabled && settings.modules.inventory.read ? '当前资料：红色围巾，数量 1，持有人艾琳' : '' } : {}),
+        ...(dataPreview ? { dataPrompt: () => settings.dataSource !== 'external' && settings.enabled && settings.modules.inventory.enabled && settings.modules.inventory.read ? '当前资料：红色围巾，数量 1，持有人艾琳' : '' } : {}),
+        nativeState2Status: () => structuredClone(native),
+        async migrateState2() { calls.push('migrate'); native = { available: true, migrated: true, message: '剧情变量已迁移。' }; emit(); return { changed: true, message: native.message }; },
         busy: () => false, dirty: () => dirty, status: () => status, preview: () => pending && structuredClone(pending),
         stage(raw) { calls.push('stage'); if (raw === 'invalid') throw Error('格式无效'); pending = structuredClone(proposal); emit(); return pending; },
         stageSuggestion(id) { calls.push('suggestion:' + id); pending = structuredClone(proposal); emit(); return pending; },
@@ -74,6 +77,7 @@ function fixture({ enabled = false, dataPreview = true } = {}) {
     return { root, view, api, calls, document, settings: () => settings, count: () => count, listenerCount: () => listeners.size,
         failSave(value) { failSave = value; }, failCheck(value) { failCheck = value; }, emit, reportHost(value) {status=value;emit();},
         available(id, value) { availability[id] = value; emit(); },
+        nativeStatus(value) { native = { ...native, ...value }; emit(); },
         suggest() { suggestions = [{ id: 's1', source: { index: 3, swipe: 0, identity: 'internal', path: ['internal'], text: 'all-message' }, text: '<amin_update>test</amin_update>' }]; emit(); },
     };
 }
@@ -208,5 +212,61 @@ test('older preview adapters without dataPrompt keep rules preview usable', () =
         assert.equal(find(f.root,'消息内资料预览内容','textarea').value,'');
         assert.match(find(f.root,'统一条目预览内容','textarea').value,/统一条目/);
         assert.doesNotMatch(notice(f.root)||'',/dataPrompt/);
+    }finally{f.view.dispose();}
+});
+
+test('live update controls show LittleWhiteBox variables 2.0 instead of legacy review and auto modes', async () => {
+    const f=fixture({enabled:true});try {
+        assert.match(f.root.textContent,/小白变量 2\.0/);
+        assert.match(f.root.textContent,/<state>/);
+        assert.equal(find(f.root,'更新处理方式','select'),undefined);
+        assert.doesNotMatch(f.root.textContent,/校验通过后自动应用|预览后确认/);
+        assert.ok(find(f.root,'初始化／迁移剧情变量'));
+        assert.match(f.root.textContent,/保留备份和旧记录/);
+        await click(f.root,'初始化／迁移剧情变量');
+        assert.deepEqual(f.calls.filter(call=>call==='migrate'),['migrate']);
+        assert.match(f.root.textContent,/剧情变量已迁移/);
+        assert.equal(f.settings().mode,'review');
+    }finally{f.view.dispose();}
+});
+
+test('native variable availability is explicit and migration waits for saved settings', async () => {
+    const f=fixture({enabled:true,nativeAvailable:false});try {
+        assert.match(f.root.textContent,/在小白盒子中启用变量 2\.0/);
+        assert.equal(find(f.root,'初始化／迁移剧情变量'),undefined);
+        f.nativeStatus({available:true,message:'可以迁移剧情变量。'});
+        assert.ok(find(f.root,'初始化／迁移剧情变量'));
+        await input(f.root,'额外联动规则','新规则');
+        assert.equal(find(f.root,'初始化／迁移剧情变量').disabled,true);
+        await click(f.root,'放弃未保存修改');
+        assert.equal(find(f.root,'初始化／迁移剧情变量').disabled,false);
+    }finally{f.view.dispose();}
+});
+
+test('legacy suggestions remain explicitly historical and are hidden when empty', () => {
+    const f=fixture({enabled:true});try {
+        const panel=find(f.root,'历史 Amin 更新建议','h3').parent;
+        assert.equal(panel.hidden,true);
+        f.suggest();
+        assert.equal(panel.hidden,false);
+        assert.match(panel.textContent,/升级前收到的 <amin_update>/);
+        assert.ok(find(panel,'校验并预览这组更新'));
+    }finally{f.view.dispose();}
+});
+
+test('Amin sends storyline data by default and an external source can disable duplicate injection', async () => {
+    const f=fixture({enabled:true});try {
+        const select=find(f.root,'资料发送来源','select'), data=find(f.root,'消息内资料预览内容','textarea');
+        assert.equal(select.value,'amin');assert.match(data.value,/红色围巾/);
+        const rules=find(f.root,'统一条目预览内容','textarea').value;
+        await input(f.root,'资料发送来源','external','select');
+        assert.equal(f.settings().dataSource,'amin');assert.match(data.value,/红色围巾/);
+        await click(f.root,'保存联动设置');
+        assert.equal(f.settings().dataSource,'external');assert.equal(data.value,'');
+        assert.match(f.root.textContent,/Amin 不再插入重复资料/);
+        assert.match(f.root.textContent,/宏提供所有选中模块/);
+        assert.equal(find(f.root,'统一条目预览内容','textarea').value,rules);
+        await input(f.root,'资料发送来源','amin','select');await click(f.root,'保存联动设置');
+        assert.equal(f.settings().dataSource,'amin');assert.match(data.value,/红色围巾/);
     }finally{f.view.dispose();}
 });

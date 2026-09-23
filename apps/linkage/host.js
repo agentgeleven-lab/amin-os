@@ -48,7 +48,7 @@ function promptContext(ctx, active) {
  * clone the scan afterward. No current-chat data is written to worldInfoCache.
  */
 export function createLinkageHost(getContext, {
-    captureGeneration, collectReply, buildPrompt, buildDataPrompt, cancelGeneration = () => {}, report = () => {},
+    captureGeneration, collectReply, buildPrompt, buildDataPrompt, beforeGeneration, cancelGeneration = () => {}, report = () => {},
     readSettings = readLinkageSettings, manages = managesModule,
 } = {}) {
     const initial = getContext(), events = initial?.eventTypes ?? initial?.event_types ?? {}, source = initial?.eventSource;
@@ -56,7 +56,7 @@ export function createLinkageHost(getContext, {
         && typeof captureGeneration === 'function' && typeof collectReply === 'function'
         && typeof buildDataPrompt === 'function' && typeof initial?.setExtensionPrompt === 'function';
     const subscriptions = [];
-    let run = null, timer = null, disposed = false, message = supported ? '等待酒馆生成和统一世界书条目' : '当前酒馆缺少统一联动所需的生成或世界书事件；不会自动接收更新';
+    let run = null, timer = null, disposed = false, epoch = 0, message = supported ? '等待酒馆生成和统一世界书条目' : '当前酒馆缺少统一联动所需的生成或世界书事件；不会自动接收更新';
     const say = value => { message = value; try { report(value); } catch { /* Status UI cannot interrupt host generation. */ } };
     const current = active => {
         const ctx = getContext();
@@ -87,12 +87,13 @@ export function createLinkageHost(getContext, {
         });
     }
     function cancel(reason = '') {
+        epoch++;
         clearData();
         clearTimeout(timer); timer = null; run = null;
         try { cancelGeneration(reason); } catch { /* The next generation will capture a new baseline. */ }
         if (reason) say(reason);
     }
-    function start(type = 'normal', options = {}, dryRun = false) {
+    async function start(type = 'normal', options = {}, dryRun = false) {
         // A dry-run prompt inspection must not invalidate a live generation.
         if (dryRun) return;
         cancel();
@@ -105,6 +106,11 @@ export function createLinkageHost(getContext, {
         const id = ctx.getCurrentChatId?.() ?? ctx.chatId;
         if (id == null || id === '') { say('当前聊天尚无有效标识，未建立更新接收记录'); return; }
         type ||= 'normal';
+        if (beforeGeneration) {
+            const identity = chatIdentity(ctx), metadata = ctx.chatMetadata, started = epoch;
+            await beforeGeneration(type);
+            if (disposed || epoch !== started || options?.signal?.aborted || getContext()?.chatMetadata !== metadata || chatIdentity(getContext()) !== identity) return;
+        }
         run = {
             id: ++sequence, type, metadata: ctx.chatMetadata, identity: chatIdentity(ctx), signal: options?.signal,
             purpose: type === 'quiet' ? 'tool' : 'story', write: storyTypes.has(type),
@@ -209,7 +215,7 @@ export function createLinkageHost(getContext, {
                 throw Error('没有与本次生成对应的完整新回复');
             }
             const result = await collectReply(active.candidate);
-            say(result?.outcome === 'missing' ? '更新规则已激活，但回复原文未包含更新块' : result?.outcome === 'empty' ? '更新规则已激活；模型报告本轮无变化' : result?.outcome === 'invalid' ? '更新规则已激活；返回块无效或已过期，请查看详细提示' : '已检查本轮统一更新块；具体变更请查看联动更新页面');
+            say(result?.outcome === 'native' ? result.message : result?.outcome === 'missing' ? '更新规则已激活，但回复原文未包含更新块' : result?.outcome === 'empty' ? '更新规则已激活；模型报告本轮无变化' : result?.outcome === 'invalid' ? '更新规则已激活；返回块无效或已过期，请查看详细提示' : '已检查本轮统一更新块；具体变更请查看联动更新页面');
         } catch (error) { say('本轮统一更新未接收：' + error.message); }
     }
     const handlers = {

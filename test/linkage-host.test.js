@@ -17,7 +17,7 @@ function context() {
         chatId: 'one', getCurrentChatId() { return this.chatId; }, chatMetadata: { state: 'private-one' },
         chat: [{ is_user: true, name: 'user', mes: 'before' }], getRequestHeaders: () => ({}) };
 }
-function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings } = {}) {
+function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings, beforeGeneration } = {}) {
     let ctx = context();
     const injections = new Map();
     const callbacks = new Map(), captured = [], replies = [], logs = [], builds = [];
@@ -32,6 +32,7 @@ function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings
     ctx.eventSource = source; ctx.eventTypes = events;
     const getContext = () => ctx;
     const host = createLinkageHost(getContext, {
+        beforeGeneration,
         readSettings: readSettings ?? (() => settings),
         manages: (_ctx, module) => settings.enabled && settings.modules.includes(module),
         buildPrompt: builder ?? ((live, options) => { builds.push(options); return `${options.purpose}:${options.write}:${live.chatMetadata.state}`; }),
@@ -382,4 +383,27 @@ test('disabled branch and missing worldbook stages replace stale switch status',
     assert.match(f.host.status().message,/未收到世界书加载事件/);
     await f.start();await f.load();await f.source.emit('GENERATION_ENDED');
     assert.match(f.host.status().message,/未确认统一条目实际激活/);assert.equal(f.replies.length,0);f.host.destroy();
+});
+
+test('stopping generation during native migration does not resume injection afterward', async () => {
+    let finish;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const f = hostFixture({ beforeGeneration: () => gate });
+    try {
+        const pending = f.start();
+        await f.source.emit('GENERATION_STOPPED');
+        finish(); await pending;
+        assert.equal(f.host.status().active, false);
+        assert.ok(!f.injected()?.value);
+    } finally { f.host.destroy(); }
+});
+
+test('native migration failure leaves the generation without stale data injection', async () => {
+    const f = hostFixture({ beforeGeneration: async () => { throw Error('migration collision'); } });
+    try {
+        await f.start();
+        assert.equal(f.host.status().active, false);
+        assert.match(f.logs.at(-1), /migration collision/);
+        assert.ok(!f.injected()?.value);
+    } finally { f.host.destroy(); }
 });

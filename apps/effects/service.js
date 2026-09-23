@@ -5,6 +5,7 @@ import {createOperationService,subscribeStateChanges,chatIdentity,acquireMetadat
 import {uuid} from '../../uuid.js';
 import {managesModule} from '../linkage/policy.js';
 import {buildSettlement,periodicPreview,SETTLEMENT_PATHS,MANUAL_SETTLEMENT_PATHS,validatePeriodicReferences} from './settlement.js';
+import {prepareState2ManualWrite} from '../state2/runtime.js';
 export const PROMPT_KEY='amin-os-persistent-effects';
 export function createEffects(getContext){
  let busy=false,message='尚未发送提醒';const listeners=new Set(),operations=createOperationService(getContext);
@@ -37,9 +38,9 @@ export function createEffects(getContext){
  }
  async function save(token,update){
   ensureAvailable();const c=check(token);if(typeof c.saveMetadata!=='function')throw Error('当前酒馆缺少聊天保存接口');
-  migrate(c);const meta=c.chatMetadata,before=meta[KEY],existed=Object.hasOwn(meta,KEY),next=forMetadata(update(readStore(c)),c),release=acquireMetadataWrite(getContext,token.operation);let saved=false;busy=true;
-  try{meta[KEY]=next;await c.saveMetadata();saved=true;const current=getContext();if(current?.chatMetadata!==meta||identity(current)!==token.id||JSON.stringify(anchor(current.chat))!==token.path)throw Error('记录已保存到原聊天，但聊天或楼层已变化，请刷新当前页面');clear();message='已保存，下次生成时使用当前记录';}
-  catch(e){if(!saved&&meta[KEY]===next){if(existed)meta[KEY]=before;else delete meta[KEY];}message=saved?e.message:'保存失败：'+e.message;throw e;}
+  migrate(c);const meta=c.chatMetadata,before=meta[KEY],existed=Object.hasOwn(meta,KEY),next=forMetadata(update(readStore(c)),c),release=acquireMetadataWrite(getContext,token.operation);let saved=false,nativeRollback;busy=true;
+  try{meta[KEY]=next;nativeRollback=prepareState2ManualWrite(c,[[KEY]]);await c.saveMetadata();saved=true;const current=getContext();if(current?.chatMetadata!==meta||identity(current)!==token.id||JSON.stringify(anchor(current.chat))!==token.path)throw Error('记录已保存到原聊天，但聊天或楼层已变化，请刷新当前页面');clear();message='已保存，下次生成时使用当前记录';}
+  catch(e){if(!saved&&meta[KEY]===next){if(existed)meta[KEY]=before;else delete meta[KEY];nativeRollback?.();}message=saved?e.message:'保存失败：'+e.message;throw e;}
   finally{busy=false;release();notify({error:message.includes('失败')||message.includes('已变化')});}
  }
  async function commit(token,label,update){
