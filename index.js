@@ -7,7 +7,7 @@ import {initializeAI} from './ai/service.js';
 import { createShell } from './shell.js';
 import { getSharedService as getLinkageService } from './apps/linkage/service.js';
 import { createLinkageHost } from './apps/linkage/host.js';
-import { buildUnifiedPrompt } from './apps/linkage/prompt.js';
+import { buildUpdateRules, buildDataPrompt } from './apps/linkage/prompt.js';
 
 let instance;
 export function initialize() {
@@ -35,7 +35,7 @@ export function initialize() {
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const linkage = getLinkageService();
     const linkageHost = createLinkageHost(() => globalThis.SillyTavern?.getContext?.(), {
-        buildPrompt: buildUnifiedPrompt, captureGeneration: linkage.captureGeneration,
+        buildPrompt: buildUpdateRules, buildDataPrompt, captureGeneration: linkage.captureGeneration,
         collectReply: linkage.collectReply, cancelGeneration: linkage.cancelGeneration,
         report: linkage.reportHost,
     });

@@ -10,7 +10,7 @@ import { parseRequestBody } from '../apps/map/src/adapters/request-body.js';
 import {createHostRoutes} from './host-settings.js';
 import {getHostRouteOptions, captureHostRoute, observeHostGeneration, runHostGeneration} from './host-generation.js';
 import { managesModule } from '../apps/linkage/policy.js';
-import { buildUnifiedPrompt } from '../apps/linkage/prompt.js';
+import { buildDataPrompt } from '../apps/linkage/prompt.js';
 
 export const AI_APPS = [
     {id:'map',name:'地图',tasks:['地图']},
@@ -115,7 +115,7 @@ export function createAI(storage, namespace, {resolveConnection=resolveHostConne
                 includeEffects&&!managesModule(ctx,'effects')?currentPrompt(ctx):'',
                 includeJournal&&!managesModule(ctx,'journal')?currentJournalPrompt(ctx):'',
                 includeScene&&!managesModule(ctx,'scene')?currentScenePrompt(ctx):'',
-                includeLinkage?buildUnifiedPrompt(ctx,{purpose:'tool',write:false}):'',
+                includeLinkage?buildDataPrompt(ctx,{purpose:'tool',write:false}):'',
             ].filter(Boolean).join('\n\n');
             const captured = snapshot ?? this.capture(app);
             if(!captured.preset.blocks.some(b=>b.type==='request'&&b.enabled))throw Error('共享预设必须启用“本次要求”块，请在 AI 设置中恢复。');

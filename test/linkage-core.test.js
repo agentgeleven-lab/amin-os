@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createLinkageService } from '../apps/linkage/service.js';
 import { parseUpdate } from '../apps/linkage/protocol.js';
 import { emptyLinkageState, readLinkageSettings, managesModule, KEY } from '../apps/linkage/policy.js';
-import { buildUnifiedPrompt } from '../apps/linkage/prompt.js';
+import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules } from '../apps/linkage/prompt.js';
 import { adapter as characters } from '../apps/linkage/adapters/characters.js';
 import { adapter as inventory } from '../apps/linkage/adapters/inventory.js';
 import { adapter as status } from '../apps/linkage/adapters/status.js';
@@ -149,4 +149,34 @@ test('existing status rules survive unified takeover and changed rules invalidat
     t.ctx.chat.push({is_user:false,name:'GM',mes:'<amin_update>'+JSON.stringify(batch(person))+'</amin_update>'});
     const candidate=await t.api.collectReply(1);t.ctx.extensionSettings.world_status_hud_v1.globalRules[0].content='生命不高于十。';
     assert.throws(()=>t.api.stageSuggestion(candidate.id),/规则已变化/);assert.equal(t.saves,0);t.api.dispose();
+});
+
+test('host regeneration exclusion preserves preceding assistant already left by host removal', async () => {
+    const t = setup();
+    try {
+        t.ctx.chat.push({ name: 'GM', is_user: false, mes: 'retained history', swipe_id: 0 });
+        const removed = { name: 'GM', is_user: false, mes: 'removed candidate', swipe_id: 0 };
+        assert.equal(t.api.captureGeneration('regenerate', { excludedReply: removed }), true);
+        t.ctx.chat.push({ name: 'GM', is_user: false, mes: '<amin_update>' + JSON.stringify(batch(person)) + '</amin_update>', swipe_id: 0 });
+        assert.ok(await t.api.collectReply(2));
+    } finally { t.api.dispose(); }
+});
+
+
+test('worldbook rules and message data have separate payloads and previews',()=>{
+    const t=setup();
+    t.ctx.chatMetadata.variables.状态栏=JSON.stringify({版本:1,项目:{玩家:{备注:'only-in-message-secret'}}});
+    t.ctx.chatMetadata[KEY].extraRules='only-in-rules-instruction';
+    const data=buildDataPrompt(t.ctx), rules=buildUpdateRules(t.ctx);
+    assert.match(data,/only-in-message-secret/);
+    assert.doesNotMatch(rules,/only-in-message-secret|"modules"|"references"/);
+    assert.match(rules,/only-in-rules-instruction|<amin_update>/);
+    assert.doesNotMatch(data,/only-in-rules-instruction|<amin_update>|统一更新协议/);
+    assert.equal(t.api.prompt(),rules);assert.equal(t.api.dataPrompt(),data);
+    assert.equal(buildUpdateRules(t.ctx,{purpose:'tool'}),'');
+    for(const setting of Object.values(t.ctx.chatMetadata[KEY].modules))setting.write=false;
+    assert.equal(buildUpdateRules(t.ctx),'');assert.match(buildDataPrompt(t.ctx),/only-in-message-secret/);
+    t.ctx.chatMetadata[KEY].enabled=false;
+    assert.equal(buildDataPrompt(t.ctx),'');assert.equal(buildUpdateRules(t.ctx),'');
+    t.api.dispose();
 });

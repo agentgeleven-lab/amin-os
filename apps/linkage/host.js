@@ -7,6 +7,7 @@ const buckets = ['chatLore', 'characterLore', 'globalLore', 'personaLore'];
 const requiredEvents = ['GENERATION_AFTER_COMMANDS', 'WORLDINFO_ENTRIES_LOADED', 'WORLD_INFO_ACTIVATED', 'MESSAGE_RECEIVED', 'GENERATION_ENDED', 'GENERATION_STOPPED', 'CHAT_CHANGED'];
 const toolScopes = new WeakMap();
 let sequence = 0;
+export const LINKAGE_DATA_PROMPT_KEY = 'amin-os-linkage-data';
 
 const contextKey = ctx => ctx?.eventSource && typeof ctx.eventSource === 'object' ? ctx.eventSource : ctx?.chatMetadata;
 function inToolScope(ctx) {
@@ -35,9 +36,9 @@ function legacyModule(entry) {
 const disabledCopy = entry => ({ ...entry, content: '', disable: true });
 const entryKey = entry => JSON.stringify([entry.world ?? '', entry.uid]);
 const messageSnapshot = ctx => (ctx.chat ?? []).map(message => ({ ref: message, text: message.mes, swipe: message.swipe_id ?? 0 }));
-function promptContext(ctx, type) {
+function promptContext(ctx, active) {
     const tail = ctx.chat?.at(-1);
-    return ['regenerate', 'swipe'].includes(type) && tail && !tail.is_user && !tail.is_system
+    return tail && tail === active.excludedReply
         ? { ...ctx, chat: ctx.chat.slice(0, -1) } : ctx;
 }
 
@@ -47,12 +48,13 @@ function promptContext(ctx, type) {
  * clone the scan afterward. No current-chat data is written to worldInfoCache.
  */
 export function createLinkageHost(getContext, {
-    captureGeneration, collectReply, buildPrompt, cancelGeneration = () => {}, report = () => {},
+    captureGeneration, collectReply, buildPrompt, buildDataPrompt, cancelGeneration = () => {}, report = () => {},
     readSettings = readLinkageSettings, manages = managesModule,
 } = {}) {
     const initial = getContext(), events = initial?.eventTypes ?? initial?.event_types ?? {}, source = initial?.eventSource;
     const supported = !!source?.on && requiredEvents.every(key => events[key]) && typeof buildPrompt === 'function'
-        && typeof captureGeneration === 'function' && typeof collectReply === 'function';
+        && typeof captureGeneration === 'function' && typeof collectReply === 'function'
+        && typeof buildDataPrompt === 'function' && typeof initial?.setExtensionPrompt === 'function';
     const subscriptions = [];
     let run = null, timer = null, disposed = false, message = supported ? '等待酒馆生成和统一世界书条目' : '当前酒馆缺少统一联动所需的生成或世界书事件；不会自动接收更新';
     const say = value => { message = value; try { report(value); } catch { /* Status UI cannot interrupt host generation. */ } };
@@ -60,7 +62,32 @@ export function createLinkageHost(getContext, {
         const ctx = getContext();
         return !!active && !disposed && !active.signal?.aborted && ctx?.chatMetadata === active.metadata && chatIdentity(ctx) === active.identity;
     };
+    function clearData() {
+        initial?.setExtensionPrompt?.(LINKAGE_DATA_PROMPT_KEY, '', 1, 0, false, 0);
+    }
+    function injectData(active) {
+        const ctx = getContext();
+        if (!current(active) || !readSettings(ctx).enabled || active.type === 'quiet' && inToolScope(ctx)) {
+            clearData(); return;
+        }
+        const value = buildDataPrompt(promptContext(ctx, active), { purpose: active.purpose, write: false });
+        if (typeof value !== 'string') throw Error('插件资料提示词无效');
+        active.data = value;
+        // IN_CHAT=1, SYSTEM=0. The host consumes this during prompt assembly;
+        // scan=false prevents application facts from activating worldbook entries.
+        ctx.setExtensionPrompt(LINKAGE_DATA_PROMPT_KEY, value, 1, 0, false, 0, () => {
+            try {
+                const live = getContext();
+                if (run !== active || !current(active) || !readSettings(live).enabled) return false;
+                if (buildDataPrompt(promptContext(live, active), { purpose: active.purpose, write: false }) !== active.data) {
+                    active.failed = true; clearData(); return false;
+                }
+                return true;
+            } catch { active.failed = true; clearData(); return false; }
+        });
+    }
     function cancel(reason = '') {
+        clearData();
         clearTimeout(timer); timer = null; run = null;
         try { cancelGeneration(reason); } catch { /* The next generation will capture a new baseline. */ }
         if (reason) say(reason);
@@ -78,9 +105,12 @@ export function createLinkageHost(getContext, {
         run = {
             id: ++sequence, type, metadata: ctx.chatMetadata, identity: chatIdentity(ctx), signal: options?.signal,
             purpose: type === 'quiet' ? 'tool' : 'story', write: storyTypes.has(type),
-            before: messageSnapshot(ctx), selected: null, prompt: '', captured: false,
+            before: messageSnapshot(ctx), selected: null, prompt: '', data: '', captured: false,
+            excludedReply: ['regenerate', 'swipe'].includes(type) && !ctx.chat?.at(-1)?.is_user && !ctx.chat?.at(-1)?.is_system ? ctx.chat?.at(-1) : null,
             candidate: null, ended: false, failed: false,
         };
+        injectData(run);
+        options?.signal?.addEventListener?.('abort', () => { if (run?.signal === options.signal) cancel('生成已停止，未接收本轮统一更新'); }, { once: true });
     }
     function loaded(payload) {
         const ctx = getContext(), entries = [];
@@ -97,13 +127,17 @@ export function createLinkageHost(getContext, {
         const owned = entries.filter(row => isUnifiedEntry(row.entry));
         for (const row of owned) row.list[row.index] = disabledCopy(row.entry);
         const active = run;
-        if (!supported || !current(active) || !readSettings(ctx).enabled || active.type === 'quiet' && inToolScope(ctx)) return;
+        if (!supported || !current(active) || !readSettings(ctx).enabled || active.type === 'quiet' && inToolScope(ctx)) { clearData(); return; }
+        // Refresh after the host appends input/removes a regenerated candidate,
+        // before it snapshots extension prompts. This also works without a bound book.
+        injectData(active);
+        if (!active.write) return;
         // Keep exactly one applicable owned entry across overlapping book bindings.
         const selected = owned.find(({ entry }) => !entry.disable && hasUnifiedPlaceholder(entry.content)
             && (!Array.isArray(entry.triggers) || !entry.triggers.length || entry.triggers.includes(active.type)));
         if (!selected) { say(owned.length ? '统一条目未启用、触发器不匹配或占位无效；本轮不会接收自动更新' : '本轮未加载统一条目；请检查世界书绑定和预设'); return; }
         try {
-            const prompt = buildPrompt(promptContext(ctx, active.type), { purpose: active.purpose, write: active.write });
+            const prompt = buildPrompt(promptContext(ctx, active), { purpose: active.purpose, write: active.write });
             if (typeof prompt !== 'string' || !prompt.trim()) return;
             // Replace by callback so dollar sequences in state stay literal.
             const expanded = {
@@ -113,8 +147,8 @@ export function createLinkageHost(getContext, {
             };
             selected.list[selected.index] = expanded;
             active.selected = entryKey(expanded); active.prompt = prompt;
-            say(active.write ? '已展开当前聊天资料，等待酒馆确认条目实际激活' : '本次工具或续写仅提供只读资料');
-        } catch (error) { active.failed = true; say('统一条目未展开：' + error.message); }
+            say('已展开变量更新规则；资料由插件注入，等待酒馆确认规则实际激活');
+        } catch (error) { active.failed = true; clearData(); say('统一条目未展开：' + error.message); }
     }
     async function activated(entries) {
         const active = run;
@@ -122,18 +156,19 @@ export function createLinkageHost(getContext, {
         if (!entries.some(entry => isUnifiedEntry(entry) && entry.amin_os_linkage_run === active.id && entryKey(entry) === active.selected)) return;
         try {
             const ctx = getContext();
-            if (!readSettings(ctx).enabled || buildPrompt(promptContext(ctx, active.type), { purpose: active.purpose, write: active.write }) !== active.prompt) {
+            if (!readSettings(ctx).enabled || buildPrompt(promptContext(ctx, active), { purpose: active.purpose, write: active.write }) !== active.prompt
+                || buildDataPrompt(promptContext(ctx, active), { purpose: active.purpose, write: false }) !== active.data) {
                 throw Error('提示词组装期间联动资料或设置已变化');
             }
             // AFTER_COMMANDS is too early: the host may still append the user
             // message or remove the previous reply for a regeneration afterward.
             active.before = messageSnapshot(ctx);
-            const accepted = await captureGeneration(active.type);
+            const accepted = await captureGeneration(active.type, { excludedReply: active.excludedReply });
             if (accepted === false) throw Error('联动服务当前不能建立生成基线，请完成待保存操作后重试');
             if (!current(active) || run !== active) return;
             active.captured = true;
             say('统一条目已激活，等待新的完整角色回复');
-        } catch (error) { active.failed = true; say('本轮更新基线未建立：' + error.message); }
+        } catch (error) { active.failed = true; clearData(); say('本轮更新基线未建立：' + error.message); }
     }
     function schedule() {
         if (!run?.ended || run.candidate === null) return;
@@ -149,12 +184,13 @@ export function createLinkageHost(getContext, {
         schedule();
     }
     function ended() {
+        clearData();
         if (!run) return;
         if (!run.write || !run.captured) { cancel(); return; }
         run.ended = true; schedule();
     }
     async function finish() {
-        const active = run; run = null; timer = null;
+        const active = run; run = null; timer = null; clearData();
         if (!active?.captured) return;
         try {
             if (!current(active) || active.failed) throw Error('生成已停止或聊天已切换');

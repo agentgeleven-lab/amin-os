@@ -40,7 +40,7 @@ test('prompt and update shortcuts scroll only the owned panel and never pan the 
     } finally { f.view.dispose(); }
 });
 
-function fixture({ enabled = false } = {}) {
+function fixture({ enabled = false, dataPreview = true } = {}) {
     const listeners = new Set(), calls = [], availability = { status: true, inventory: true, scene: false, dice: true };
     const labels = { status: '世界状态', inventory: '背包与账本', scene: '场景与时间', dice: '固定骰点（只读）' };
     let settings = { version: 1, enabled, mode: 'review', modules: { status: { enabled: true, read: true, write: true }, inventory: { enabled: true, read: true, write: true }, scene: { enabled: false, read: false, write: false }, dice: { enabled: true, read: true, write: false } }, extraRules: '' };
@@ -55,6 +55,7 @@ function fixture({ enabled = false } = {}) {
         async saveSettings(value) { calls.push('settings'); settings = structuredClone(value); emit(); },
         async saveLinks(links) { calls.push('links'); settings = { ...settings, links: structuredClone(links) }; emit(); },
         prompt: () => settings.enabled ? '统一条目\n' + settings.extraRules + '\n' + JSON.stringify(settings.modules) : '',
+        ...(dataPreview ? { dataPrompt: () => settings.enabled && settings.modules.inventory.enabled && settings.modules.inventory.read ? '当前资料：红色围巾，数量 1，持有人艾琳' : '' } : {}),
         busy: () => false, dirty: () => dirty, status: () => status, preview: () => pending && structuredClone(pending),
         stage(raw) { calls.push('stage'); if (raw === 'invalid') throw Error('格式无效'); pending = structuredClone(proposal); emit(); return pending; },
         stageSuggestion(id) { calls.push('suggestion:' + id); pending = structuredClone(proposal); emit(); return pending; },
@@ -183,5 +184,29 @@ test('later host availability reports replace an earlier local success notice', 
     const f=fixture();try {
         await toggle(f.root,'启用统一联动更新',true);await click(f.root,'保存联动设置');assert.match(notice(f.root),/设置已保存/);
         f.reportHost('当前宿主尚未提供统一条目读取接口。');assert.equal(notice(f.root),'当前宿主尚未提供统一条目读取接口。');
+    }finally{f.view.dispose();}
+});
+
+
+test('worldbook rules and injected application data have independent previews and copying', async () => {
+    const f=fixture({enabled:true});try {
+        const data=find(f.root,'消息内资料预览内容','textarea');
+        assert.equal(data.readOnly,true);assert.match(data.value,/红色围巾/);
+        assert.ok(find(f.root,'消息内资料预览','summary'));assert.equal(f.calls.includes('inspect'),false);
+        assert.doesNotMatch(find(f.root,'统一条目预览内容','textarea').value,/红色围巾/);
+        await click(f.root,'检查绑定世界书');await click(f.root,'复制条目预览');
+        const copied=f.calls.find(call=>Array.isArray(call))[1];assert.match(copied,/用户前文/);assert.doesNotMatch(copied,/红色围巾/);
+        assert.doesNotMatch(data.value,/用户前文/);assert.match(f.root.textContent,/不保存到可见聊天正文/);
+        await toggle(f.root,'背包与账本 · 提供资料给模型',false);
+        assert.match(data.value,/红色围巾/);await click(f.root,'保存联动设置');assert.equal(data.value,'');
+        await click(f.root,'刷新消息内资料预览');assert.match(notice(f.root),/已刷新消息内资料预览/);
+    }finally{f.view.dispose();}
+});
+
+test('older preview adapters without dataPrompt keep rules preview usable', () => {
+    const f=fixture({enabled:true,dataPreview:false});try {
+        assert.equal(find(f.root,'消息内资料预览内容','textarea').value,'');
+        assert.match(find(f.root,'统一条目预览内容','textarea').value,/统一条目/);
+        assert.doesNotMatch(notice(f.root)||'',/dataPrompt/);
     }finally{f.view.dispose();}
 });

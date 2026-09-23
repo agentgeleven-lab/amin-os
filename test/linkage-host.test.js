@@ -4,7 +4,7 @@ import {
     LINKAGE_OWNER_FIELD, LINKAGE_ENTRY_MARKER, LINKAGE_PLACEHOLDER, LINKAGE_ENTRY_TITLE,
     prepareUnifiedWorldbook, installUnifiedWorldbook, inspectUnifiedWorldbook, unifiedWorldbookTarget,
 } from '../apps/linkage/lorebook.js';
-import { createLinkageHost, withLinkageToolScope } from '../apps/linkage/host.js';
+import { createLinkageHost, withLinkageToolScope, LINKAGE_DATA_PROMPT_KEY } from '../apps/linkage/host.js';
 
 const clone = value => structuredClone(value);
 const owned = (patch = {}) => ({ uid: 1, world: 'book', content: LINKAGE_PLACEHOLDER, [LINKAGE_OWNER_FIELD]: LINKAGE_ENTRY_MARKER, ...patch });
@@ -17,8 +17,9 @@ function context() {
         chatId: 'one', getCurrentChatId() { return this.chatId; }, chatMetadata: { state: 'private-one' },
         chat: [{ is_user: true, name: 'user', mes: 'before' }], getRequestHeaders: () => ({}) };
 }
-function hostFixture({ missingEvent, builder, capture, readSettings } = {}) {
+function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings } = {}) {
     let ctx = context();
+    const injections = new Map();
     const callbacks = new Map(), captured = [], replies = [], logs = [], builds = [];
     const settings = { enabled: true, modules: ['status', 'map', 'organizations'] };
     const source = {
@@ -27,17 +28,20 @@ function hostFixture({ missingEvent, builder, capture, readSettings } = {}) {
         async emit(name, ...args) { for (const fn of [...(callbacks.get(name) ?? [])]) await fn(...args); },
     };
     const events = Object.fromEntries(eventNames.filter(name => name !== missingEvent).map(name => [name, name]));
+    ctx.setExtensionPrompt = (key, value, ...options) => injections.set(key, { value, options });
     ctx.eventSource = source; ctx.eventTypes = events;
     const getContext = () => ctx;
     const host = createLinkageHost(getContext, {
         readSettings: readSettings ?? (() => settings),
         manages: (_ctx, module) => settings.enabled && settings.modules.includes(module),
         buildPrompt: builder ?? ((live, options) => { builds.push(options); return `${options.purpose}:${options.write}:${live.chatMetadata.state}`; }),
+        buildDataPrompt: dataBuilder ?? ((live) => `DATA:${live.chatMetadata.state}`),
         captureGeneration: async type => { captured.push({ type, length: ctx.chat.length }); return await capture?.(type); },
         collectReply: async index => { replies.push(index); }, report: value => logs.push(value),
     });
     return {
         host, captured, replies, logs, builds, settings, callbacks, source, getContext,
+        injected: () => injections.get(LINKAGE_DATA_PROMPT_KEY),
         ctx: () => ctx,
         async start(type = 'normal', options = {}, dryRun = false) { await source.emit('GENERATION_AFTER_COMMANDS', type, options, dryRun); },
         async load(payload = { characterLore: [owned()] }) { await source.emit('WORLDINFO_ENTRIES_LOADED', payload); return payload; },
@@ -207,16 +211,19 @@ test('quiet and continuation are read-only, and Amin quiet scope avoids duplicat
     try {
         for (const type of ['quiet', 'continue', 'impersonate']) {
             await f.start(type); const payload = await f.load();
-            assert.equal(payload.characterLore[0].content, `${type === 'quiet' ? 'tool' : 'story'}:false:private-one`);
+            assert.equal(payload.characterLore[0].disable, true);
+            assert.equal(f.injected().value, 'DATA:private-one');
             await f.activate(payload); f.reply(); await f.finish();
         }
         assert.deepEqual(f.captured, []); assert.deepEqual(f.replies, []);
         await withLinkageToolScope(f.getContext, async () => {
             await f.start('quiet'); const payload = await f.load(); assert.equal(payload.characterLore[0].disable, true);
+            assert.equal(f.injected().value, '');
             // A scope waiting on a quiet queue must never silence ordinary story.
             await f.start('normal'); assert.equal((await f.load()).characterLore[0].disable, undefined);
         });
-        await f.start('quiet'); assert.equal((await f.load()).characterLore[0].disable, undefined);
+        await f.start('quiet'); assert.equal((await f.load()).characterLore[0].disable, true);
+        assert.equal(f.injected().value, 'DATA:private-one');
     } finally { f.host.destroy(); }
 });
 
@@ -224,10 +231,12 @@ test('tool scopes clean up on rejection and do not follow the user to another ch
     const f = hostFixture();
     try {
         await assert.rejects(withLinkageToolScope(f.getContext, async () => { throw Error('tool failed'); }), /tool failed/);
-        await f.start('quiet'); assert.equal((await f.load()).characterLore[0].disable, undefined);
+        await f.start('quiet'); assert.equal((await f.load()).characterLore[0].disable, true);
+        assert.equal(f.injected().value, 'DATA:private-one');
         await withLinkageToolScope(f.getContext, async () => {
             await f.switchChat(); await f.start('quiet');
-            assert.match((await f.load()).characterLore[0].content, /private-two/);
+            assert.equal((await f.load()).characterLore[0].disable, true);
+            assert.equal(f.injected().value, 'DATA:private-two');
         });
     } finally { f.host.destroy(); }
 });
@@ -292,4 +301,68 @@ test('malformed chat policy and a busy service do not interrupt host generation 
         assert.equal(busy.host.status().captured, false);
         assert.deepEqual(busy.replies, []);
     } finally { busy.host.destroy(); }
+});
+
+test('plugin facts inject without a bound book and never mutate visible chat', async () => {
+    const f = hostFixture({ builder: () => 'UPDATE RULES ONLY' });
+    const chat = clone(f.ctx().chat), metadata = clone(f.ctx().chatMetadata);
+    try {
+        await f.start(); await f.load({});
+        assert.equal(f.injected().value, 'DATA:private-one');
+        assert.deepEqual(f.injected().options.slice(0, 4), [1, 0, false, 0]);
+        assert.deepEqual(f.ctx().chat, chat); assert.deepEqual(f.ctx().chatMetadata, metadata);
+        const payload = await f.load();
+        assert.equal(payload.characterLore[0].content, 'UPDATE RULES ONLY');
+        await f.source.emit('GENERATION_ENDED'); assert.equal(f.injected().value, '');
+    } finally { f.host.destroy(); }
+});
+
+test('plugin data clears on stop, disabled policy, switch, abort and dispose', async () => {
+    for (const action of ['stop', 'disabled', 'switch', 'abort', 'destroy']) {
+        const f = hostFixture(), controller = new AbortController();
+        try {
+            await f.start('normal', { signal: controller.signal });
+            assert.match(f.injected().value, /private-one/);
+            if (action === 'stop') await f.source.emit('GENERATION_STOPPED');
+            if (action === 'disabled') { f.settings.enabled = false; assert.equal(f.injected().options[4](), false); await f.load(); }
+            if (action === 'switch') await f.switchChat();
+            if (action === 'abort') controller.abort();
+            if (action === 'destroy') f.host.destroy();
+            assert.equal(f.injected().value, '');
+        } finally { f.host.destroy(); }
+    }
+});
+
+test('refresh before prompt assembly follows host source without dropping earlier assistants', async () => {
+    const f = hostFixture({ dataBuilder: live => live.chat.map(message => message.mes).join('|') });
+    try {
+        f.reply('retained history'); f.reply('replaced reply');
+        await f.start('regenerate');
+        assert.equal(f.injected().value, 'before|retained history');
+        f.ctx().chat.pop();
+        await f.load({}); assert.equal(f.injected().value, 'before|retained history');
+        await f.source.emit('GENERATION_ENDED');
+        await f.start(); f.ctx().chat.push({ is_user: true, mes: 'actual input' });
+        await f.load({}); assert.equal(f.injected().value, 'before|retained history|actual input');
+    } finally { f.host.destroy(); }
+});
+
+test('data-only changes after scan invalidate rule activation', async () => {
+    const f = hostFixture({ builder: () => 'unchanged rules' });
+    try {
+        await f.start(); const payload = await f.load();
+        f.ctx().chatMetadata.state = 'different data'; await f.activate(payload);
+        assert.deepEqual(f.captured, []); assert.equal(f.injected().value, '');
+    } finally { f.host.destroy(); }
+});
+
+test('a rejected data injection filter cannot authorize later update collection', async () => {
+    const f = hostFixture({ builder: () => 'constant rules' });
+    try {
+        await f.start(); await f.activate(await f.load());
+        f.ctx().chatMetadata.state = 'changed after capture';
+        assert.equal(f.injected().options[4](), false);
+        assert.equal(f.injected().value, '');
+        f.reply(); await f.finish(); assert.deepEqual(f.replies, []);
+    } finally { f.host.destroy(); }
 });

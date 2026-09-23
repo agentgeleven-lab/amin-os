@@ -4,7 +4,7 @@ import { checkpointState } from '../status/state-checkpoint.js';
 import { adapters as allAdapters } from './registry.js';
 import { KEY, MODULES, readLinkageState, readLinkageSettings, validateLinkageState, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
 import { parseUpdate, hasUpdate } from './protocol.js';
-import { buildUnifiedPrompt } from './prompt.js';
+import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules } from './prompt.js';
 import { buildReferenceIndex } from './references.js';
 
 const clone = value => structuredClone(value), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -125,13 +125,14 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         try { const result = await operation.confirm(); message = '联动设置已保存。'; generation = null; candidates.clear(); return result; }
         finally { notify(); }
     }
-    function captureGeneration(type = 'normal') {
+    function captureGeneration(type = 'normal', source = {}) {
         generation = null;
         if (manualScope) return false;
         if (!['normal','regenerate','swipe'].includes(type)) return false;
         const ctx = context(); if (!readLinkageState(ctx).enabled || operation.busy() || operation.dirty()) return false;
         const chat = [...(ctx.chat ?? [])];
-        if (['regenerate','swipe'].includes(type) && chat.length && !chat.at(-1).is_user) chat.pop();
+        if (['regenerate','swipe'].includes(type) && chat.length && !chat.at(-1).is_user && !chat.at(-1).is_system
+            && (!Object.hasOwn(source, 'excludedReply') || chat.at(-1) === source.excludedReply)) chat.pop();
         const effective = { ...ctx, chat };
         generation = { id:createId(), metadata:ctx.chatMetadata, identity:chatIdentity(ctx), path:chatPath(chat), data:clone(rawData(effective)), settings:readLinkageState(ctx), prompt:buildPrompt(effective) };
         return true;
@@ -155,7 +156,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     return {
         settings:()=>readLinkageSettings(context()), saveSettings,
         modules:()=>{const ctx=context();return adapters.map(a=>({id:a.id,label:a.label,available:moduleAvailable(ctx,a.id),...modulePolicy(ctx,a.id)}));},
-        prompt:()=>buildPrompt(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),
+        prompt:()=>buildUpdateRules(context()), dataPrompt:()=>buildDataPrompt(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),
         saveLinks(links){
             const ctx=context(),known=new Set(buildReferenceIndex(rawData(ctx)).entities.map(item=>item.id)),old=readLinkageState(ctx).links;
             for(const link of links)if(!old.some(value=>same(value,link))&&(!known.has(link.from)||!known.has(link.to)))throw Error('新的手动关联必须选择当前存在的条目。');
