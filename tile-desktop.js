@@ -17,7 +17,7 @@ export function createTileDesktop({home,cards,apps,createIcon,openApp,onLayout})
  const scale=make('input','');scale.type='range';scale.min='70';scale.max='100';scale.step='5';scale.setAttribute('aria-label','磁贴整体大小');const scaleValue=make('output','amin-tile-scale-value');
  const choice=make('select','');choice.setAttribute('aria-label','选择磁贴');
  const sizes=make('select','');sizes.setAttribute('aria-label','磁贴尺寸');
- for(const [value,name]of [['small','小 · 1×1'],['medium','中 · 2×2'],['compactWide','短宽 · 3×2'],['wide','宽 · 4×2'],['compactTall','短长 · 2×3'],['tall','长 · 2×4']]){const o=make('option','',name);o.value=value;sizes.append(o);}
+ for(const [value,name]of [['small','小 · 1×1'],['slimWide','小横 · 2×1'],['slimTall','小竖 · 1×2'],['medium','中 · 2×2'],['compactWide','短宽 · 3×2'],['wide','宽 · 4×2'],['compactTall','短长 · 2×3'],['tall','长 · 2×4']]){const o=make('option','',name);o.value=value;sizes.append(o);}
  const target=make('select','');target.setAttribute('aria-label','磁贴打开的应用');
  const name=make('input','');name.type='text';name.maxLength=60;name.placeholder='留空使用应用名称';name.setAttribute('aria-label','磁贴名称');
  const image=make('input','');image.type='url';image.setAttribute('aria-label','磁贴背景图片地址');image.placeholder='留空跟随统一外观';

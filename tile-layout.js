@@ -6,7 +6,7 @@ export const TILE_COLUMNS=6;
 export const TILE_MAX_ROWS=256;
 const gridColumns=value=>value===4?4:6;
 export function normalizeTileGrid(value){return {columns:gridColumns(value?.columns),scale:Number.isFinite(value?.scale)&&value.scale>=70&&value.scale<=100?Math.round(value.scale):100};}
-export const TILE_SPANS=Object.freeze({small:{w:1,h:1},medium:{w:2,h:2},wide:{w:4,h:2},tall:{w:2,h:4},compactWide:{w:3,h:2},compactTall:{w:2,h:3}});
+export const TILE_SPANS=Object.freeze({small:{w:1,h:1},slimWide:{w:2,h:1},slimTall:{w:1,h:2},medium:{w:2,h:2},wide:{w:4,h:2},tall:{w:2,h:4},compactWide:{w:3,h:2},compactTall:{w:2,h:3}});
 export const tileSpan=size=>TILE_SPANS[size]??TILE_SPANS.medium;
 const tileDefaults=()=>[
  {id:'characters',target:'characters',label:'',size:'wide'},{id:'inventory',target:'inventory',label:'',size:'medium'},

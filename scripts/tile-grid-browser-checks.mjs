@@ -65,10 +65,15 @@ export async function checkTileGrid({send,evaluate,waitFor,delay,artifacts,check
     assert.equal(await evaluate('JSON.stringify(tileRead())'),savedTouch,'cancel retains exact coordinates');
     assert.equal(await evaluate("tileGrid().scrollWidth<=tileGrid().clientWidth+1"),true,'grid fits 320px');
     const screenshot=async name=>{const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(path.join(artifacts,name+'.png'),Buffer.from(r.data,'base64'));};
+    await evaluate("tileField('选择磁贴','status');tileField('磁贴尺寸','slimTall');tileField('选择磁贴','dice');tileField('磁贴尺寸','slimWide')");
+    assert.equal(await evaluate("tileButton('status').style.gridRow"),'1 / span 2','1x2 vertical footprint');
+    assert.equal(await evaluate("tileButton('dice').style.gridColumn"),'1 / span 2','2x1 horizontal footprint');
+    assert.equal(await evaluate("tileButton('dice').style.gridRow"),'4 / span 1');
+    assert.equal(await evaluate("(await import('/tile-layout.js')).loadTiles(localStorage).find(t=>t.id==='status').size"),'slimTall','compact rectangle reload');
     await screenshot('tile-grid-edit-320');
     await evaluate("tileField('网格列数','4')");
     assert.equal(await evaluate("getComputedStyle(tileGrid()).gridTemplateColumns.split(' ').length"),4,'four-column grid');
-    assert.equal(await evaluate("tileRead().every(t=>t.x>=0&&t.x+(t.size==='wide'?4:t.size==='compactWide'?3:t.size==='small'?1:2)<=4)"),true,'narrow grid preserves bounded positions');
+    assert.equal(await evaluate("await (async()=>{const {tileSpan}=await import('/tile-layout.js');return tileRead().every(t=>t.x>=0&&t.x+tileSpan(t.size).w<=4)})()"),true,'narrow grid preserves bounded positions');
     const gridWidth=await evaluate('tileGrid().clientWidth');
     await evaluate("const range=document.querySelector('[aria-label=\"磁贴整体大小\"]');range.value='80';range.dispatchEvent(new Event('input',{bubbles:true}))");
     await delay(80);
