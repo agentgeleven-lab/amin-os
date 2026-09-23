@@ -268,10 +268,17 @@ export function mount(target, options = {}) {
         for (const element of page.querySelectorAll?.('[data-linkage-invalid]') ?? []) element.disabled = true;
     }
     createPromptPanel(); createManualPanel(); const unsubscribe = api.subscribe(render); render();
+    function revealWithinPanel(section) {
+        // scrollIntoView also scrolls outer ancestors, including the host page.
+        // This workbench owns its tab's scrollport; leave the chat and viewport alone.
+        if (!section.getBoundingClientRect || !target.getBoundingClientRect) return;
+        const offset = section.getBoundingClientRect().top - target.getBoundingClientRect().top - (target.clientTop || 0);
+        target.scrollTop = Math.max(0, (target.scrollTop || 0) + offset);
+    }
     const view = { element: page, open(section) {
         if(disposed)return;render();
-        if(section==='prompt'){promptPanel.open=true;promptPanel.scrollIntoView?.({block:'start'});promptValue.focus?.({preventScroll:true});}
-        else if(section==='updates')(api.preview()?reviewPanel:suggestionsPanel).scrollIntoView?.({block:'start'});
+        if(section==='prompt'){promptPanel.open=true;revealWithinPanel(promptPanel);promptPanel.querySelectorAll?.('summary')?.[0]?.focus?.({preventScroll:true});}
+        else if(section==='updates')revealWithinPanel(api.preview()?reviewPanel:suggestionsPanel);
     }, dispose() { if (disposed) return; disposed = true; generationView.dispose(); unsubscribe?.(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); return view;
 }

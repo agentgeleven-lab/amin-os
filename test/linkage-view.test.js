@@ -24,6 +24,22 @@ async function toggle(root, label, checked) { const node = find(root, label, 'in
 async function input(root, label, value, tag = 'textarea') { const node = find(root, label, tag); assert.ok(node, 'missing field: ' + label); node.value = value; await node.dispatch(tag === 'select' ? 'change' : 'input'); return node; }
 const notice = root => walk(root).find(node => node.className === 'amin-notice')?.textContent;
 
+test('prompt and update shortcuts scroll only the owned panel and never pan the host document', () => {
+    const f = fixture({ enabled:true });
+    try {
+        const outer = new Node('div',f.document); outer.scrollTop=145;outer.append(f.root);
+        f.root.scrollTop=70;f.root.clientTop=2;f.root.getBoundingClientRect=()=>({top:200});
+        for(const node of walk(f.root)) node.scrollIntoView=()=>{throw Error('Must not scroll host ancestors');};
+        const summary=find(f.root,'统一世界书条目与预览','summary'), prompt=summary.parent;
+        prompt.getBoundingClientRect=()=>({top:900});
+        let focusOptions;summary.focus=options=>{focusOptions=options;f.document.activeElement=summary;};
+        f.view.open('prompt');assert.equal(prompt.open,true);assert.equal(f.root.scrollTop,768);
+        assert.equal(outer.scrollTop,145);assert.deepEqual(focusOptions,{preventScroll:true});assert.equal(f.document.activeElement,summary);
+        const suggestions=find(f.root,'收到的剧情更新建议','h3').parent;suggestions.getBoundingClientRect=()=>({top:450});
+        f.view.open('updates');assert.equal(f.root.scrollTop,1016);assert.equal(outer.scrollTop,145);
+    } finally { f.view.dispose(); }
+});
+
 function fixture({ enabled = false } = {}) {
     const listeners = new Set(), calls = [], availability = { status: true, inventory: true, scene: false, dice: true };
     const labels = { status: '世界状态', inventory: '背包与账本', scene: '场景与时间', dice: '固定骰点（只读）' };
