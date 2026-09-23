@@ -1,11 +1,13 @@
 // Isolated Chromium integration checks. No real chat, credentials, or model calls.
 // Run: node scripts/rp-browser-smoke.mjs (AMIN_BROWSER / AMIN_RP_ARTIFACTS optional).
+// Set AMIN_FLOOR_ONLY=1 for the isolated mouse/touch toolbar interaction suite.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import {checkFloorToolbar} from './floor-toolbar-browser-checks.mjs';
 
 const root = process.env.AMIN_REPO || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const executable = process.env.AMIN_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
@@ -30,7 +32,7 @@ const server = http.createServer((request, response) => {
     catch { response.statusCode = 404; response.end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const child = spawn(executable, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { stdio: 'ignore', windowsHide: true });
+const child = spawn(executable, ['--headless=new', '--disable-gpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { stdio: 'ignore', windowsHide: true });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const errors = [], checks = [], layouts = [], pending = new Map();
 let socket, sequence = 0, evaluate, send;
@@ -75,6 +77,7 @@ const fill = (id, label, value) => evaluate(`fillField(${JSON.stringify(id)},${J
 async function app(id) { await evaluate(`AminOS.openApp(${JSON.stringify(id)})`); await waitFor(`!!pane(${JSON.stringify(id)})?.querySelector('.amin-app-page,.amin-dice,.amin-map')`, id + ' mount'); }
 async function recordLayout(id, width, label) {
     await send('Emulation.setDeviceMetricsOverride', { width, height: width < 600 ? 844 : 1000, deviceScaleFactor: 1, mobile: width < 600 });
+    await waitFor(`document.querySelector('.amin-drawer').getBoundingClientRect().width<=${width}+1`, 'drawer resize at '+width).catch(async error=>{throw Error(error.message+' '+await evaluate("JSON.stringify({width:innerWidth,client:document.documentElement.clientWidth,vv:visualViewport.width,scale:visualViewport.scale,drawer:document.querySelector('.amin-drawer').style.cssText})"));});
     await delay(110); await evaluate(`pane(${JSON.stringify(id)}).scrollTo(0,0)`);
     if (label.includes('-editor-')) await evaluate(`pane(${JSON.stringify(id)}).querySelector(${JSON.stringify(id === 'relationships' ? '.amin-relationship-editor' : '.amin-card')}).scrollIntoView({block:'start'})`);
     if (label.includes('-graph-')) await evaluate(`pane(${JSON.stringify(id)}).querySelector('.amin-relationships-graph-scroll').scrollIntoView({block:'start'})`);
@@ -99,6 +102,9 @@ try {
     await send('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/' }); await waitFor('document.readyState==="complete"', 'fixture HTML'); await evaluate('(' + fixture.toString() + ')()');
     await waitFor('!!globalThis.AminOS&&document.querySelectorAll(".amin-extra-floor").length>=8', 'all app registration');
     console.log('Fixture ready; checking real app interactions.');
+    if(process.env.AMIN_FLOOR_ONLY==='1') {
+        await checkFloorToolbar({send,evaluate,waitFor,delay,artifacts,checks});
+    } else {
 
     await app('characters'); await click('characters', '新增人物卡'); await fill('characters', '人物名称', '浏览器新增 NPC'); await fill('characters', '人物类型', 'npc'); await fill('characters', '人物备注', '可安全删除的模拟记录'); await click('characters', '保存人物卡');
     assert.equal(await evaluate("(await import('/apps/characters/model.js')).readCharacters(ctx).characters.length"), 3);
@@ -204,6 +210,7 @@ try {
     assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&pane('status').contains(emptyStatusPanel)&&emptyStatusPanel.isConnected"), true, 'first message retains the existing OS workbench');
     assert.equal(await evaluate("document.querySelectorAll('.wsh-floor-host .wsh-workbench').length"), 0);
     checks.push('Empty chat opens inside OS and first message/render retains the same workbench without floor migration');
+    }
     assert.deepEqual(errors, [], 'uncaught browser runtime errors');
     fs.writeFileSync(path.join(artifacts, 'report.json'), JSON.stringify({ passed: true, environment: 'Headless Edge with isolated mock SillyTavern host; emulated viewport, no real host/model/phone', checks, layouts, runtimeErrors: errors }, null, 2));
     console.log('PASS RP browser smoke: ' + checks.join('; ') + '.'); console.log('Artifacts: ' + artifacts);

@@ -46,3 +46,12 @@ test('worldbook floor window shares button order and follows opening order',()=>
  docks[0].setOpen(false);docks[0].setOpen(true);assert.equal(hosts[0].style.order,'2');assert.equal(hosts[5].style.order,'1');
  buttons[0].click=()=>docks[0].setOpen(false);docks[0].setVisible(false);assert(buttons[0].hidden);assert.equal(hosts[5].style.order,'1');docks.forEach(d=>d.dispose());
 });
+
+test('opening and reordering windows never reparents existing iframe hosts',()=>{
+ const document={createElement:()=>new Node()},message=new Node(),hosts=[new Node(),new Node()],buttons=[new Node(),new Node()];
+ const docks=['status','map'].map((id,i)=>mountFloorControl(message,id,hosts[i],buttons[i],document));
+ const root=hosts[0].parent,original=[...root.children];let appends=0;const append=root.append.bind(root);root.append=(...nodes)=>{appends++;append(...nodes);};
+ docks[1].setOpen(true);docks[0].setOpen(true);docks[1].setOpen(false);docks[1].setOpen(true);
+ assert.equal(appends,0);assert.deepEqual(root.children,original);assert.deepEqual(hosts.map(h=>h.style.order),['1','2']);
+ docks.forEach(d=>d.dispose());
+});

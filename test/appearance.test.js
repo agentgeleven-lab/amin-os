@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createAppearance,defaults,themeVariables,validate,resolveFloor} from '../settings/appearance.js';
+import {createAppearance,defaults,themeVariables,validate,resolveFloor,FLOOR_BUTTON_ORDER,normalizeFloorButtonOrder,mergeFloorToolbarDraft} from '../settings/appearance.js';
 import {drawerPlacement,clampPosition} from '../window-state.js';
 test('appearance follows global defaults while explicit app overrides persist across reloads',()=>{
  const ctx={extensionSettings:{other:{keep:true}},saveSettingsDebounced(){}};const service=createAppearance(()=>ctx);
@@ -63,4 +63,29 @@ test('worldbook floor visibility and separate dimensions persist without changin
  const ctx={extensionSettings:{},saveSettingsDebounced(){}},a=createAppearance(()=>ctx),s=a.snapshot();
  assert.equal(s.floor.buttons.worldbooks,true);s.floor.buttons.worldbooks=false;s.floor.overrides.worldbooks={width:620,desktopHeight:50,mobileHeight:45};a.save(s);
  const restored=createAppearance(()=>ctx).snapshot();assert.equal(restored.floor.buttons.worldbooks,false);assert.equal(resolveFloor(restored,'worldbooks').width,620);assert.equal(resolveFloor(restored,'map').width,900);
+});
+
+
+test('floor toolbar order sanitizes partial and obsolete records while keeping every current entry',()=>{
+ const saved=validate({floor:{alignment:'right',buttonOrder:['dice','obsolete','dice','status',null],moreButtons:['status','bad','status','dice']}});
+ assert.deepEqual(saved.floor.buttonOrder,['dice','status',...FLOOR_BUTTON_ORDER.filter(id=>!['dice','status'].includes(id))]);
+ assert.deepEqual(saved.floor.moreButtons,['status','dice']);assert.equal(saved.floor.toolbarAlignment,'right');
+ assert.deepEqual(normalizeFloorButtonOrder(null),FLOOR_BUTTON_ORDER);assert.deepEqual(normalizeFloorButtonOrder('dice'),FLOOR_BUTTON_ORDER);
+ assert.deepEqual(validate({floor:{moreButtons:{status:true}}}).floor.moreButtons,[]);
+ assert.throws(()=>validate({floor:{toolbarAlignment:'bad'}}));
+});
+
+test('floor toolbar layout persists independently from window placement and visibility',()=>{
+ const ctx={extensionSettings:{},saveSettingsDebounced(){}},service=createAppearance(()=>ctx),state=service.snapshot();
+ state.floor.toolbarAlignment='center';state.floor.alignment='right';state.floor.buttonOrder=normalizeFloorButtonOrder(['tts','dice']);state.floor.moreButtons=['tts'];state.floor.buttons.tts=false;
+ service.save(state);const restored=createAppearance(()=>ctx).snapshot();
+ assert.deepEqual(restored.floor,state.floor);assert.equal(restored.floor.toolbarAlignment,'center');assert.equal(restored.floor.alignment,'right');assert.equal(restored.floor.buttons.tts,false);
+ state.floor.buttonOrder.reverse();state.floor.moreButtons.push('map');assert.notDeepEqual(service.snapshot().floor.buttonOrder,state.floor.buttonOrder);assert.deepEqual(service.snapshot().floor.moreButtons,['tts']);
+});
+
+test('saving an unrelated settings draft preserves live toolbar changes and retains explicit edits',()=>{
+ const draft=defaults(),current=defaults();draft.global.fontSize=16;current.floor.buttonOrder=normalizeFloorButtonOrder(['dice']);current.floor.moreButtons=['tts'];current.floor.toolbarAlignment='right';
+ const merged=mergeFloorToolbarDraft(draft,current);assert.equal(merged.global.fontSize,16);assert.deepEqual(merged.floor.buttonOrder,current.floor.buttonOrder);assert.deepEqual(merged.floor.moreButtons,['tts']);assert.equal(merged.floor.toolbarAlignment,'right');
+ draft.floor.moreButtons=['status'];const edited=mergeFloorToolbarDraft(draft,current,['moreButtons']);assert.deepEqual(edited.floor.moreButtons,['status']);assert.deepEqual(edited.floor.buttonOrder,current.floor.buttonOrder);
+ edited.floor.buttonOrder.reverse();assert.notDeepEqual(edited.floor.buttonOrder,current.floor.buttonOrder);assert.deepEqual(draft.floor.buttonOrder,FLOOR_BUTTON_ORDER);
 });

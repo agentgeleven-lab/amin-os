@@ -1,10 +1,12 @@
 import {resetTileLayout} from '../tile-layout.js';
-import {getAppearance,PALETTES,APP_NAMES,defaults} from './appearance.js';
+import {getAppearance,PALETTES,APP_NAMES,defaults,mergeFloorToolbarDraft} from './appearance.js';
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function mount(target){
  const service=getAppearance();target.classList.add('amin-ai','amin-settings','amin-app-page');
  let page='global',draft=service.snapshot(),message='',messageState='';
+ const editedToolbarFields=new Set();
  function draw(){
+  draft=mergeFloorToolbarDraft(draft,service.snapshot(),editedToolbarFields);
   target.replaceChildren();const heading=el('header',null,'amin-context');heading.append(el('h2','外观设置'),el('p','统一主题、布局与楼层窗口。分页切换会保留未保存的修改。'));target.append(heading);
   const nav=el('nav',null,'amin-tabs'),body=el('section',null,'amin-stack'),notice=el('p',message,'amin-result');nav.setAttribute('aria-label','外观设置分类');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.dataset.state=messageState;notice.hidden=!message;target.append(nav,notice,body);
   const report=(text,state='success')=>{message=text;messageState=state;notice.textContent=text;notice.dataset.state=state;notice.hidden=!text;};
@@ -50,8 +52,23 @@ export function mount(target){
    const names=Object.keys(defaults().floor.buttons).map(id=>[id,APP_NAMES[id]||id]);
    const buttons=section('楼层入口','选择每条消息下显示的应用按钮。'),buttonGrid=grid(buttons);
    for(const [id,name]of names){const row=el('label',null,'amin-field amin-check'),check=el('input');check.type='checkbox';check.checked=draft.floor.buttons[id];check.onchange=()=>draft.floor.buttons[id]=check.checked;row.append(check,el('span','显示'+name+'按钮'));buttonGrid.append(row);}
+   const arrangement=section('按钮排列与收纳','也可在消息楼层点击“调整排列”拖动排序。放入“更多”的按钮仍然可以打开应用。'),arrangementGrid=grid(arrangement);
+   select(arrangementGrid,'按钮整排对齐',[['left','靠左'],['center','居中'],['right','靠右']],draft.floor.toolbarAlignment,v=>{draft.floor.toolbarAlignment=v;editedToolbarFields.add('toolbarAlignment');});
+   const order=el('div',null,'amin-stack amin-floor-order-settings');arrangement.append(order);
+   function drawOrder(){
+    order.replaceChildren();
+    draft.floor.buttonOrder.forEach((id,index)=>{
+     const row=el('div',null,'amin-toolbar amin-floor-order-row');row.dataset.floorButton=id;row.append(el('span',APP_NAMES[id]||id,'amin-floor-order-name'));
+     const move=delta=>{const list=[...draft.floor.buttonOrder];[list[index],list[index+delta]]=[list[index+delta],list[index]];draft.floor.buttonOrder=list;editedToolbarFields.add('buttonOrder');drawOrder();order.querySelector(`[data-floor-button="${id}"] button[data-move="${delta}"]:not(:disabled)`)?.focus();};
+     const up=button(row,'上移',()=>move(-1));up.dataset.move='-1';up.disabled=index===0;up.setAttribute('aria-label',`${APP_NAMES[id]}上移`);
+     const down=button(row,'下移',()=>move(1));down.dataset.move='1';down.disabled=index===draft.floor.buttonOrder.length-1;down.setAttribute('aria-label',`${APP_NAMES[id]}下移`);
+     const label=el('label',null,'amin-field amin-check'),check=el('input');check.type='checkbox';check.checked=draft.floor.moreButtons.includes(id);check.onchange=()=>{draft.floor.moreButtons=draft.floor.moreButtons.filter(value=>value!==id);if(check.checked)draft.floor.moreButtons.push(id);editedToolbarFields.add('moreButtons');};label.append(check,el('span','放入更多'));row.append(label);order.append(row);
+    });
+   }
+   drawOrder();
+   button(toolbar(arrangement),'恢复按钮默认排列',()=>{const floor=defaults().floor;for(const key of ['buttonOrder','moreButtons','toolbarAlignment']){draft.floor[key]=floor[key];editedToolbarFields.add(key);}draw();});
    const shared=section('统一窗口尺寸','窗口不会超过消息宽度。先打开的窗口排在上面，重新打开会排到末尾。'),sharedGrid=grid(shared);
-   select(sharedGrid,'按钮与窗口对齐',[['left','靠左'],['center','居中'],['right','靠右']],draft.floor.alignment,v=>draft.floor.alignment=v);
+   select(sharedGrid,'窗口对齐',[['left','靠左'],['center','居中'],['right','靠右']],draft.floor.alignment,v=>draft.floor.alignment=v);
    select(sharedGrid,'窗口高度',[['fixed','统一高度'],['auto','随内容变化（不超过上限）']],draft.floor.sizeMode,v=>draft.floor.sizeMode=v);
    const dimensions=(parent,value)=>{numeric(parent,'桌面最大宽度',value.width,320,1400,v=>value.width=v);numeric(parent,'桌面高度（占屏幕 %）',value.desktopHeight,30,90,v=>value.desktopHeight=v);numeric(parent,'手机高度（占屏幕 %）',value.mobileHeight,30,85,v=>value.mobileHeight=v);};
    dimensions(sharedGrid,draft.floor);
@@ -59,8 +76,8 @@ export function mount(target){
    for(const [id,name]of names){const card=el('details',null,'amin-card');card.append(el('summary',name));overrides.append(card);const content=el('div',null,'amin-stack'),editor=el('div',null,'amin-form-grid');card.append(content);select(content,'尺寸来源',[['inherit','跟随统一尺寸'],['own','单独设置']],draft.floor.overrides[id]?'own':'inherit',v=>{if(v==='own')draft.floor.overrides[id]={width:draft.floor.width,desktopHeight:draft.floor.desktopHeight,mobileHeight:draft.floor.mobileHeight};else delete draft.floor.overrides[id];render();});content.append(editor);const render=()=>{editor.replaceChildren();if(draft.floor.overrides[id])dimensions(editor,draft.floor.overrides[id]);else editor.append(el('p','使用上方统一窗口尺寸。','amin-meta amin-span-full'));};render();}
   }
   const actions=toolbar(body);
-  button(actions,'保存并应用',()=>{service.save(draft);report('已应用所有分页的修改。打开的窗口同步更新。');}).className='amin-primary';
-  button(actions,'恢复本页默认',()=>{const d=defaults();if(page==='global'){draft.global=d.global;draft.window=d.window;draft.desktop.style=d.desktop.style;draft.desktop.windowTheme=d.desktop.windowTheme;}else if(page==='apps')draft.apps={};else if(page==='effects')draft.desktop.effects=d.desktop.effects;else draft.floor=d.floor;message='本页已恢复默认，点击“保存并应用”生效。';messageState='';draw();});
+  button(actions,'保存并应用',()=>{service.save(mergeFloorToolbarDraft(draft,service.snapshot(),editedToolbarFields));draft=service.snapshot();editedToolbarFields.clear();report('已应用所有分页的修改。打开的窗口同步更新。');draw();}).className='amin-primary';
+  button(actions,'恢复本页默认',()=>{const d=defaults();if(page==='global'){draft.global=d.global;draft.window=d.window;draft.desktop.style=d.desktop.style;draft.desktop.windowTheme=d.desktop.windowTheme;}else if(page==='apps')draft.apps={};else if(page==='effects')draft.desktop.effects=d.desktop.effects;else{draft.floor=d.floor;for(const key of ['buttonOrder','moreButtons','toolbarAlignment'])editedToolbarFields.add(key);}message='本页已恢复默认，点击“保存并应用”生效。';messageState='';draw();});
  }
  draw();return {open(){},dispose(){target.replaceChildren();}};
 }

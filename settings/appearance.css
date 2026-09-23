@@ -35,9 +35,9 @@
 }
 .amin-floor[data-alignment=center] {align-items:center}
 .amin-floor[data-alignment=right] {align-items:flex-end}
-.amin-floor[data-alignment=center]>.amin-floor-toolbar {justify-content:center}
-.amin-floor[data-alignment=right]>.amin-floor-toolbar {justify-content:flex-end}
-.amin-floor>.amin-floor-toolbar>button {
+.amin-floor-toolbar[data-toolbar-alignment=center] {justify-content:center}
+.amin-floor-toolbar[data-toolbar-alignment=right] {justify-content:flex-end}
+.amin-floor>.amin-floor-toolbar :is(button) {
   display:inline-flex;align-items:center;justify-content:center;gap:6px;
   min-width:0;max-width:100%;min-height:36px;margin:0!important;padding:7px 11px!important;
   border:1px solid var(--amin-line)!important;border-radius:var(--amin-radius)!important;
@@ -45,16 +45,8 @@
   font:var(--amin-font)/1.4 'Segoe UI','Microsoft YaHei',sans-serif!important;
   cursor:pointer;opacity:1;white-space:normal;overflow-wrap:anywhere;touch-action:manipulation;
 }
-.amin-floor>.amin-floor-toolbar>button[aria-expanded=true] {border-color:var(--amin-accent)!important;background:var(--amin-control)!important}
-.amin-floor>.amin-floor-toolbar>button:focus-visible {outline:2px solid var(--amin-accent-text,var(--amin-accent));outline-offset:2px}
-.amin-floor-toolbar>[data-floor-app=map] {order:0}
-.amin-floor-toolbar>[data-floor-app=status] {order:1}
-.amin-floor-toolbar>[data-floor-app=reply] {order:2}
-.amin-floor-toolbar>[data-floor-app=effects] {order:3}
-.amin-floor-toolbar>[data-floor-app=information] {order:4}
-.amin-floor-toolbar>[data-floor-app=worldbooks] {order:5}
-.amin-floor-toolbar>[data-floor-app=tts] {order:6}
-.amin-floor-toolbar>[data-floor-app=dice] {order:7}
+.amin-floor>.amin-floor-toolbar :is(button)[aria-expanded=true] {border-color:var(--amin-accent)!important;background:var(--amin-control)!important}
+.amin-floor>.amin-floor-toolbar :is(button):focus-visible {outline:2px solid var(--amin-accent-text,var(--amin-accent));outline-offset:2px}
 .amin-floor>.dm-message-map {order:1}
 .amin-floor>.wsh-floor-host {order:2}
 .amin-floor>[data-floor-app] {
@@ -120,7 +112,7 @@
   .wsh-floor-host[data-amin-surface] .wsh-history-grid {grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:640px),(pointer:coarse) {
-  .amin-floor>.amin-floor-toolbar>button,.amin-reply-floor-header button,.wsh-floor-host[data-amin-surface] .wsh-history-nav button {min-height:44px;min-width:44px}
+  .amin-floor>.amin-floor-toolbar :is(button),.amin-reply-floor-header button,.wsh-floor-host[data-amin-surface] .wsh-history-nav button {min-height:44px;min-width:44px}
 }
 
 /* Local wordmark and vector brand both follow the active palette. */
@@ -139,3 +131,20 @@
 #amin-os .amin-icon-button {display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0}
 #amin-os .amin-icon-button .amin-collapse-mark {display:block;width:18px;height:18px;flex:none;margin:0;padding:0;position:static;transform:none;pointer-events:none}
 #amin-os .amin-brand-icon .amin-orbit-mark,#amin-os .amin-mark .amin-orbit-mark {margin:0;padding:0;position:static;transform:none;align-self:center;justify-self:center;max-width:none;max-height:none}
+
+/* Order is represented by DOM order, shared with keyboard navigation. */
+.amin-floor-toolbar-overflow{display:flex;flex-wrap:wrap;gap:6px;width:100%;min-width:0;padding:8px;border:1px solid var(--amin-line);border-radius:var(--amin-radius);background:var(--amin-bg)}
+.amin-floor-toolbar[data-toolbar-alignment=center] .amin-floor-toolbar-overflow{justify-content:center}
+.amin-floor-toolbar[data-toolbar-alignment=right] .amin-floor-toolbar-overflow{justify-content:flex-end}
+.amin-floor>.amin-floor-toolbar .amin-floor-toolbar-edit{background:transparent!important;color:var(--amin-muted)!important}
+.amin-floor>.amin-floor-toolbar .amin-floor-toolbar-edit[aria-pressed=true]{border-color:var(--amin-accent)!important;color:var(--amin-accent-text,var(--amin-accent))!important}
+.amin-floor-toolbar-hint{flex-basis:100%;min-width:0;margin:4px 0;font-size:max(11px,calc(var(--amin-font) - 1px));color:var(--amin-muted);overflow-wrap:anywhere}
+.amin-floor-toolbar[data-editing=true] button[data-floor-app]{touch-action:none;user-select:none;cursor:grab;outline:1px dashed var(--amin-line);outline-offset:2px}
+.amin-floor-toolbar[data-editing=true] button[data-dragging=true]{cursor:grabbing;opacity:.6;outline-color:var(--amin-accent)}
+.amin-floor-toolbar button[data-drop=before]{box-shadow:inset 4px 0 var(--amin-accent)}
+.amin-floor-toolbar button[data-drop=after]{box-shadow:inset -4px 0 var(--amin-accent)}
+@media (pointer:coarse),(max-width:640px){.amin-floor>.amin-floor-toolbar button{min-height:44px;min-width:44px}}
+
+.amin-settings .amin-floor-order-row{padding:8px 0;border-bottom:1px solid var(--amin-line);gap:8px}
+.amin-settings .amin-floor-order-name{flex:1 1 100%;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.amin-settings .amin-floor-order-row .amin-check{margin:0;min-width:0}
