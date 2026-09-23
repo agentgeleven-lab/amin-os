@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createLinkageService } from '../apps/linkage/service.js';
-import { parseUpdate } from '../apps/linkage/protocol.js';
+import { parseUpdate, hasUpdate } from '../apps/linkage/protocol.js';
 import { emptyLinkageState, readLinkageSettings, managesModule, KEY } from '../apps/linkage/policy.js';
 import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules } from '../apps/linkage/prompt.js';
 import { adapter as characters } from '../apps/linkage/adapters/characters.js';
@@ -199,4 +199,27 @@ test('an empty update cannot report success after data drifts',async()=>{
     t.ctx.chatMetadata.variables.状态栏=JSON.stringify({版本:1,项目:{玩家:{生命:9}}});
     t.ctx.chat.push({is_user:false,mes:'<amin_update>{"version":1,"changes":[]}</amin_update>'});
     assert.equal((await t.api.collectReply(1)).outcome,'invalid');assert.equal(t.saves,0);t.api.dispose();
+});
+
+
+test('Markdown escaped update tags preserve JSON data and reject duplicate or incomplete blocks',()=>{
+    const payload=batch({...person,data:{...person.data,notes:String.raw`C:\notes\file "quoted"`}});
+    const body=JSON.stringify(payload);
+    for(const [open,close] of [['<amin_update>','</amin_update>'],[String.raw`\<amin\_update>`,String.raw`\</amin\_update>`],['<amin\\_update>','</amin\\_update>']]){
+        const raw='正文'+open+body+close;
+        assert.equal(hasUpdate(raw),true);assert.deepEqual(parseUpdate(raw),payload);
+        assert.throws(()=>parseUpdate(raw+'<amin_update>'+body+'</amin_update>'),/一个完整/);
+        assert.throws(()=>parseUpdate(open+body),/一个完整/);
+    }
+});
+
+test('user escaped status reply applies both existing text fields atomically in automatic mode',async()=>{
+    const t=setup();t.ctx.chatMetadata[KEY].mode='auto';
+    t.ctx.chatMetadata.variables.状态栏=JSON.stringify({版本:1,项目:{HK416:{心智状态:'原状态'},德尔:{当前状态:'原状态'}}});
+    const changes=batch(change('status','set','HK416.心智状态',{value:'完全开放（绝对解锁状态）'}),change('status','set','德尔.当前状态',{value:'掌握416全部心智私密模块权限并进行深度浏览与检测'}));
+    t.api.captureGeneration('normal');
+    t.ctx.chat.push({is_user:false,mes:String.raw`\<amin\_update>`+JSON.stringify(changes)+String.raw`\</amin\_update>`});
+    await t.api.collectReply(1);
+    assert.equal(t.saves,1);assert.equal(status.read(t.ctx).项目.HK416.心智状态,changes.changes[0].data.value);
+    assert.equal(status.read(t.ctx).项目.德尔.当前状态,changes.changes[1].data.value);t.api.dispose();
 });

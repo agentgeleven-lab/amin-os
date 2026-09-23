@@ -45,7 +45,7 @@ export function buildUpdateRules(ctx, { purpose = 'story', write = purpose === '
     if (!writable.length) return '';
     return [
         '【统一更新协议 v1】',
-        '本次回复有两个必需部分：先输出正常剧情正文，再在回复最末尾输出且只输出一个 <amin_update> JSON 块。这个块是插件读取的变量更新结果，不是剧情对白，不得省略或放入思考过程、代码围栏。',
+        '本次回复有两个必需部分：先输出正常剧情正文，再在回复最末尾输出且只输出一个 <amin_update> JSON 块。这个块是插件读取的变量更新结果，不是剧情对白，不得省略或放入思考过程、代码围栏。标签必须原样写为 <amin_update> 与 </amin_update>，不要用反斜杠转义尖括号或下划线。',
         '更新前的基准是另行注入的【Amin OS · 统一剧情资料】中的 modules 与 references。对照本轮用户输入及你刚写出的剧情，检查实际发生的变化；只提交与基准不同且有事实依据的字段。尝试、猜测、计划、单独的骰点成功不等于结果已经发生。不要为满足输出要求编造变化。',
         '下面是本轮允许写入的模块及操作。module 必须逐字使用模块标识，action 必须使用该模块列出的操作；未列出的模块只读。data 中的 ? 表示可选字段，省略不用的字段，实际 JSON 键名不得带 ?。不要复制整份资料。',
         ...writable.map(adapter => `${adapter.id}（${adapter.label}）：\n${typeof adapter.contract === 'string' ? adapter.contract : JSON.stringify(adapter.contract)}`),

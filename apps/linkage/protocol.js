@@ -1,14 +1,21 @@
 import { MODULES, plain, validateJSON } from './policy.js';
 
 export const OPEN = '<amin_update>', CLOSE = '</amin_update>';
+// Accept Markdown escaping of delimiters only. Never unescape the JSON payload.
+const tagPattern = () => /\\?<\/?amin\\?_update\\?>/g;
+function tags(text) {
+    return [...text.matchAll(tagPattern())].map(match => ({
+        index: match.index, length: match[0].length, closing: match[0].includes('/'),
+    }));
+}
 export function parseUpdate(input) {
     let raw = input;
     if (typeof input === 'string') {
         if (input.length > 2 * 1024 * 1024) throw Error('一次联动更新超过 2 MiB。');
-        const starts = input.split(OPEN).length - 1, ends = input.split(CLOSE).length - 1;
-        if (starts || ends) {
-            if (starts !== 1 || ends !== 1 || input.indexOf(CLOSE) < input.indexOf(OPEN)) throw Error('每条消息必须只有一个完整的 amin_update 更新块。');
-            raw = input.slice(input.indexOf(OPEN) + OPEN.length, input.indexOf(CLOSE));
+        const markers = tags(input);
+        if (markers.length) {
+            if (markers.length !== 2 || markers[0].closing || !markers[1].closing) throw Error('每条消息必须只有一个完整的 amin_update 更新块。');
+            raw = input.slice(markers[0].index + markers[0].length, markers[1].index);
         }
         try { raw = JSON.parse(raw); } catch { throw Error('联动更新不是有效 JSON，请检查模型输出。'); }
     }
@@ -22,4 +29,4 @@ export function parseUpdate(input) {
     }
     return structuredClone(raw);
 }
-export function hasUpdate(text) { return typeof text === 'string' && (text.includes(OPEN) || text.includes(CLOSE)); }
+export function hasUpdate(text) { return typeof text === 'string' && tagPattern().test(text); }

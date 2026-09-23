@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "agentgeleven-lab",
-    "version": "0.15.3",
+    "version": "0.15.4",
   "homePage": "https://github.com/agentgeleven-lab/amin-os",
   "auto_update": false
 }
