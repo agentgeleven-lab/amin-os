@@ -44,17 +44,19 @@ export function buildUpdateRules(ctx, { purpose = 'story', write = purpose === '
     const writable = adapters.filter(adapter => mayRead(ctx, adapter.id) && mayWrite(ctx, adapter.id));
     if (!writable.length) return '';
     return [
-            '【统一更新协议 v1】',
-            '先完成正常剧情。只更新本轮已经发生且依据明确的变化；尝试、猜测、计划和骰点成功本身都不等于已发生的结果。关联变化放在同一个更新块内，使用列出的操作与稳定 ID。',
-            '仅允许以下模块和操作；其余资料只读。不要输出旧的 <state>、MAP_UPDATE 或调用旧地图更新工具，也不要变更设置、权限、全局能力库、聊天正文、存档或固定骰点。',
-            ...writable.map(adapter => `${adapter.id}（${adapter.label}）：\n${typeof adapter.contract === 'string' ? adapter.contract : JSON.stringify(adapter.contract)}`),
-            '每条回复末尾最多一个 <amin_update> JSON 块，无变化时不输出。所有关联操作必须一起有效，否则整批不应用。先创建被引用实体，再操作引用它的对象。',
-            '<amin_update>{"version":1,"changes":[{"module":"模块名","action":"该模块允许的操作","target":"对象ID（按操作要求）","data":{},"reason":"本轮已发生的事实依据"}]}</amin_update>',
-            '这只是格式说明，不得输出占位示例。不推测ID，不重复已经记录的扣除/转交/推进时间。',
-            '涉及随机判定的规则只能使用已经发送的固定骰点；缺少结果时保持待判定，不由模型生成骰数。原应用规则仍约束内容，输出格式统一使用本协议。',
-
+        '【统一更新协议 v1】',
+        '本次回复有两个必需部分：先输出正常剧情正文，再在回复最末尾输出且只输出一个 <amin_update> JSON 块。这个块是插件读取的变量更新结果，不是剧情对白，不得省略或放入思考过程、代码围栏。',
+        '更新前的基准是另行注入的【Amin OS · 统一剧情资料】中的 modules 与 references。对照本轮用户输入及你刚写出的剧情，检查实际发生的变化；只提交与基准不同且有事实依据的字段。尝试、猜测、计划、单独的骰点成功不等于结果已经发生。不要为满足输出要求编造变化。',
+        '下面是本轮允许写入的模块及操作。module 必须逐字使用模块标识，action 必须使用该模块列出的操作；未列出的模块只读。data 中的 ? 表示可选字段，省略不用的字段，实际 JSON 键名不得带 ?。不要复制整份资料。',
+        ...writable.map(adapter => `${adapter.id}（${adapter.label}）：\n${typeof adapter.contract === 'string' ? adapter.contract : JSON.stringify(adapter.contract)}`),
+        '已有对象的 target 和引用字段使用资料中的原始 ID；引用目录中的“模块:ID”是目录标识，除操作明确要求外不要把模块前缀拼进 target。世界状态 target 按其操作使用“项目名.字段名”。创建操作允许为本轮新对象分配符合对应模块要求且未占用的新 ID；先创建对象，再在同一批中引用它。不得猜测已有对象的 ID。',
+        '有变化时，JSON 为 {"version":1,"changes":[...]}；changes 中每项包含 module、action、data、reason，以及操作要求的 target。reason 简短写明本轮已发生的依据。全部关联变化放在同一数组，最多 64 项；不得重复已经记录的扣除、转交或时间推进。',
+        writable.some(adapter => adapter.id === 'status') ? '格式演示（不是当前事实，不得照抄）：仅当资料已有数字字段“示例人物.生命”，且本轮明确损失 2 点时，可输出 <amin_update>{"version":1,"changes":[{"module":"status","action":"adjust","target":"示例人物.生命","data":{"delta":-2},"reason":"本轮明确损失2点生命"}]}</amin_update>。真实输出替换为实际字段和事实。' : '',
+        '没有可确认的变化、资料不足或变化超出允许范围时，仍须在正文末尾原样输出：<amin_update>{"version":1,"changes":[]}</amin_update>。空列表只表示本轮无可提交的更新，不代表清空任何资料。',
+        '以下原应用规则与补充要求用于判断字段如何变化；其中旧的输出标签或格式要求统一转换为本协议。不要输出旧 <state>、MAP_UPDATE 或调用旧地图更新工具。不得修改设置、权限、全局能力库、聊天正文、存档或固定骰点；随机判定只使用已发送的固定结果，缺失时保持待判定。',
         inheritedRules(ctx,writable),
         settings.extraRules ? `【用户补充要求】\n${settings.extraRules}` : '',
+        '【回复结束前核对】正文之后必须有一个完整的 <amin_update>...</amin_update>，内含有效 JSON、version 为数字 1、changes 为数组。有依据则提交变化，无依据则提交空数组。不要仅在正文中描述“已更新”，不要省略这个块。',
     ].filter(Boolean).join('\n\n').replaceAll('{{', '\\u007b\\u007b');
 }
 

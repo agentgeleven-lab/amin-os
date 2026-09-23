@@ -199,8 +199,8 @@ export function createLinkageHost(getContext, {
                 || before?.ref === reply && before.text === reply.mes && before.swipe === (reply.swipe_id ?? 0)) {
                 throw Error('没有与本次生成对应的完整新回复');
             }
-            await collectReply(active.candidate);
-            say('已检查本轮统一更新块；具体变更请查看联动更新页面');
+            const result = await collectReply(active.candidate);
+            say(result?.outcome === 'missing' ? '更新规则已激活，但回复原文未包含更新块' : result?.outcome === 'empty' ? '更新规则已激活；模型报告本轮无变化' : result?.outcome === 'invalid' ? '更新规则已激活；返回块无效或已过期，请查看详细提示' : '已检查本轮统一更新块；具体变更请查看联动更新页面');
         } catch (error) { say('本轮统一更新未接收：' + error.message); }
     }
     const handlers = {

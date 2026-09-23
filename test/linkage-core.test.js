@@ -180,3 +180,23 @@ test('worldbook rules and message data have separate payloads and previews',()=>
     assert.equal(buildDataPrompt(t.ctx),'');assert.equal(buildUpdateRules(t.ctx),'');
     t.api.dispose();
 });
+
+
+test('empty and missing update replies report separately without saving or staging',async()=>{
+    for(const mode of ['review','auto'])for(const [text,outcome] of [['仅剧情正文','missing'],['正文<amin_update>{"version":1,"changes":[]}</amin_update>','empty']]){
+        const t=setup();t.ctx.chatMetadata[KEY].mode=mode;
+        const before=structuredClone(t.ctx.chatMetadata);
+        t.api.captureGeneration('normal');t.ctx.chat.push({is_user:false,mes:text});
+        assert.equal((await t.api.collectReply(1)).outcome,outcome);
+        assert.equal(t.saves,0);assert.equal(t.api.suggestions().length,0);assert.equal(t.api.preview(),null);
+        assert.deepEqual(t.ctx.chatMetadata,before);assert.match(t.api.status(),outcome==='empty'?/无可提交/:/未返回/);
+        t.api.dispose();
+    }
+});
+
+test('an empty update cannot report success after data drifts',async()=>{
+    const t=setup();t.api.captureGeneration('normal');
+    t.ctx.chatMetadata.variables.状态栏=JSON.stringify({版本:1,项目:{玩家:{生命:9}}});
+    t.ctx.chat.push({is_user:false,mes:'<amin_update>{"version":1,"changes":[]}</amin_update>'});
+    assert.equal((await t.api.collectReply(1)).outcome,'invalid');assert.equal(t.saves,0);t.api.dispose();
+});

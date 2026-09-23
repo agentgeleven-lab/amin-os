@@ -141,8 +141,23 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         const basis = generation; generation = null;
         if (!basis) return null;
         const ctx = context(), chat = ctx.chat ?? [], reply = chat[index];
-        if (ctx.chatMetadata !== basis.metadata || chatIdentity(ctx) !== basis.identity || !Number.isInteger(index) || index !== chat.length - 1 || index !== basis.path.length || !same(chatPath(chat.slice(0,index)),basis.path) || !reply || reply.is_user || reply.is_system || !hasUpdate(reply.mes)) return null;
+        if (ctx.chatMetadata !== basis.metadata || chatIdentity(ctx) !== basis.identity || !Number.isInteger(index) || index !== chat.length - 1 || index !== basis.path.length || !same(chatPath(chat.slice(0,index)),basis.path) || !reply || reply.is_user || reply.is_system) return null;
+        if (!hasUpdate(reply.mes)) {
+            message = '本轮回复未返回 amin_update 更新块；请检查模型输出及消息原文正则。'; notify();
+            return { outcome:'missing' };
+        }
         const candidate = { id:basis.id, source:sourceFor(ctx,index), text:reply.mes, basis };
+        try {
+            const parsed = parseUpdate(reply.mes);
+            if (!parsed.changes.length) {
+                ensureGeneration(candidate);
+                message = '模型已返回更新块：本轮无可提交的变化，未修改资料。'; notify();
+                return { outcome:'empty' };
+            }
+        } catch (error) {
+            message = '更新块无效或已过期：' + error.message; notify();
+            return { outcome:'invalid' };
+        }
         if (readLinkageState(ctx).applied.some(record=>!record.archived && sourceEqual(record.source,candidate.source))) return null;
         candidates.set(candidate.id,candidate); message='收到跨应用更新建议，请查看预览。'; notify();
         if (readLinkageState(ctx).mode === 'auto') {

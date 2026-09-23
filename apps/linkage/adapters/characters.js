@@ -18,7 +18,7 @@ function checkBindings(ctx, previous, next) {
 export const adapter = {
     id: 'characters', label: '人物卡与外观',
     paths: [[KEY], [...STATUS_PATH]],
-    contract: 'target=稳定人物ID。create-character: data={name,kind:"pc"|"npc",notes?,stats?:[{id,label,binding:"项目名.字段名",component:"value"|"current"|"max",check:"none"|"d20"|"coc"}],appearance?:{description,hairstyle,features}}；save-character: 同上字段按需更新现有人物；delete-character: data={}，保留其他应用的原ID引用；save-stat: data={id,label,binding,component,check}；delete-stat: data={statId}；set-appearance: data={description?,hairstyle?,features?}。新增ID须为1–100位字母数字下划线连字符。属性只存世界状态绑定，数值由worldstatus模块更新；穿戴引用inventory的ownerId+equipped，不得复制衣物记录或更新骰点。',
+    contract: 'target=稳定人物ID。create-character: data={name,kind:"pc"|"npc",notes?,stats?:[{id,label,binding:"项目名.字段名",component:"value"|"current"|"max",check:"none"|"d20"|"coc"}],appearance?:{description,hairstyle,features}}；save-character: 同上字段按需更新现有人物；delete-character: data={}，保留其他应用的原ID引用；save-stat: data={id,label,binding,component,check}；delete-stat: data={statId}；set-appearance: data={description?,hairstyle?,features?}。新增ID须为1–100位字母数字下划线连字符。属性只存世界状态绑定，数值由status模块更新；穿戴引用inventory的ownerId+equipped，不得复制衣物记录或更新骰点。',
     read: ctx => readCharacters(ctx),
     apply(ctx, change, { operationId, now }) {
         const state = readCharacters(ctx), previous = state.characters.find(person => person.id === change.target), data = change.data;
