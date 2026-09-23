@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanupRetiredData } from '../retired-data.js';
-import { defaultTiles, loadTiles, TILE_KEY } from '../tile-layout.js';
+import { defaultTiles, loadTiles, TILE_KEY, PREVIOUS_TILE_KEY } from '../tile-layout.js';
 import { AI_APPS } from '../ai/service.js';
 function harness(entries = {}) {
     const data = new Map(Object.entries(entries)), writes = [];
@@ -22,9 +22,9 @@ test('uninstall removes every retired chat key but preserves unrelated and simil
 });
 test('uninstall removes retired custom tiles without changing other custom layouts or metadata', () => {
     const kept = { id: 'custom-map', target: 'map', size: 'wide', label: 'My map', image: 'abc' };
-    const h = harness({ [TILE_KEY]: JSON.stringify({ version: 2, extra: 'preserve', tiles: [kept, { id: 'x', target: 'factions' }] }), 'amin-os.tiles.v1': JSON.stringify([{ id: 'status', size: 'wide' }, { id: 'factions' }]) });
+    const h = harness({ [PREVIOUS_TILE_KEY]: JSON.stringify({ version: 2, extra: 'preserve', tiles: [kept, { id: 'x', target: 'factions' }] }), 'amin-os.tiles.v1': JSON.stringify([{ id: 'status', size: 'wide' }, { id: 'factions' }]) });
     cleanupRetiredData(h.storage);
-    assert.deepEqual(JSON.parse(h.data.get(TILE_KEY)), { version: 2, extra: 'preserve', tiles: [kept] });
+    assert.deepEqual(JSON.parse(h.data.get(PREVIOUS_TILE_KEY)), { version: 2, extra: 'preserve', tiles: [kept] });
     assert.deepEqual(JSON.parse(h.data.get('amin-os.tiles.v1')), [{ id: 'status', size: 'wide' }]);
     assert.ok(!defaultTiles().some(t => t.target === 'factions'));
     assert.ok(!AI_APPS.some(a => a.id === 'factions'));
@@ -51,4 +51,27 @@ test('uninstall leaves corrupt shared data untouched and continues with exact re
 test('storage errors are reported without blocking the remaining application startup', () => {
     const storage = { get length() { throw Error('denied'); } };
     assert.deepEqual(cleanupRetiredData(storage).errors, ['storage enumeration']);
+});
+
+
+test('uninstall handles fine-grid v3 and prior v2 independently without repacking or dropping invalid shared records', () => {
+    const kept = { id: 'custom-map', target: 'map', size: 'compactWide', label: 'Map', x: 2, y: 21, backgroundColor: '#123456', textColor: '#abcdef', iconColor: '#fedcba', image: '/map.png' };
+    const invalid = [{ id: 'bad', target: 'unknown', x: -10, custom: { retain: true } }, null, 'unrecognized'];
+    const current = { version: 3, extra: 'preserve', knownTargets: ['map', 'factions'], tiles: [kept, ...invalid, { id: 'retired-copy', target: 'factions', x: 0, y: 0 }] };
+    const previous = { version: 2, tiles: [{ id: 'map', target: 'map' }, { id: 'factions' }] };
+    const future = JSON.stringify({ version: 9, tiles: [{ id: 'factions' }], preserve: true });
+    const h = harness({ [TILE_KEY]: JSON.stringify(current), [PREVIOUS_TILE_KEY]: JSON.stringify(previous), 'amin-os.tiles.v1': future, 'amin-os.tiles.v30': 'unrelated' });
+    const result = cleanupRetiredData(h.storage);
+    assert.equal(result.updated, 2); assert.deepEqual(result.errors, []);
+    assert.deepEqual(JSON.parse(h.data.get(TILE_KEY)), { ...current, tiles: [kept, ...invalid] });
+    assert.deepEqual(JSON.parse(h.data.get(PREVIOUS_TILE_KEY)), { ...previous, tiles: [previous.tiles[0]] });
+    assert.equal(h.data.get('amin-os.tiles.v1'), future); assert.equal(h.data.get('amin-os.tiles.v30'), 'unrelated');
+    const writes = h.writes.length; cleanupRetiredData(h.storage); assert.equal(h.writes.length, writes);
+});
+
+test('uninstall preserves unsupported or invalid v3 envelopes byte for byte', () => {
+    for (const raw of ['{broken', 'null', '{"version":3,"tiles":null}', '{"version":8,"tiles":[{"id":"factions"}]}']) {
+        const h = harness({ [TILE_KEY]: raw }); cleanupRetiredData(h.storage);
+        assert.equal(h.data.get(TILE_KEY), raw); assert.deepEqual(h.writes, []);
+    }
 });

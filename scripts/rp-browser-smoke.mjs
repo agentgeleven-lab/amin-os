@@ -1,6 +1,6 @@
 // Isolated Chromium integration checks. No real chat, credentials, or model calls.
 // Run: node scripts/rp-browser-smoke.mjs (AMIN_BROWSER / AMIN_RP_ARTIFACTS optional).
-// Set AMIN_FLOOR_ONLY=1 for the isolated mouse/touch toolbar interaction suite.
+// Set AMIN_FLOOR_ONLY=1 for toolbar interactions or AMIN_TILE_ONLY=1 for tile grid/colors.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import {checkFloorToolbar} from './floor-toolbar-browser-checks.mjs';
+import {checkTileGrid,tileFixtureSeed} from './tile-grid-browser-checks.mjs';
 
 const root = process.env.AMIN_REPO || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const executable = process.env.AMIN_BROWSER || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
@@ -64,6 +65,7 @@ async function fixture() {
     window.pane = id => document.querySelector('.amin-app-pane[data-app="' + id + '"]');
     window.clickButton = async (id, label) => { const button = [...pane(id).querySelectorAll('button')].find(el => visible(el) && (el.textContent.trim() === label || el.getAttribute('aria-label') === label)); if (!button) throw Error('Missing ' + id + ' button: ' + label); if (button.disabled) throw Error('Disabled ' + id + ' button: ' + label); button.click(); await new Promise(resolve => setTimeout(resolve, 50)); };
     window.fillField = (id, label, value) => { const parent = pane(id), field = [...parent.querySelectorAll('input,textarea,select')].find(el => visible(el) && (el.getAttribute('aria-label') === label || el.labels?.[0]?.firstElementChild?.textContent === label)); if (!field) throw Error('Missing ' + id + ' field: ' + label + ' | Pane: ' + parent.innerText.slice(0, 1800)); field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); return field.value; };
+    if(window.tileFixtureSeed)(await import('/tile-layout.js')).saveTiles(localStorage,window.tileFixtureSeed);
     await import('/index.js');
     return true;
 }
@@ -99,10 +101,12 @@ try {
     send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++sequence, timer = setTimeout(() => { pending.delete(id); reject(Error('Debugger timeout: ' + method + ' ' + String(params.expression ?? '').slice(0, 120))); }, 10000); pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params })); });
     evaluate = async expression => { const value = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, replMode: true }); if (value.exceptionDetails) throw Error(value.exceptionDetails.exception?.description || value.exceptionDetails.text); return value.result.value; };
     await send('Runtime.enable'); await send('Page.enable'); await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await send('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/' }); await waitFor('document.readyState==="complete"', 'fixture HTML'); await evaluate('(' + fixture.toString() + ')()');
+    await send('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/' }); await waitFor('document.readyState==="complete"', 'fixture HTML'); if(process.env.AMIN_TILE_ONLY==='1')await evaluate('window.tileFixtureSeed='+JSON.stringify(tileFixtureSeed));await evaluate('(' + fixture.toString() + ')()');
     await waitFor('!!globalThis.AminOS&&document.querySelectorAll(".amin-extra-floor").length>=8', 'all app registration');
     console.log('Fixture ready; checking real app interactions.');
-    if(process.env.AMIN_FLOOR_ONLY==='1') {
+    if(process.env.AMIN_TILE_ONLY==='1') {
+        await checkTileGrid({send,evaluate,waitFor,delay,artifacts,checks});
+    } else if(process.env.AMIN_FLOOR_ONLY==='1') {
         await checkFloorToolbar({send,evaluate,waitFor,delay,artifacts,checks});
     } else {
 

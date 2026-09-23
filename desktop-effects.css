@@ -34,3 +34,17 @@
 #amin-os[data-amin-theme=win10light] .amin-drawer:has(.amin-home[data-backdrop=none]:not([hidden])){--amin-bg:#f3f3f3;--amin-card:#fff;--amin-control:#e8e8e8;--amin-text:#202020;--amin-muted:#595959;--amin-line:#b6b6b6;background:#f3f3f3!important;color:#202020;color-scheme:light}
 #amin-os[data-amin-theme^=win10] :is(.amin-brand-icon,.amin-mark){color:var(--amin-text)!important}
 #amin-os[data-amin-theme=win10light] .amin-drawer{border-color:#b6b6b6}
+
+/* Per-tile colors apply consistently to classic/Win10 and flat/layered finishes. */
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-tile-palette=true]{background:var(--amin-tile-base-color)!important;color:var(--amin-tile-custom-text,#fff)!important}
+#amin-os[data-amin-surface] .amin-home[data-tile-finish=layered] .amin-home-apps .amin-app-card[data-tile-palette=true]{background:color-mix(in srgb,var(--amin-tile-base-color) var(--amin-tile-alpha,100%),transparent)!important}
+#amin-os[data-amin-surface] .amin-home .amin-home-apps .amin-app-card[data-tile-palette=true][data-custom-background=true]{background:var(--amin-tile-custom-bg)!important}
+#amin-os[data-amin-surface] .amin-home .amin-home-apps .amin-app-card[data-tile-palette=true] .amin-app-icon{color:var(--amin-tile-custom-icon,var(--amin-tile-custom-text,#fff))!important}
+#amin-os[data-amin-surface] .amin-home .amin-home-apps .amin-app-card[data-tile-palette=true] .amin-card-copy{color:var(--amin-tile-custom-text,#fff)!important}
+#amin-os .amin-tile-colors{display:flex;flex-wrap:wrap;align-items:center;gap:10px;width:100%;min-width:0}
+#amin-os .amin-tile-color-row{display:flex;align-items:center;gap:8px;min-height:44px}
+#amin-os .amin-tile-color-row .amin-tile-field{display:flex;flex-direction:row;align-items:center;gap:6px}
+#amin-os .amin-tile-color-row input[type=checkbox]{width:20px;min-width:20px;height:20px;margin:0}
+#amin-os .amin-tile-color-row input[type=color]{width:48px;min-width:48px;height:40px;padding:3px;cursor:pointer}
+#amin-os .amin-tile-color-row input:disabled{opacity:.5;cursor:default}
+#amin-os .amin-tile-color-note{width:100%;color:var(--amin-muted);overflow-wrap:anywhere}

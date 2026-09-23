@@ -16,13 +16,13 @@ export function cleanupRetiredData(storage, ctx) {
         if (key === 'amin_os_factions_v1' || key.startsWith('amin_os_factions_v1:')) {
             storage.removeItem(key); result.removed++; return;
         }
-        const tiles = key === 'amin-os.tiles.v2' || key === 'amin-os.tiles.v1';
+        const tiles = key === 'amin-os.tiles.v3' || key === 'amin-os.tiles.v2' || key === 'amin-os.tiles.v1';
         const profiles = key.startsWith('dynamic-map.api-profiles:amin-os:');
         if (!tiles && !profiles) return;
         const value = JSON.parse(storage.getItem(key));
         let changed = false;
         if (tiles) {
-            const list = key === 'amin-os.tiles.v1' ? value : value?.version === 2 ? value.tiles : null;
+            const list = key === 'amin-os.tiles.v1' ? value : (value?.version === 2 || value?.version === 3) ? value.tiles : null;
             if (Array.isArray(list)) {
                 const filtered = list.filter(t => t?.id !== 'factions' && t?.target !== 'factions');
                 changed = filtered.length !== list.length;

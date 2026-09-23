@@ -10,5 +10,5 @@ test('effects migrate disabled and reject invalid media and animation limits',()
 });
 test('individual backgrounds survive normalization, duplication and ordering without retaining bad URLs',()=>{
  const tiles=[{id:'a',target:'map',label:'A',size:'tall',image:'https://example.com/a.png'},{id:'b',target:'map',label:'B',size:'small',image:'/assets/b.png'}];
- assert.deepEqual(normalizeTiles(tiles),tiles);assert.equal(moveTile(tiles,'b','a')[0].image,'/assets/b.png');assert.equal(normalizeTiles([{...tiles[0],image:'javascript:bad'}])[0].image,undefined);
+ assert.deepEqual(normalizeTiles(tiles).map(({x,y,...tile})=>tile),tiles);assert.equal(moveTile(tiles,'b','a')[0].image,'/assets/b.png');assert.equal(normalizeTiles([{...tiles[0],image:'javascript:bad'}])[0].image,undefined);
 });
