@@ -16,12 +16,12 @@
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-target=status]{background:var(--amin-text);color:var(--amin-bg)}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-target=reply]{background:var(--amin-control);color:var(--amin-text)}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-target=ai]{background:var(--amin-card);color:var(--amin-text);border:1px solid var(--amin-line)}
-#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small]{padding:4px;align-items:center;justify-content:center;gap:5px}
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small]{padding:2px;align-items:center;justify-content:center;gap:2px}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card .amin-app-icon{color:inherit;background:none;border:0;border-radius:0;width:min(36px,var(--amin-tile-unit,48px));height:min(36px,var(--amin-tile-unit,48px));flex:0 0 auto}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card .amin-app-icon svg{width:100%;height:100%}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card .amin-card-copy strong{color:inherit;font-size:clamp(11px,calc(var(--amin-tile-unit,48px) * .3),20px);font-weight:400;line-height:1.2;overflow-wrap:anywhere}
-#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small] .amin-app-icon{width:24px;height:24px;flex-basis:24px}
-#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small] .amin-card-copy{display:none}
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small] .amin-app-icon{width:clamp(10px,calc(var(--amin-tile-unit,48px) * .36),24px);height:clamp(10px,calc(var(--amin-tile-unit,48px) * .36),24px);flex:0 0 auto}
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small] .amin-card-copy{display:block;width:100%;min-width:0;flex:0 0 auto;margin:0;text-align:center}
 #amin-os .amin-home-apps .amin-card-arrow{display:none}
 #amin-os[data-amin-surface] .amin-home-apps .amin-app-card:hover{opacity:.9}
 #amin-os[data-amin-surface] .amin-tiles-editing .amin-app-card{touch-action:none;cursor:grab}
@@ -61,8 +61,8 @@
 #amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card .amin-app-icon{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);width:clamp(22px,calc(var(--amin-tile-unit,48px) * .55),40px);height:clamp(22px,calc(var(--amin-tile-unit,48px) * .55),40px)}
 #amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card .amin-card-copy{margin-top:auto;text-align:left;z-index:1}
 #amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card .amin-card-copy strong{font-family:inherit;font-size:clamp(11px,calc(var(--amin-tile-unit,48px) * .28),14px);font-weight:400}
-#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small]{padding:5px}
-#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small] .amin-app-icon{width:22px;height:22px;top:50%}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small]{padding:2px}
+#amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card[data-size=small] .amin-app-icon{position:static;transform:none;left:auto;top:auto;width:clamp(10px,calc(var(--amin-tile-unit,48px) * .36),24px);height:clamp(10px,calc(var(--amin-tile-unit,48px) * .36),24px)}
 #amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card:hover{opacity:1;border-color:#ffffff80;filter:brightness(1.08)}
 #amin-os[data-desktop-style=win10] .amin-home-apps .amin-app-card:focus-visible{outline:2px solid #fff;outline-offset:-4px}
 
@@ -89,3 +89,5 @@
 #amin-os .amin-tile-drop-preview{position:absolute;z-index:4;pointer-events:none;box-sizing:border-box;border:2px solid #15803d;background:#22c55e35;color:#fff;display:flex;align-items:flex-start;justify-content:flex-start;padding:4px;overflow:hidden;font-size:12px;font-weight:600;line-height:1.35;text-shadow:0 1px 3px #000;box-shadow:inset 0 0 0 1px #fff8}
 #amin-os .amin-tile-drop-preview[data-valid=false]{border-color:#dc2626;background:#ef444450;border-style:dashed}
 #amin-os .amin-tile-drop-preview[hidden]{display:none}
+
+#amin-os[data-amin-surface] .amin-home-apps .amin-app-card[data-size=small] .amin-card-copy strong{display:block;font-size:clamp(9px,calc(var(--amin-tile-unit,48px) * .21),12px);line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
