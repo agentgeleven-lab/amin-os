@@ -1,6 +1,7 @@
 import {ROOT,read,empty,clone,equal,validate,diff,enforceLocks} from './model.js';
 import {checkpointState} from '../status/state-checkpoint.js';
 import {createHistory} from '../status/history.js';
+import {subscribeStateChanges,chatIdentity as operationIdentity,acquireMetadataWrite} from '../shared/operations.js';
 export const META='amin_os_organizations_v1',SETTINGS='amin_os_organizations_settings_v1';
 export const defaults=()=>({includeCharacter:true,includeChat:true,readWorldbooks:true,selectedBooks:null,books:'',detail:'标准',scope:'',allowInference:false,allowNew:false,groups:['organizations','alliances','regions'],generationRules:'',updateRules:'',assessmentRules:'',generationEnabled:true,updateEnabled:true,assessmentEnabled:true,follow:false});
 export function roleIdentity(ctx){const group=ctx?.groupId;return group!=null&&group!==''?'group:'+String(group):'character:'+String(ctx?.characters?.[ctx?.characterId]?.avatar??'');}
@@ -54,7 +55,7 @@ export function createStore({context,setVariable,saveMetadata=ctx=>ctx.saveMetad
   discard(){pending=null;notify();},
   async confirm(){
    if(!pending)throw Error('没有待确认结果');if(busy)throw Error('正在保存');
-   const p=pending;check(p.t);compatible();busy=true;
+   const p=pending;check(p.t);compatible();const release=acquireMetadataWrite(context);busy=true;
    try{
     const c=context(),m=meta();
     if(p.kind==='data'){
@@ -63,22 +64,28 @@ export function createStore({context,setVariable,saveMetadata=ctx=>ctx.saveMetad
      writeDoc(p.doc);m.locks=(m.locks??[]).filter(path=>{const[g,id,k]=path.split('.');return p.doc[g]?.[id]&&Object.hasOwn(p.doc[g][id],k);});
     }else m.assessment={...p.assessment,basis:clone(p.t.doc),at:Date.now(),floor:p.t.floor};
     pending=null; // consume before awaiting persistence; never apply twice
-    history.sync();await persist(c);checkScope(p.t);
-   }finally{busy=false;sync();notify();}
+    history.sync({persist:false});await persist(c);checkScope(p.t);
+   }finally{release();busy=false;sync();notify();}
   },
   assessment(){const a=meta().assessment;return a?{...clone(a),stale:!equal(a.basis,readDoc())||a.floor!==floor(context())}:null;},
   locks:()=>clone(meta().locks??[]),
-  async setLocks(locks){if(busy)throw Error('正在保存');const c=context(),d=readDoc();for(const path of locks){const [g,id,k,...rest]=path.split('.');if(rest.length||!d[g]?.[id]||!Object.hasOwn(d[g][id],k))throw Error('锁定路径不存在');}invalidate();meta().locks=[...new Set(locks)];lastLocks=clone(meta().locks);await persist(c);notify();},
+  async setLocks(locks){if(busy)throw Error('正在保存');const c=context(),d=readDoc();for(const path of locks){const [g,id,k,...rest]=path.split('.');if(rest.length||!d[g]?.[id]||!Object.hasOwn(d[g][id],k))throw Error('锁定路径不存在');}const release=acquireMetadataWrite(context);busy=true;try{invalidate();meta().locks=[...new Set(locks)];lastLocks=clone(meta().locks);await persist(c);notify();}finally{release();busy=false;}},
   config(){const c=context();chatIdentity(c);const role=roleIdentity(c);return {...defaults(),...clone(c.extensionSettings?.[SETTINGS]?.[role]??{})};},
   async saveConfig(value){const c=context();chatIdentity(c);const role=roleIdentity(c);c.extensionSettings[SETTINGS]??={};c.extensionSettings[SETTINGS][role]={...defaults(),...clone(value)};await c.saveSettingsDebounced?.();notify();},
   beginRequest(){if(controller||busy)throw Error('已有请求或保存正在进行');const t=capture();requestToken=t;controller=new AbortController();const own=controller;return {token:t,signal:own.signal,check:()=>{if(own.signal.aborted)throw Error('任务已取消');check(t);},finish:()=>{if(controller===own){controller=null;requestToken=null;}}};},
   cancel(){controller?.abort();controller=null;requestToken=null;notify();},
   busy:()=>busy||!!controller,
-  async retrySave(){const c=context();chatIdentity(c);await persist(c);lastError='';notify();},
-  dispose(){disposed=true;invalidate();clearInterval(timer);for(const [name,fn]of subscriptions)source?.removeListener?.(name,fn);listeners.clear();},
+  async retrySave(){const c=context();chatIdentity(c);const release=acquireMetadataWrite(context);try{await persist(c);lastError='';notify();}finally{release();}},
+  dispose(){disposed=true;invalidate();clearInterval(timer);offExternal();history.dispose();for(const [name,fn]of subscriptions)source?.removeListener?.(name,fn);listeners.clear();},
  };
  const c=context(),source=c?.eventSource,events=c?.eventTypes??c?.event_types??{},subscriptions=[];
  for(const name of ['CHAT_CHANGED','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPED','GENERATION_ENDED'])if(events[name]&&source?.on){const fn=()=>{if(name==='CHAT_CHANGED'){invalidate();accepted=null;}sync();};subscriptions.push([events[name],fn]);source.on(events[name],fn);}
+ const offExternal=subscribeStateChanges((change,metadata)=>{
+  if(disposed||change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==operationIdentity(context())||!change.paths.some(path=>path[0]===META||path[0]==='variables'&&path[1]===ROOT))return;
+  invalidate();accepted=clone(readDoc());lastLocks=clone(meta().locks??[]);
+  lastIdentity=chatIdentity(context());lastMetadata=context().chatMetadata;
+  history.adoptExternal();lastError='已应用跨应用状态，原预览已取消。';notify();
+ });
  const timer=poll?setInterval(sync,700):null;sync();return api;
 }
 let shared;

@@ -1,0 +1,127 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createDiceService, HISTORY_KEY } from '../apps/dice/service.js';
+import { createOperationService } from '../apps/shared/operations.js';
+
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const input = (value = '') => ({ value, dispatchEvent() {}, focus() {} });
+function fixture() {
+    const handlers = new Map(); let id = 0, draws = 0, saves = 0;
+    const ctx = { chatId: 'current', characterId: 0, characters: [{ avatar: 'pc.png' }], chat: [], chatMetadata: {}, extensionSettings: {}, saveMetadata: async () => { saves++; }, eventTypes: { MESSAGE_SENT: 'sent', CHAT_CHANGED: 'chat' }, eventSource: { on: (event, callback) => handlers.set(event, callback), removeListener: event => handlers.delete(event) } };
+    const dice = createDiceService(() => ctx, { rng: () => { draws++; return 4; }, createId: () => `roll-${++id}`, now: () => 1234 });
+    const operations = createOperationService(() => ctx);
+    const stageRestore = records => operations.stage({ label: '恢复骰点存档', patches: [{ path: [HISTORY_KEY], value: { version: 1, rolls: records.map(record => { const value = structuredClone(record); if (value.status === 'appended') value.status = 'rolled'; delete value.pending; return value; }) } }], summary: '恢复固定骰点' });
+    return { ctx, handlers, dice, operations, stageRestore, draws: () => draws, saves: () => saves, dispose() { dice.dispose(); operations.dispose(); } };
+}
+test('external restore keeps fixed dice and clears stale undo and MESSAGE_SENT bindings', async () => {
+    const h = fixture(), record = await h.dice.roll({ formula: 'd6', label: '存档前结果' }), draft = input('行动');
+    await h.dice.append(record.id, draft);
+    const previousToken = h.dice.capture(), text = draft.value;
+    assert.equal(h.dice.canUndo(), true);
+    h.stageRestore(h.dice.history()); await h.operations.confirm();
+    assert.equal(h.dice.canUndo(), false);
+    assert.throws(() => h.dice.check(previousToken), /存档恢复/);
+    await assert.rejects(h.dice.undoAppend(), /没有可撤销/);
+    assert.equal(draft.value, text);
+    h.ctx.chat.push({ is_user: true, mes: text }); h.handlers.get('sent')(0); await tick();
+    assert.equal(h.dice.history()[0].status, 'rolled');
+    assert.equal(h.dice.history()[0].sent, undefined);
+    assert.deepEqual(h.dice.history()[0].results, record.results);
+    assert.equal(h.draws(), 1);
+    h.dispose();
+});
+test('replaced unsaved native history is owned by the restore save coordinator only', async () => {
+    const h = fixture(); h.ctx.saveMetadata = async () => { throw Error('offline'); };
+    await assert.rejects(h.dice.roll({ formula: 'd6' }));
+    assert.equal(h.dice.dirty(), true);
+    h.stageRestore(h.dice.history()); await assert.rejects(h.operations.confirm());
+    assert.equal(h.dice.dirty(), false);
+    assert.equal(h.operations.dirty(), true);
+    const before = structuredClone(h.dice.history());
+    await assert.rejects(h.dice.retrySave(), /尚未保存/);
+    await assert.rejects(h.dice.roll({ formula: 'd20' }), /尚未保存/);
+    h.ctx.saveMetadata = async () => {};
+    await h.operations.retrySave();
+    assert.deepEqual(h.dice.history(), before);
+    assert.equal(h.draws(), 1);
+    h.dispose();
+});
+test('other module changes retain valid dice pending bindings and old draft undo', async () => {
+    const h = fixture(), record = await h.dice.roll({ formula: 'd6' }), draft = input('行动');
+    await h.dice.append(record.id, draft);
+    h.operations.stage({ label: '修改人物', patches: [{ path: ['amin_os_characters_v1'], value: { version: 1, events: [] } }] }); await h.operations.confirm();
+    assert.equal(h.dice.canUndo(), true);
+    h.ctx.chat.push({ is_user: true, mes: draft.value }); h.handlers.get('sent')(0); await tick();
+    assert.equal(h.dice.history()[0].status, 'sent');
+    h.dispose();
+});
+test('disposed dice service removes external restore subscriptions and host callbacks', async () => {
+    const h = fixture(); await h.dice.roll({ formula: 'd6' });
+    const oldStatus = h.dice.status(); let notifications = 0; h.dice.subscribe(() => notifications++);
+    h.dice.dispose();
+    h.stageRestore(h.dice.history()); await h.operations.confirm();
+    assert.equal(notifications, 0);
+    assert.equal(h.dice.status(), oldStatus);
+    assert.equal(h.handlers.size, 0);
+    h.operations.dispose();
+});
+test('native dice save leases prevent a restore racing its in-flight fixed result', async () => {
+    const h = fixture(), wait = deferred(); h.ctx.saveMetadata = () => wait.promise;
+    const rolling = h.dice.roll({ formula: 'd6' });
+    const fixed = structuredClone(h.dice.history());
+    assert.throws(() => h.stageRestore([]), error => error.code === 'BUSY');
+    assert.deepEqual(h.dice.history(), fixed);
+    wait.resolve(); await rolling;
+    h.ctx.saveMetadata = async () => {};
+    h.stageRestore([]); await h.operations.confirm();
+    assert.deepEqual(h.dice.history(), []);
+    assert.equal(h.draws(), 1);
+    h.dispose();
+});
+test('restore save leases block random draws and draft changes until the save settles', async () => {
+    const h = fixture(), record = await h.dice.roll({ formula: 'd6' }), wait = deferred();
+    h.ctx.saveMetadata = () => wait.promise;
+    h.stageRestore([record]); const restoring = h.operations.confirm();
+    const draft = input('我的行动');
+    await assert.rejects(h.dice.roll({ formula: 'd20' }), error => error.code === 'BUSY');
+    await assert.rejects(h.dice.append(record.id, draft), error => error.code === 'BUSY');
+    assert.equal(h.draws(), 1);
+    assert.equal(draft.value, '我的行动');
+    wait.resolve(); await restoring;
+    h.ctx.saveMetadata = async () => {};
+    await h.dice.append(record.id, draft);
+    assert.ok(draft.value.includes(record.text));
+    h.dispose();
+});
+test('a real sent message waits for an unrelated save and its retry before linking once', async () => {
+    const h = fixture(), record = await h.dice.roll({ formula: 'd6' }), draft = input('行动');
+    await h.dice.append(record.id, draft);
+    const wait = deferred(); h.ctx.saveMetadata = () => wait.promise;
+    h.operations.stage({ label: '保存人物', patches: [{ path: ['amin_os_characters_v1'], value: { version: 1, events: [] } }] });
+    const saving = h.operations.confirm();
+    h.ctx.chat.push({ is_user: true, mes: draft.value }); h.handlers.get('sent')(0);
+    assert.equal(h.dice.history()[0].status, 'appended');
+    wait.resolve(); await assert.rejects(saving, error => error.code === 'STALE_COMPLETION');
+    assert.equal(h.dice.history()[0].status, 'appended');
+    h.ctx.saveMetadata = async () => {};
+    await h.operations.retrySave(); await tick();
+    assert.equal(h.dice.history()[0].status, 'sent');
+    assert.equal(h.dice.history()[0].sent.messageIndex, 0);
+    assert.equal(h.draws(), 1);
+    h.dispose();
+});
+test('switching chats during a native save releases its original lease before returning', async () => {
+    const h = fixture(), firstWait = deferred(), originalMetadata = h.ctx.chatMetadata;
+    h.ctx.saveMetadata = () => firstWait.promise;
+    const first = h.dice.roll({ formula: 'd6' });
+    h.ctx.chatMetadata = {}; h.ctx.chatId = 'other'; h.handlers.get('chat')();
+    firstWait.resolve(); await assert.rejects(first, /聊天已变化/);
+    h.ctx.chatMetadata = originalMetadata; h.ctx.chatId = 'current'; h.handlers.get('chat')();
+    const nextWait = deferred(); h.ctx.saveMetadata = () => nextWait.promise;
+    const second = h.dice.roll({ formula: 'd6' });
+    assert.throws(() => h.stageRestore([]), error => error.code === 'BUSY');
+    nextWait.resolve(); await second;
+    assert.equal(h.dice.history().length, 2);
+    h.dispose();
+});

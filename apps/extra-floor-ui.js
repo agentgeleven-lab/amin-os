@@ -8,12 +8,17 @@ import {mountFloorControl} from '../settings/floor-layout.js';
 import {mount as mountScene} from './scene/view.js';
 import {mount as mountJournal} from './journal/view.js';
 import {mount as mountDice} from './dice/view.js';
+import {mount as mountCharacters} from './characters/view.js';
+import {mount as mountInventory} from './inventory/view.js';
+import {mount as mountRelationships} from './relationships/view.js';
+import {mount as mountSaves} from './saves/view.js';
 import {observeChatFloors} from './floor-scheduler.js';
 import {messageVersion,persistAudioMessageId,audioMessageSource} from './floor-message.js';
 
 export function installExtraFloorButtons(id){
  const getContext=()=>globalThis.SillyTavern?.getContext?.(),mounted=new Map(),owned=new Set();
  const apps={scene:{title:'场景与时间',icon:'◷ ',mount:mountScene},journal:{title:'剧情档案',icon:'▤ ',mount:mountJournal},dice:{title:'骰子',icon:'⚄ ',mount:mountDice},organizations:{title:'势力概览',icon:'◎ ',mount:mountOrganizations},tts:{title:'语音朗读',icon:'▷ ',mount:mountTTS},effects:{title:'能力面板',icon:'✦ ',mount:mountEffects},information:{title:'信息面板',icon:'▤ ',mount:mountInformation},worldbooks:{title:'世界书管理',icon:'▥ ',mount:mountWorldbooks}};
+ Object.assign(apps,{characters:{title:'人物卡',icon:'♙ ',mount:mountCharacters},inventory:{title:'背包与账本',icon:'▣ ',mount:mountInventory},relationships:{title:'人物关系',icon:'♧ ',mount:mountRelationships},saves:{title:'跨应用存档',icon:'▤ ',mount:mountSaves}});
  const app=apps[id];if(!app)throw Error('未知楼层应用：'+id);const titleText=app.title,mountApp=app.mount;
  const key=ctx=>JSON.stringify([ctx?.getCurrentChatId?.()??ctx?.chatId,ctx?.characterId,ctx?.groupId]);
  const node=(tag,cls,text)=>{const e=document.createElement(tag);e.className=cls;if(text)e.textContent=text;return e;};

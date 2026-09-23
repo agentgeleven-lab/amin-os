@@ -4,6 +4,7 @@ import {canChangeType} from './type-permission.js';
 import {getAI} from '../../ai/service.js';
 import { checkpointState } from './state-checkpoint.js';
 import { mergeUpdates, RELATION_UPDATE_RULES } from './state-tools.js';
+import { acquireMetadataWrite } from '../shared/operations.js';
 export async function generateStatus(CONFIG, signal, sourceOptions = {}) {
 const sharedAI=getAI(),snapshot=requireStatusChat(sharedAI?.capture('status'));
 if(snapshot) CONFIG={...CONFIG,api:{...CONFIG.api,maxTokens:snapshot.config.maxTokens,timeoutMs:snapshot.config.timeoutSeconds*1000}};
@@ -13,7 +14,7 @@ if (window[LOCK]) {
   return { ok: false, reason: 'busy' };
 }
 window[LOCK] = true;
-let monitor, timer;
+let monitor, timer, releaseWrite;
 const controller = new AbortController();
 const parentSignal = signal;
 const onAbort = () => controller.abort();
@@ -212,6 +213,7 @@ try {
   }
   guard();
   // 从再次检查到变量写入没有 await，避免本页其他操作插入其中。
+  releaseWrite=acquireMetadataWrite(currentContext);
   const backupKey = '状态栏_生成前备份_' + Date.now();
   if (latest !== null) vars.setLocalVariable(backupKey, JSON.stringify(latest));
   vars.setLocalVariable('状态栏', JSON.stringify(finalState));
@@ -220,6 +222,7 @@ try {
   // setLocalVariable 本身会安排酒馆保存；此处主动等待当前聊天元数据保存。
   try { await ctx.saveMetadata(); }
   catch { throw Error('变量已写入内存，但聊天保存失败。请保持当前聊天并重试保存；备份仍在变量面板。'); }
+  guard();
   window.toastr?.success((CONFIG.mode === 'update' ? '状态栏已更新：' : '状态栏已生成：新增/生成 ') + added + ' 个变量，前端刷新即可显示。');
   return { ok: true, changed: true, variables: added, books: source.世界书.map(x => x.名称),
     backup: latest === null ? null : backupKey, sourceChars: sourceText.length };
@@ -228,6 +231,7 @@ try {
   window.toastr?.error(message, '状态栏生成器', { timeOut: 12000 });
   return { ok: false, message };
 } finally {
+  releaseWrite?.();
   clearInterval(monitor);
   clearTimeout(timer);
   parentSignal?.removeEventListener('abort', onAbort);

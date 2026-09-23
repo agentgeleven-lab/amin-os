@@ -2,6 +2,8 @@ import {mediaURL} from './desktop-effects-model.js';
 export const TILE_KEY='amin-os.tiles.v2';
 export const LEGACY_TILE_KEY='amin-os.tiles.v1';
 export const defaultTiles=()=>[
+ {id:'characters',target:'characters',label:'',size:'wide'},{id:'inventory',target:'inventory',label:'',size:'medium'},
+ {id:'relationships',target:'relationships',label:'',size:'medium'},{id:'saves',target:'saves',label:'',size:'medium'},
  {id:'scene',target:'scene',label:'',size:'wide'},{id:'journal',target:'journal',label:'',size:'medium'},
  {id:'dice',target:'dice',label:'',size:'medium'},
  {id:'map',target:'map',label:'',size:'wide'},{id:'status',target:'status',label:'',size:'medium'},{id:'organizations',target:'organizations',label:'',size:'wide'},{id:'reply',target:'reply',label:'',size:'medium'},
@@ -18,9 +20,9 @@ export function migrateTiles(value){
  return result.concat(defaults.filter(t=>!seen.has(t.id)));
 }
 export function loadTiles(storage){
- try{const saved=storage.getItem(TILE_KEY);if(saved!==null){const data=JSON.parse(saved);if(data?.version!==2||!Array.isArray(data.tiles))return defaultTiles();return normalizeTiles(data.tiles);}return migrateTiles(JSON.parse(storage.getItem(LEGACY_TILE_KEY)));}catch{return defaultTiles();}
+ try{const saved=storage.getItem(TILE_KEY);if(saved!==null){const data=JSON.parse(saved);if(data?.version!==2||!Array.isArray(data.tiles))return defaultTiles();const tiles=normalizeTiles(data.tiles);const introduced=['characters','inventory','relationships','saves'];const known=Array.isArray(data.knownTargets)?data.knownTargets:defaultTiles().map(t=>t.target).filter(id=>!introduced.includes(id));const missing=defaultTiles().filter(t=>!known.includes(t.target)&&!tiles.some(item=>item.target===t.target));if(missing.length){const ids=new Set(tiles.map(t=>t.id));for(const tile of missing){let id=tile.id;while(ids.has(id))id+='-new';ids.add(id);tiles.push({...tile,id});}}if(missing.length||!Array.isArray(data.knownTargets)){try{saveTiles(storage,tiles);}catch{}}return tiles;}return migrateTiles(JSON.parse(storage.getItem(LEGACY_TILE_KEY)));}catch{return defaultTiles();}
 }
-export function saveTiles(storage,tiles){storage.setItem(TILE_KEY,JSON.stringify({version:2,tiles:normalizeTiles(tiles)}));}
+export function saveTiles(storage,tiles){storage.setItem(TILE_KEY,JSON.stringify({version:2,knownTargets:defaultTiles().map(t=>t.target),tiles:normalizeTiles(tiles)}));}
 export function moveTile(tiles,id,target,after=false){
  const list=normalizeTiles(tiles),source=list.find(t=>t.id===id);if(!source||id===target)return list;
  const rest=list.filter(t=>t.id!==id),index=rest.findIndex(t=>t.id===target);if(index<0)return list;rest.splice(index+(after?1:0),0,source);return rest;

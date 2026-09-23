@@ -144,7 +144,7 @@ export function appendEvent(store, chat, change, { eventId, at }) {
 }
 export function mapReferences(ctx) {
     const raw = ctx?.chatMetadata?.dynamicMapV1;
-    let doc; try { doc = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return []; }
+    let doc; try { const saved = typeof raw === 'string' ? JSON.parse(raw) : raw; doc = saved?.document ?? saved; } catch { return []; }
     if (!object(doc?.maps)) return [];
     return Object.entries(doc.maps).flatMap(([mapId, map]) => object(map?.nodes) ? Object.entries(map.nodes).filter(([, node]) => node?.discovered === true).map(([nodeId, node]) => ({ mapId, nodeId, mapName: String(map.name ?? mapId), nodeName: String(node.name ?? nodeId), current: doc.activeMap === mapId && map.currentLocation === nodeId })) : []);
 }

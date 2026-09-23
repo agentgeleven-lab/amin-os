@@ -31,6 +31,10 @@ export function initialize() {
     ctx.saveSettingsDebounced?.();
     initializeAI(localStorage,ctx.extensionSettings.dynamicMapNamespace);
     const apps={
+        characters:()=>import('./apps/characters/view.js').then(m=>m.mount(shell.panes.characters)),
+        inventory:()=>import('./apps/inventory/view.js').then(m=>m.mount(shell.panes.inventory)),
+        relationships:()=>import('./apps/relationships/view.js').then(m=>m.mount(shell.panes.relationships)),
+        saves:()=>import('./apps/saves/view.js').then(m=>m.mount(shell.panes.saves)),
         scene:()=>import('./apps/scene/view.js').then(m=>m.mount(shell.panes.scene)),
         journal:()=>import('./apps/journal/view.js').then(m=>m.mount(shell.panes.journal)),
         dice:()=>import('./apps/dice/view.js').then(m=>m.mount(shell.panes.dice)),
@@ -58,10 +62,10 @@ export function initialize() {
         });
     }
     installReplyFloorButtons();
-    for(const id of ['dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
+    for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.12.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.13.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 

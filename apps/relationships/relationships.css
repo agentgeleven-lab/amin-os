@@ -1,0 +1,19 @@
+/* Relationship-specific graph geometry; colors follow the active Amin theme. */
+.amin-relationships {min-width:0;max-width:100%}
+.amin-relationships-graph-scroll {min-width:0;max-width:100%;overflow:auto;overscroll-behavior:contain;border:1px solid var(--amin-line);border-radius:var(--amin-radius);background:var(--amin-control)}
+.amin-relationships-graph-scroll:focus-visible {outline:2px solid var(--amin-accent-text,var(--amin-accent));outline-offset:2px}
+.amin-relationships-graph {display:block;max-width:none;font:13px/1.5 var(--amin-ui-family,Segoe UI,sans-serif)}
+.amin-relationship-edge>path {fill:none;stroke:var(--amin-accent-text,var(--amin-accent));stroke-width:1.8;opacity:.8}
+.amin-relationship-arrow {fill:var(--amin-accent-text,var(--amin-accent))}
+.amin-relationship-edge>text {fill:var(--amin-text);font-size:12px;paint-order:stroke;stroke:var(--amin-control);stroke-width:4px;stroke-linejoin:round}
+.amin-relationship-person {cursor:pointer;outline:none}
+.amin-relationship-person>rect {fill:var(--amin-card);stroke:var(--amin-line);stroke-width:1.5}
+.amin-relationship-person>text {fill:var(--amin-text);pointer-events:none}
+.amin-relationship-person>.amin-relationship-person-kind {fill:var(--amin-muted);font-size:10px}
+.amin-relationship-person[aria-pressed=true]>rect,.amin-relationship-person:focus-visible>rect {stroke:var(--amin-accent-text,var(--amin-accent));stroke-width:3}
+.amin-relationship-person:hover>rect {stroke:var(--amin-accent-text,var(--amin-accent))}
+.amin-relationships-list {list-style:none;margin:0;padding:0}
+.amin-relationships-list>li {min-width:0}
+.amin-relationships .amin-relationship-direction {white-space:pre-wrap;font-weight:600;overflow-wrap:anywhere}
+.amin-relationships .amin-relationship-notes {white-space:pre-wrap}
+.amin-relationships .amin-relationship-editor {scroll-margin-block:12px}

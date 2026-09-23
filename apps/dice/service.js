@@ -1,4 +1,5 @@
 import { LIMITS, normalizeConfig, rollBatch, formatRoll } from './engine.js';
+import { chatIdentity, subscribeStateChanges, createOperationService, acquireMetadataWrite, metadataWriteStatus } from '../shared/operations.js';
 export const SETTINGS_KEY = 'amin_os_dice_presets_v1';
 export const HISTORY_KEY = 'amin_os_dice_v1';
 const clone = value => structuredClone(value);
@@ -51,15 +52,27 @@ export function appendToDraft({ input, text, expectedDraft, check }) {
     emitInput(input); input.focus?.(); return { input, before, after };
 }
 export function createDiceService(getContext = () => globalThis.SillyTavern?.getContext?.(), { rng, createId = createRollId, now = Date.now } = {}) {
-    const listeners = new Set(), dirty = new WeakSet(), subscriptions = [], pending = new Map();
-    let busy = false, settingsBusy = false, disposed = false, lastAppend = null, message = '先掷骰，再把固定结果追加到聊天草稿。';
-    const notify = () => { for (const fn of listeners) fn(); };
+    const listeners = new Set(), dirty = new WeakSet(), subscriptions = [], pending = new Map(), epochs = new WeakMap(), leases = new WeakMap(), gate = createOperationService(getContext);
+    let busy = false, settingsBusy = false, disposed = false, lastAppend = null, deferredSent = false, message = '先掷骰，再把固定结果追加到聊天草稿。';
+    const notify = () => { for (const fn of listeners) { try { fn(); } catch { /* A window cannot interrupt an already fixed result. */ } } };
     function capture() {
+        if (disposed) throw Error('骰子服务已关闭。');
         const ctx = getContext(); if (!loaded(ctx)) throw Error('请先打开一个聊天，再掷骰。');
-        return { key: chatKey(ctx), metadata: ctx.chatMetadata };
+        return { key: chatKey(ctx), metadata: ctx.chatMetadata, epoch: epochs.get(ctx.chatMetadata) ?? 0 };
     }
-    function check(token) { const c = getContext(); if (!loaded(c) || token.key !== chatKey(c) || token.metadata !== c.chatMetadata) throw Error('聊天已变化，请在当前聊天重新选择骰点。'); return c; }
+    function check(token) { const c = getContext(); if (disposed || !loaded(c) || token.key !== chatKey(c) || token.metadata !== c.chatMetadata) throw Error('聊天已变化，请在当前聊天重新选择骰点。'); if (token.epoch !== (epochs.get(c.chatMetadata) ?? 0)) throw Error('骰点历史已被存档恢复，请重新选择当前骰点。'); return c; }
+    function acquireWrite(token) {
+        const ctx = check(token), metadata = ctx.chatMetadata; gate.capture();
+        let lease = leases.get(metadata);
+        // A host MESSAGE_SENT can arrive while this service saves another roll.
+        // Share our own lease until all such saves settle, but exclude other apps.
+        if (!lease) { lease = { count: 0, release: acquireMetadataWrite(getContext) }; leases.set(metadata, lease); }
+        lease.count++;
+        let released = false;
+        return () => { if (released) return; released = true; if (--lease.count === 0) { leases.delete(metadata); lease.release(); } };
+    }
     function restorePending() {
+        pending.clear();
         let token, c; try { token = capture(); c = check(token); } catch { return; }
         for (const r of readHistory(c)) if (r.status === 'appended' && r.pending?.chatKey === token.key && Number.isSafeInteger(r.pending.firstIndex) && r.pending.firstIndex >= 0 && r.pending.firstIndex <= (c.chat?.length ?? 0)) {
             pending.set(r.id, { token, text: r.text, firstIndex: r.pending.firstIndex });
@@ -74,7 +87,7 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         check(token); assertHistoryWritable(ctx);
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口；骰点仍保留在本聊天内存中。');
         const value = ctx.chatMetadata[HISTORY_KEY];
-        try { await ctx.saveMetadata(); if (ctx.chatMetadata[HISTORY_KEY] === value) dirty.delete(ctx.chatMetadata); }
+        try { await ctx.saveMetadata(); check(token); if (ctx.chatMetadata[HISTORY_KEY] === value) dirty.delete(ctx.chatMetadata); }
         catch (e) { throw Error(`骰点已固定，但聊天保存失败：${e?.message || '未知错误'}。请重试保存。`); }
     }
     async function roll(input, rerollOf = null) {
@@ -82,17 +95,20 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         const token = capture(), c = check(token), settings = normalizeConfig(input);
         assertHistoryWritable(c);
         if (typeof c.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口，无法建立骰点记录。');
-        const id = createId(), result = rollBatch(settings, rng), record = { id, createdAt: now(), settings: result.settings, results: result.results, status: 'rolled', rerollOf };
-        record.text = formatRoll(record); busy = true;
-        // Keep the random result on persistence failure. Retry-save never rolls again.
-        write(c, [...readHistory(c), record]); message = '骰点已固定，正在保存。'; notify();
-        try { await persist(c, token); check(token); message = '骰点已固定。追加到草稿后，可与行动正文一起发送。'; return clone(record); }
+        const release = acquireWrite(token); busy = true;
+        try {
+            const id = createId(), result = rollBatch(settings, rng), record = { id, createdAt: now(), settings: result.settings, results: result.results, status: 'rolled', rerollOf };
+            record.text = formatRoll(record);
+            // Keep the random result on persistence failure. Retry-save never rolls again.
+            write(c, [...readHistory(c), record]); message = '骰点已固定，正在保存。'; notify();
+            await persist(c, token); check(token); message = '骰点已固定。追加到草稿后，可与行动正文一起发送。'; return clone(record);
+        }
         catch (e) { message = e.message; throw e; }
-        finally { busy = false; notify(); }
+        finally { busy = false; release(); notify(); }
     }
     async function retrySave() {
-        if (busy) throw Error('正在保存，请稍候。'); const token = capture(), c = check(token); busy = true;
-        try { await persist(c, token); check(token); message = '骰点记录已保存。'; } catch (e) { message = e.message; throw e; } finally { busy = false; notify(); }
+        if (busy) throw Error('正在保存，请稍候。'); const token = capture(), c = check(token), release = acquireWrite(token); busy = true;
+        try { await persist(c, token); check(token); message = '骰点记录已保存。'; } catch (e) { message = e.message; throw e; } finally { busy = false; release(); notify(); }
     }
     async function append(ids, input = globalThis.document?.querySelector('#send_textarea')) {
         if (busy) throw Error('正在处理骰点，请稍候。');
@@ -101,7 +117,7 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         let list = readHistory(c), selected = selectedIds.map(id => list.find(r => r.id === id));
         if (!selected.length || selected.some(r => !r)) throw Error('骰点记录已不存在，请重新选择。');
         if (selected.some(r => r.status === 'sent')) throw Error('所选骰点已发出；需要新判定时请明确重掷。');
-        busy = true;
+        const release = acquireWrite(token); busy = true;
         try {
             if (dirty.has(c.chatMetadata)) await persist(c, token);
             check(token); assertHistoryWritable(c);
@@ -117,7 +133,7 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
             for (const r of selected) { const target = list.find(v => v.id === r.id); target.status = 'appended'; target.pending = { chatKey: token.key, firstIndex: c.chat?.length ?? 0 }; pending.set(r.id, { token, text: r.text, firstIndex: target.pending.firstIndex }); }
             write(c, list); message = '已追加固定骰点。继续编辑行动正文，然后使用聊天发送按钮一起发出。'; notify();
             await persist(c, token); check(token);
-        } catch (e) { message = e.message; throw e; } finally { busy = false; notify(); }
+        } catch (e) { message = e.message; throw e; } finally { busy = false; release(); notify(); }
     }
     async function undoAppend() {
         if (busy) throw Error('正在处理骰点，请稍候。');
@@ -125,10 +141,13 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         assertHistoryWritable(c);
         if (undo.input.value !== undo.after) throw Error('你已编辑草稿，无法自动撤销；请手动移除骰点段落。');
         if (undo.ids.some(id => !pending.has(id))) throw Error('骰点可能已经发送，无法撤销。');
-        const list = readHistory(c); undo.input.value = undo.before; emitInput(undo.input); lastAppend = null;
-        for (const r of list) if (undo.ids.includes(r.id)) { r.status = 'rolled'; delete r.pending; pending.delete(r.id); }
-        write(c, list); busy = true;
-        try { await persist(c, undo.token); message = '已撤销刚才的追加，骰点记录仍然保留。'; } catch (e) { message = e.message; throw e; } finally { busy = false; notify(); }
+        const release = acquireWrite(undo.token); busy = true;
+        try {
+            const list = readHistory(c); undo.input.value = undo.before; emitInput(undo.input); lastAppend = null;
+            for (const r of list) if (undo.ids.includes(r.id)) { r.status = 'rolled'; delete r.pending; pending.delete(r.id); }
+            write(c, list);
+            await persist(c, undo.token); message = '已撤销刚才的追加，骰点记录仍然保留。';
+        } catch (e) { message = e.message; throw e; } finally { busy = false; release(); notify(); }
     }
     async function savePreset(name, settings, id = null) {
         if (settingsBusy) throw Error('正在保存预设，请稍候。');
@@ -155,6 +174,9 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         if (disposed) return; restorePending(); if (!pending.size) return;
         let token, c; try { token = capture(); c = check(token); } catch { return; }
         try { assertHistoryWritable(c); } catch (e) { message = e.message; notify(); return; }
+        let release;
+        try { release = acquireWrite(token); }
+        catch (error) { deferredSent = true; message = `用户消息已发送，等待当前资料保存后关联骰点：${error.message}`; notify(); return; }
         const list = readHistory(c); let changed = false;
         for (const [id, p] of pending) {
             if (p.token.key !== token.key || p.token.metadata !== token.metadata) continue;
@@ -165,21 +187,40 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
             const record = list.find(r => r.id === id); if (!record) { pending.delete(id); continue; }
             const { m, i } = candidates[0]; record.status = 'sent'; record.sent = { messageIndex: i, messageText: m.mes, at: now() }; delete record.pending; pending.delete(id); changed = true;
         }
-        if (!changed) return;
-        write(c, list); lastAppend = null; message = '骰点已随用户消息发送；重试或续写会沿用消息中的固定结果。'; notify();
+        if (!changed) { release(); return; }
+        try { write(c, list); lastAppend = null; message = '骰点已随用户消息发送；重试或续写会沿用消息中的固定结果。'; notify(); }
+        catch (error) { release(); message = error.message; notify(); return; }
         // Host callbacks must not throw. The record survives a failed save for explicit retry.
-        void persist(c, token).catch(e => { message = e.message; notify(); });
+        void persist(c, token).catch(e => { message = e.message; notify(); }).finally(release);
     }
-    function onChatChange() { pending.clear(); lastAppend = null; restorePending(); message = '已切换聊天。此处只显示当前聊天的骰点记录。'; notify(); }
+    function onChatChange() { pending.clear(); lastAppend = null; deferredSent = false; restorePending(); try { gate.capture(); } catch { /* No open chat. */ } message = '已切换聊天。此处只显示当前聊天的骰点记录。'; notify(); }
+    subscriptions.push(subscribeStateChanges((detail, sourceMetadata) => {
+        if (disposed || detail.phase !== 'applied' || !detail.paths.some(path => path[0] === HISTORY_KEY)) return;
+        const ctx = getContext();
+        if (!loaded(ctx) || sourceMetadata !== ctx.chatMetadata || detail.identity !== chatIdentity(ctx)) return;
+        // A restore has already replaced the authoritative history. Never let an
+        // old draft handle or MESSAGE_SENT callback recreate its former links.
+        epochs.set(ctx.chatMetadata, (epochs.get(ctx.chatMetadata) ?? 0) + 1);
+        pending.clear(); lastAppend = null; deferredSent = false; dirty.delete(ctx.chatMetadata);
+        restorePending();
+        message = '骰点历史已恢复，固定结果保留。请重新选择要追加的记录；聊天草稿保持原样。'; notify();
+    }));
+    subscriptions.push(gate.subscribe(() => {
+        if (disposed) return;
+        notify();
+        const state = metadataWriteStatus(getContext);
+        if (deferredSent && !state.busy && !state.dirty) { deferredSent = false; queueMicrotask(() => { if (!disposed) onSent(); }); }
+    }));
+    try { gate.capture(); } catch { /* Service can mount before any chat is open. */ }
     const initial = getContext(), source = initial?.eventSource, events = initial?.eventTypes ?? initial?.event_types ?? {};
     for (const [name, fn] of Object.entries({ MESSAGE_SENT: onSent, CHAT_CHANGED: onChatChange, MESSAGE_DELETED: notify, MESSAGE_UPDATED: notify, MESSAGE_SWIPED: notify })) {
         if (!events[name] || !source?.on) continue; source.on(events[name], fn); subscriptions.push(() => source.removeListener ? source.removeListener(events[name], fn) : source.off?.(events[name], fn));
     }
     return { capture, check, history, roll, append, undoAppend, retrySave, savePreset, deletePreset, presets: () => readPresets(getContext()), context: getContext,
         reroll(id) { const record = history().find(r => r.id === id); if (!record) throw Error('骰点记录已不存在。'); return roll(record.settings, id); },
-        status: () => message, busy: () => busy || settingsBusy, dirty: () => dirty.has(getContext()?.chatMetadata ?? {}), canUndo: () => !!lastAppend,
+        status: () => message, busy: () => busy || settingsBusy || metadataWriteStatus(getContext).busy, dirty: () => dirty.has(getContext()?.chatMetadata ?? {}), canUndo: () => !!lastAppend,
         subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-        dispose() { disposed = true; for (const remove of subscriptions) remove(); listeners.clear(); pending.clear(); lastAppend = null; },
+        dispose() { disposed = true; for (const remove of subscriptions) remove(); gate.dispose(); listeners.clear(); pending.clear(); lastAppend = null; deferredSent = false; },
     };
 }
 let shared;

@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { subscribeStateChanges, chatIdentity, captureContext, assertContext, acquireMetadataWrite } from '../shared/operations.js';
 import {mountWorldbookSources} from '../worldbook-source-ui.js';
 import {sourceSettings,saveSourceSettings} from '../worldbook-sources.js';
 import { createMapLink } from './map-link.js';
@@ -73,6 +74,11 @@ const history = createHistory({ context, read: () => parseState(context().chatMe
   beforeRestore: () => { running?.abort(); closeHud(); }, warn: message => notify(message, true) });
 const floorButtons = installFloorButtons({ history, node, context, enabled: () => getSettings().floorButtons,
   openWorkbench:(target,{page,onClose,validate})=>showHud(page,{target,onClose,validate}) });
+async function persistStatusChange(write) {
+  const token=captureContext(context),ctx=assertContext(context,token),release=acquireMetadataWrite(context,token);
+  try { write();history.adoptExternal();await ctx.saveMetadata();assertContext(context,token); }
+  finally { release(); }
+}
 function syncHistory() {
   try {
     history.sync(); floorButtons.refresh();
@@ -156,9 +162,11 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   const templatePage = createTemplatesPage({ context, settingsKey: KEY, read: readCurrent,
     write: async value => {
       checkIdentity(id); validate(); if (running) throw Error('模型任务运行中，请稍后应用模板。');
-      const old = id.metadata.variables?.状态栏;
-      if (old !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), old);
-      setLocalVariable('状态栏', JSON.stringify(value)); checkpointState(context()); history.sync(); await context().saveMetadata();
+      await persistStatusChange(()=>{
+        const old = id.metadata.variables?.状态栏;
+        if (old !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), old);
+        setLocalVariable('状态栏', JSON.stringify(value));checkpointState(context());
+      });
     }, isRunning: () => !!running, node });
   templatePage.id = 'wsh-template-page'; templatePage.setAttribute('role', 'tabpanel'); templatePage.setAttribute('aria-labelledby', templateTab.id);
   templateTab.setAttribute('aria-controls', templatePage.id);
@@ -207,7 +215,7 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   html = html.replace('</head>', '<link rel="stylesheet" href="' + new URL('./themes.css', import.meta.url).href + '"></head>');
   html=html.replace('</head>','<link rel="stylesheet" href="'+new URL('../../ui-status.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../settings/appearance-frame.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('../../ui/standard.css',import.meta.url).href+'"><link rel="stylesheet" href="'+new URL('./workbench-frame.css',import.meta.url).href+'"></head>');
   html = html.replace('<head>', '<head>' + bridge);
-  const listener = event => {
+  const listener = async event => {
     if (event.source !== frame.contentWindow || event.data?.wsh !== token) return;
     const { command, id: requestId } = event.data;
     try {
@@ -219,7 +227,7 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
         if (running) throw Error('状态栏生成中，请完成后再编辑。');
         value = parseState(command.slice('/setvar key=状态栏 '.length));
         if (!value) throw Error('不能写入空状态。');
-        setLocalVariable('状态栏', JSON.stringify(value)); checkpointState(context()); history.sync();
+        await persistStatusChange(()=>{setLocalVariable('状态栏', JSON.stringify(value));checkpointState(context());});
       } else throw Error('不支持的状态栏命令。');
       event.source.postMessage({ wsh: token, id: requestId, value }, '*');
     } catch (e) { event.source.postMessage({ wsh: token, id: requestId, error: e.message }, '*'); }
@@ -275,10 +283,11 @@ async function restoreBackup() {
       if (running) throw Error('生成正在运行，请稍后恢复。');
       const restored = parseState(candidates.get(select.value));
       if (!restored) throw Error('备份为空。');
-      const current = id.metadata.variables.状态栏;
-      if (current !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), current);
-      setLocalVariable('状态栏', JSON.stringify(restored)); checkpointState(context());
-      await context().saveMetadata(); d.close(); notify('已恢复，恢复前的状态也已备份。');
+      await persistStatusChange(()=>{
+        const current = id.metadata.variables.状态栏;
+        if (current !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), current);
+        setLocalVariable('状态栏', JSON.stringify(restored));checkpointState(context());
+      });d.close(); notify('已恢复，恢复前的状态也已备份。');
     } catch (e) { result.textContent = e.message; }
   };
   cancel.onclick = () => d.close();
@@ -350,6 +359,11 @@ function mount() {
 
   syncHistory();
   const ctx = context(); const events = ctx.eventTypes || ctx.event_types || {};
+  subscribeStateChanges((change,metadata) => {
+    if(change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==chatIdentity(context())||!change.paths.some(path=>path[0]==='variables'&&path[1]==='状态栏'))return;
+    running?.abort();closeHud();
+    history.adoptExternal();floorButtons.refresh();
+  });
   for (const name of ['CHAT_CHANGED', 'MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'GENERATION_ENDED', 'CHARACTER_MESSAGE_RENDERED']) { if (events[name]) ctx.eventSource?.on(events[name], syncHistory); }
   setInterval(() => {
     if(hudPanel){try{checkIdentity(activeIdentity);}catch{running?.abort();closeHud();}}

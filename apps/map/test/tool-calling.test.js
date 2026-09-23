@@ -6,9 +6,9 @@ import { createStore } from '../src/core/store.js';
 import { createDraftSession } from '../src/core/draft.js';
 import { bindChatStore } from '../src/adapters/chat.js';
 function fixture(){
- let ctx={characters:[{avatar:'a'}],characterId:0,getCurrentChatId:()=> 'a',chatMetadata:{},extensionSettings:{},saveMetadata:async()=>{},saveSettingsDebounced(){},registerFunctionTool:t=>registered.set(t.name,t),unregisterFunctionTool:n=>registered.delete(n),isToolCallingSupported:()=>true};
+ let ctx={characters:[{avatar:'a'}],characterId:0,getCurrentChatId:()=> 'a',chatMetadata:{dynamicMapV1:{updatedAt:1,document:createDemoDocument()}},extensionSettings:{},saveMetadata:async()=>{},saveSettingsDebounced(){},registerFunctionTool:t=>registered.set(t.name,t),unregisterFunctionTool:n=>registered.delete(n),isToolCallingSupported:()=>true};
  const registered=new Map(),store=createStore(createDemoDocument()),persistence=bindChatStore(store,{getContext:()=>ctx,storage:{getItem:()=>null,setItem(){}},namespace:'tools'}),draft=createDraftSession(store,persistence),tools=createMapTools({store,draft,persistence,getContext:()=>ctx});
- persistence.importDocument(store.snapshot(),persistence.token());tools.configure({enabled:true});
+ tools.configure({enabled:true});
  return {store,draft,persistence,tools,registered,request:operations=>({token:tools.query().token,reason:'剧情已发生',operations}),switch(){ctx={...ctx,chatMetadata:{},getCurrentChatId:()=> 'b'};persistence.switchChat();persistence.importDocument(store.snapshot(),persistence.token());},destroy(){tools.destroy();draft.destroy();persistence.destroy();}};
 }
 const move={op:'move',mapId:'world',id:'qingyun_sect'};

@@ -4,6 +4,10 @@ import {getAppearance} from './settings/appearance.js';
 import { clampPosition, drawerPlacement, resizedHeight } from './window-state.js';
 
 const APPS=[
+    {id:'characters',name:'人物卡',sub:'人物档案、状态绑定与属性检定',icon:'♙',color:'mint'},
+    {id:'inventory',name:'背包与账本',sub:'物品、装备、资源与转移记录',icon:'▣',color:'peach'},
+    {id:'relationships',name:'人物关系',sub:'有向关系图与人物关联',icon:'♧',color:'lavender'},
+    {id:'saves',name:'跨应用存档',sub:'保存剧情状态、预览恢复与导入导出',icon:'▤',color:'mint'},
     {id:'scene',name:'场景与时间',sub:'游戏时钟、在场人物与场景快照',icon:'◷',color:'mint'},
     {id:'journal',name:'剧情档案',sub:'伏笔追踪、编年史与确认引用',icon:'▤',color:'peach'},
     {id:'dice',name:'骰子',sub:'通用掷骰、D20 判定与 CoC 检定',icon:'⚄',color:'lavender'},
@@ -26,6 +30,7 @@ function icon(id){
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
     for(const [key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(key,value);
     if(id==='settings')paths.settings='M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6';
+    Object.assign(paths,{characters:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M4 21v-2a8 8 0 0 1 16 0v2',inventory:'M8 7V4h8v3 M4 7h16v14H4z M4 12h16 M10 12v3h4v-3',relationships:'M6 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M18 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M12 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M8 7h8 M7 9l4 7 M17 9l-4 7',saves:'M4 3h13l3 3v15H4z M8 3v6h8V3 M8 21v-8h8v8'});
     if(id==='dice')paths.dice='M5 3h14l2 2v14l-2 2H5l-2-2V5z M8 8h.01 M16 8h.01 M12 12h.01 M8 16h.01 M16 16h.01';
     const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',paths[id]);svg.append(path);return svg;
 }

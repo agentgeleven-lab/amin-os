@@ -11,6 +11,7 @@ import { createStore } from './src/core/store.js';
 import { createPanel } from './src/ui/panel.js';
 import { createPublicApi } from './src/integrations/api.js';
 import { bindChatStore } from './src/adapters/chat.js';
+import { registerMapRuntime } from './src/integrations/runtime.js';
 
 let instance;
 export function initialize({ mount, onOpen = () => {} } = {}) {
@@ -35,6 +36,7 @@ export function initialize({ mount, onOpen = () => {} } = {}) {
     const preferences = createPreferences(() => globalThis.SillyTavern?.getContext?.(), localStorage, settingsObject?.dynamicMapNamespace ?? 'unbound');
     const integration=createVariableBridge({store,persistence,getContext:()=>globalThis.SillyTavern?.getContext?.()??{}});
     const shared = {integration,draft:createDraftSession(store,persistence),apiSettings:createApiSettings(localStorage,persistence.namespace)};
+    const unregisterRuntime = registerMapRuntime({ store, persistence, draft: shared.draft, context: () => globalThis.SillyTavern?.getContext?.() });
     shared.tools=createMapTools({store,draft:shared.draft,persistence,getContext:()=>globalThis.SillyTavern?.getContext?.()??{}});
     shared.textUpdates=createTextUpdates({tools:shared.tools,getContext:()=>globalThis.SillyTavern?.getContext?.()??{},report(message){status=message;panel?.setStatus(message);for(const item of inlinePanels)item.setStatus(message);}});
     panel = createPanel(store, persistence, preferences, { ...shared, mount, inline: !!mount, embedded: !!mount });
@@ -55,6 +57,7 @@ export function initialize({ mount, onOpen = () => {} } = {}) {
     const api = createPublicApi(store, options => { onOpen(); panel.open(options); }, integration);
     globalThis.SillyTavernDynamicMap = api;
     instance = { api, destroy() {
+        unregisterRuntime();
         shared.textUpdates.destroy(); shared.tools.destroy(); integration.destroy(); messageButtons.destroy(); panel.destroy(); shared.draft.destroy(); settings.remove();
         persistence.destroy();
         if (events.CHAT_CHANGED) ctx.eventSource.removeListener?.(events.CHAT_CHANGED, onChatChanged);

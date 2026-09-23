@@ -1,12 +1,13 @@
 import { KEY, readStore, readCurrentScene, visibleEvents, chatPath, transition, appendEvent, mapReferences, currentPrompt, createSceneId } from './model.js';
+import { acquireMetadataWrite, publishExternalMetadataChange, subscribeStateChanges } from '../shared/operations.js';
 export const PROMPT_KEY = 'amin-os-scene-time';
 const clone = value => structuredClone(value);
 const identity = ctx => JSON.stringify([ctx?.groupId != null ? ['group', ctx.groupId] : ['character', ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.characterId ?? null], ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null]);
 const loaded = ctx => ctx?.chatMetadata && typeof ctx.chatMetadata === 'object' && (ctx.getCurrentChatId?.() ?? ctx.chatId) != null && (ctx.getCurrentChatId?.() ?? ctx.chatId) !== '';
 export function createSceneService(getContext = () => globalThis.SillyTavern?.getContext?.(), { createId = createSceneId, now = () => new Date().toISOString(), poll = false } = {}) {
     const listeners = new Set(), dirty = new WeakSet(), removers = [];
-    let pending = null, busy = false, disposed = false, lastScope = null, lastMessage = '', epoch = 0;
-    const notify = () => { for (const callback of listeners) callback(); };
+    let pending = null, busy = false, disposed = false, lastScope = null, lastMessage = '', epoch = 0, publishing = false;
+    const notify = () => { for (const callback of listeners) { try { callback(); } catch { /* A view must not interrupt persistence. */ } } };
     const clearPrompt = () => getContext()?.setExtensionPrompt?.(PROMPT_KEY, '', 1, 0, false);
     function capture() {
         const ctx = getContext();
@@ -34,6 +35,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         check(token, { checkBasis: false });
         try { await ctx.saveMetadata(); }
         catch (error) { throw Error(`操作已记入当前聊天，但保存失败：${error?.message ?? '未知错误'}。请重试保存；不会再次推进时间。`); }
+        check(token, { checkBasis: false });
         if (ctx.chatMetadata[KEY] === value) dirty.delete(ctx.chatMetadata);
     }
     function stage(op, data, token = capture()) {
@@ -50,26 +52,33 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         const operation = pending, ctx = check(operation.token);
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口。');
         const value = appendEvent(readStore(ctx), ctx.chat, operation, operation);
+        const release = acquireMetadataWrite(getContext);
         // Consume before persistence: failure retries only saving, never the transition.
-        pending = null; busy = true; ctx.chatMetadata[KEY] = value; dirty.add(ctx.chatMetadata); clearPrompt();
-        lastScope = { ...operation.token, basis: JSON.stringify(value) };
-        lastMessage = '正在保存已确认的场景与时间。'; notify();
+        pending = null; busy = true;
         try {
+            ctx.chatMetadata[KEY] = value; dirty.add(ctx.chatMetadata); clearPrompt();
+            lastScope = { ...operation.token, basis: JSON.stringify(value) };
+            // Time-derived effects refresh immediately, including while disk persistence is pending.
+            publishing = true;
+            try { publishExternalMetadataChange(() => ctx, [[KEY]], { operationId: operation.eventId }); }
+            finally { publishing = false; }
+            lastMessage = '正在保存已确认的场景与时间。'; notify();
             await persist(ctx, operation.token, value);
             check(operation.token, { checkBasis: false }); lastMessage = '已保存。';
             return clone(operation.state);
         } catch (error) { lastMessage = error.message; throw error; }
-        finally { busy = false; sync(); notify(); }
+        finally { release(); busy = false; sync(); notify(); }
     }
     async function retrySave() {
         if (busy) throw Error('正在保存，请稍候。');
         const token = capture(), ctx = check(token), value = ctx.chatMetadata[KEY];
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口。');
         if (!dirty.has(ctx.chatMetadata)) return;
+        const release = acquireMetadataWrite(getContext);
         busy = true; notify();
         try { await persist(ctx, token, value); check(token, { checkBasis: false }); lastMessage = '已重新保存，时间没有再次推进。'; }
         catch (error) { lastMessage = error.message; throw error; }
-        finally { busy = false; sync(); notify(); }
+        finally { release(); busy = false; sync(); notify(); }
     }
     function start(type = 'normal', options = {}, dryRun = false) {
         clearPrompt();
@@ -95,6 +104,14 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     for (const [name, callback] of Object.entries(handlers)) if (types[name] && source?.on) {
         source.on(types[name], callback); removers.push(() => source.removeListener ? source.removeListener(types[name], callback) : source.off?.(types[name], callback));
     }
+    removers.push(subscribeStateChanges((detail, metadata) => {
+        const ctx = getContext();
+        if (disposed || publishing || detail?.phase !== 'applied' || detail.identity !== identity(ctx) || (metadata && metadata !== ctx?.chatMetadata) || !detail.paths?.some(path => path[0] === KEY)) return;
+        // A restore or travel operation can replace the scene without a host message event.
+        epoch++; pending = null; clearPrompt();
+        lastScope = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null) } : null;
+        lastMessage = '场景与时间已由其他应用更新，待确认预览已取消。请重新核对当前剧情。'; notify();
+    }));
     const timer = poll ? setInterval(sync, 800) : null;
     sync();
     return { context: getContext, capture, check, sync, stage, preview, confirm, retrySave, supported,

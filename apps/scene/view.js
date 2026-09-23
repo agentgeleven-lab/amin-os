@@ -1,16 +1,19 @@
 import { getSharedSceneService } from './service.js';
 import { formatGameTime, formatPeriods, parsePeriods, createSceneId } from './model.js';
+import { contextExpiryPreview } from '../effects/model.js';
+import { mountTravel, appendExpiryPreview } from './travel-view.js';
 const node = (tag, text, className) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (className) el.className = className; return el; };
-const LABELS = { 'set-time': '设置游戏时间', 'advance-time': '推进游戏时间', periods: '保存时段划分', 'save-scene': '保存场景资料', 'switch-scene': '进入场景', 'leave-scene': '离开当前场景', settings: '保存读取设置' };
+const LABELS = { 'set-time': '设置游戏时间', 'advance-time': '推进游戏时间', travel: '旅行', periods: '保存时段划分', 'save-scene': '保存场景资料', 'switch-scene': '进入场景', 'leave-scene': '离开当前场景', settings: '保存读取设置' };
 const mountedViews = new WeakMap();
-export function mount(target) {
+export function mount(target, { service = getSharedSceneService(), travelService, expiryPreview = contextExpiryPreview } = {}) {
     const existing = mountedViews.get(target); if (existing) { existing.open(); return existing; }
-    const api = getSharedSceneService(), instance = 'amin-scene-' + createSceneId();
+    const api = service, instance = 'amin-scene-' + createSceneId();
     const page = node('div', null, 'amin-page amin-app-page amin-scene'), intro = node('div', null, 'amin-context'), tabs = node('nav', null, 'amin-tabs');
     const notice = node('div', null, 'amin-notice'), review = node('section', null, 'amin-stack'), body = node('section', null, 'amin-stack');
     tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '场景与时间页面');
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     body.id = instance + '-body'; body.setAttribute('role', 'tabpanel'); page.append(intro, tabs, notice, review, body); target.append(page);
+    const travelHost = node('div', null, 'amin-stack'), travelView = mountTravel(travelHost, { service: travelService, periods: () => api.read().periods });
     let tab = '时钟', token = null, selected = '', clockDraft = null, sceneDraft = null, periodsDraft = '', settingDraft = null, disposed = false;
     let timeReason = '', sceneReason = '', advanceReason = '', amount = 10, unit = 'minutes', message = '', error = false;
     const say = (value, failed = false) => { message = value; error = failed; notice.textContent = value; notice.dataset.state = failed ? 'error' : api.busy() ? 'busy' : ''; };
@@ -46,7 +49,13 @@ export function mount(target) {
         if (!draft) return;
         const panel = card('待确认 · ' + LABELS[draft.op]); panel.classList.add('amin-result');
         panel.append(node('p', '原因：' + draft.reason));
-        if (['set-time', 'advance-time'].includes(draft.op)) panel.append(node('p', formatGameTime(draft.details.beforeTime, state.periods) + ' → ' + formatGameTime(draft.details.afterTime, draft.state.periods)));
+        if (['set-time', 'advance-time'].includes(draft.op)) {
+            panel.append(node('p', formatGameTime(draft.details.beforeTime, state.periods) + ' → ' + formatGameTime(draft.details.afterTime, draft.state.periods)));
+            if (draft.op === 'advance-time') {
+                try { appendExpiryPreview(panel, expiryPreview(api.context(), draft.details.afterTime).newlyExpired); }
+                catch (e) { panel.append(node('p', '无法检查限时效果：' + e.message, 'amin-notice')); }
+            }
+        }
         if (draft.op === 'periods') panel.append(node('pre', formatPeriods(draft.state.periods)));
         if (draft.op === 'settings') panel.append(node('p', `应用${draft.state.settings.enabled ? '启用' : '停用'}；正文和工具 AI ${draft.state.settings.includeInContext ? '读取已确认场景' : '不读取场景'}。`));
         if (draft.op === 'leave-scene') panel.append(node('p', '清除当前场景选择，游戏时间与已存场景保留。'));
@@ -110,7 +119,7 @@ export function mount(target) {
         if (!entries.length) { body.append(node('p', '还没有已确认操作。', 'amin-empty')); return; }
         for (const event of entries.slice(0, 100)) {
             const entry = card(LABELS[event.op] ?? event.op); entry.append(node('p', event.reason), node('p', `${event.floor ? '第 ' + event.floor + ' 条消息之后' : '聊天开始前'} · ${event.at}`, 'amin-meta'));
-            if (['set-time', 'advance-time'].includes(event.op)) entry.append(node('p', formatGameTime(event.details.beforeTime, state.periods) + ' → ' + formatGameTime(event.details.afterTime, state.periods)));
+            if (['set-time', 'advance-time', 'travel'].includes(event.op)) entry.append(node('p', formatGameTime(event.details.beforeTime, state.periods) + ' → ' + formatGameTime(event.details.afterTime, state.periods)));
             if (event.details.sceneName) entry.append(node('p', event.details.sceneName)); body.append(entry);
         }
         if (entries.length > 100) body.append(node('p', `显示最近 100 条；当前分支共 ${entries.length} 条记录，早期记录仍用于恢复。`, 'amin-meta'));
@@ -128,21 +137,22 @@ export function mount(target) {
         token = currentToken;
         intro.textContent = `场景与时间 · ${formatGameTime(state.clock, state.periods)} · ${state.scenes[state.activeSceneId]?.name ?? '未进入场景'} · ${state.settings.enabled && state.settings.includeInContext ? '已开启 AI 读取' : '仅本地记录'}`;
         tabs.replaceChildren();
-        for (const name of ['时钟', '场景', '记录', '设置']) {
+        const names = ['时钟', '场景', '旅行', '记录', '设置'];
+        for (const name of names) {
             const b = button(name, () => { tab = name; render(); }); b.id = instance + '-' + name; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(tab === name)); b.setAttribute('aria-controls', body.id); b.tabIndex = tab === name ? 0 : -1;
-            b.addEventListener('keydown', e => { const names = ['时钟', '场景', '记录', '设置']; if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return; e.preventDefault(); tab = e.key === 'Home' ? names[0] : e.key === 'End' ? names.at(-1) : names[(names.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : 3)) % 4]; render(); tabs.querySelector('[aria-selected="true"]')?.focus(); });
+            b.addEventListener('keydown', e => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return; e.preventDefault(); tab = e.key === 'Home' ? names[0] : e.key === 'End' ? names.at(-1) : names[(names.indexOf(tab) + (e.key === 'ArrowRight' ? 1 : names.length - 1)) % names.length]; render(); tabs.querySelector('[aria-selected="true"]')?.focus(); });
             tabs.append(b);
         }
         body.setAttribute('aria-labelledby', instance + '-' + tab);
         body.replaceChildren(); renderReview(state);
-        if (tab === '时钟') renderClock(state); else if (tab === '场景') renderScenes(state); else if (tab === '记录') renderHistory(state); else renderSettings();
+        if (tab === '时钟') renderClock(state); else if (tab === '场景') renderScenes(state); else if (tab === '旅行') { body.append(travelHost); travelView.open(); } else if (tab === '记录') renderHistory(state); else renderSettings();
         say(error ? message : api.status(), error);
         if (api.dirty()) { const retry = card('保存尚未完成'); retry.append(node('p', '已确认操作保留在当前聊天内存中。重试保存会沿用同一条记录。'), button('重试保存', () => api.retrySave(), true)); body.prepend(retry); }
     }
     const unsubscribe = api.subscribe(render); render();
     const view = {
         open() { if (disposed) return; api.sync(); render(); },
-        dispose() { if (disposed) return; disposed = true; unsubscribe(); page.remove(); if (mountedViews.get(target) === view) mountedViews.delete(target); },
+        dispose() { if (disposed) return; disposed = true; unsubscribe(); travelView.dispose(); page.remove(); if (mountedViews.get(target) === view) mountedViews.delete(target); },
     };
     mountedViews.set(target, view); return view;
 }

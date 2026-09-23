@@ -1,5 +1,6 @@
 import { createDemoDocument } from '../core/demo.js';
 import { validateDocument } from '../core/protocol.js';
+import { createOperationService, subscribeStateChanges, acquireMetadataWrite, chatIdentity as operationIdentity } from '../../../shared/operations.js';
 
 export const STORAGE_KEY = 'dynamicMapV1';
 export function chatIdentity(ctx) {
@@ -14,22 +15,32 @@ export function chatIdentity(ctx) {
 /** Synchronous binding changes; async save completions cannot write another chat. */
 export function bindChatStore(store, { getContext, storage, namespace, report = () => {} }) {
     let binding = null, loading = false, disposed = false, generation = 0;
+    const operations = createOperationService(getContext);
+    const settledListeners = new Set();
     const keyFor = id => `dynamic-map.chat.${namespace}.${id}`;
     function ensureBound() {
         if (!binding || chatIdentity(getContext()) !== binding.id || getContext().chatMetadata !== binding.metadata) {
             throw new Error('聊天已切换或尚未打开，请重新打开地图后操作');
         }
     }
-    function ensureActive() {
+    function ensureReadable() {
         ensureBound();
         if (binding.invalid) throw new Error('保存的地图格式无效，请先导出原始数据备份，再导入有效地图');
     }
-    store.setGuard(ensureActive);
+    function ensureWritable(recovery = false) {
+        if (recovery) ensureBound(); else ensureReadable();
+        if (operations.busy()) throw new Error('当前聊天正在保存，请稍候再修改地图');
+        if (operations.dirty()) throw new Error('当前聊天的联合操作尚未保存，请重试保存后再修改地图');
+        const descriptor = Object.getOwnPropertyDescriptor(binding.metadata, STORAGE_KEY);
+        if ((descriptor && (!('value' in descriptor) || !descriptor.writable)) || (!descriptor && !Object.isExtensible(binding.metadata))) throw new Error('当前聊天地图资料不可写');
+    }
+    const ensureActive = ensureReadable;
+    store.setGuard(ensureWritable);
     function currentReport(text, target = binding) { if (!disposed && binding === target) report(text); }
     function switchChat() {
         generation++;
         const ctx = getContext(), id = chatIdentity(ctx);
-        binding = id && ctx.chatMetadata ? { id, metadata: ctx.chatMetadata, revision: 0, invalid: false } : null;
+        binding = id && ctx.chatMetadata ? { id, metadata: ctx.chatMetadata, revision: 0, invalid: false, saves: 0 } : null;
         let document = createDemoDocument();
         loading = true;
         try {
@@ -52,15 +63,17 @@ export function bindChatStore(store, { getContext, storage, namespace, report = 
     }
     async function persist(document) {
         if (loading || disposed) return;
-        ensureActive();
+        ensureWritable();
+        const release = acquireMetadataWrite(getContext);
         const target = binding, revision = ++target.revision;
-        const envelope = { updatedAt: Math.max(Date.now(), (target.raw?.updatedAt ?? 0) + 1), document };
-        target.raw = structuredClone(envelope);
         let cached = true;
-        try { storage.setItem(keyFor(target.id), JSON.stringify(envelope)); } catch { cached = false; }
-        target.metadata[STORAGE_KEY] = structuredClone(envelope);
-        currentReport(cached ? '本地已保存，正在同步聊天…' : '本地副本不可用，正在保存聊天…', target);
+        target.saves++;
         try {
+            const envelope = { updatedAt: Math.max(Date.now(), (target.raw?.updatedAt ?? 0) + 1), document };
+            target.raw = structuredClone(envelope);
+            try { storage.setItem(keyFor(target.id), JSON.stringify(envelope)); } catch { cached = false; }
+            target.metadata[STORAGE_KEY] = structuredClone(envelope);
+            currentReport(cached ? '本地已保存，正在同步聊天…' : '本地副本不可用，正在保存聊天…', target);
             // Call immediately with the current context, never from a delayed save queue.
             const ctx = getContext();
             if (typeof ctx.saveMetadata !== 'function') throw new Error('酒馆未提供保存接口');
@@ -70,15 +83,44 @@ export function bindChatStore(store, { getContext, storage, namespace, report = 
                 currentReport('已保存到当前聊天', target);
             }
         } catch (error) {
-            currentReport(`${cached ? '本地副本已保留' : '保存失败，请立即导出备份'}；聊天同步失败：${error.message}`, target);
+            if (target.revision === revision) currentReport(`${cached ? '本地副本已保留' : '保存失败，请立即导出备份'}；聊天同步失败：${error.message}`, target);
+        } finally {
+            target.saves--; release();
+            if (!disposed && binding === target && target.revision === revision) for (const callback of [...settledListeners]) { try { callback(); } catch { /* A derived view cannot interrupt persistence. */ } }
         }
     }
+    // Travel/restore already patched authoritative metadata. Replacing the live
+    // view must not re-persist it or revive a newer unsynced local cache.
+    function applyExternalMetadata(detail, eventMetadata) {
+        if (disposed || !detail.paths.some(path => path[0] === STORAGE_KEY)) return;
+        const ctx = getContext();
+        if (!binding || binding.metadata !== ctx.chatMetadata || (eventMetadata && eventMetadata !== ctx.chatMetadata) || binding.id !== chatIdentity(ctx) || detail.identity !== operationIdentity(ctx)) return;
+        if (!['applied', 'saved'].includes(detail.phase)) return;
+        const raw = ctx.chatMetadata[STORAGE_KEY];
+        let document;
+        try {
+            document = raw === undefined ? createDemoDocument() : structuredClone(validateDocument(raw.document));
+        } catch (error) { binding.invalid = true; currentReport('外部地图资料无法载入，原记录保留：' + error.message); return; }
+        if (detail.phase === 'applied') {
+            generation++; binding.revision++; binding.invalid = false; binding.raw = structuredClone(raw);
+            loading = true;
+            try { store.replace(document); } finally { loading = false; }
+        }
+        try { storage.setItem(keyFor(binding.id), raw === undefined ? 'null' : JSON.stringify({ ...raw, synced: detail.phase === 'saved' })); }
+        catch { currentReport('地图已更新，但本地恢复副本无法写入'); }
+        currentReport(detail.phase === 'saved' ? '联合操作已保存，地图已同步' : '地图已同步到已确认操作，正在保存');
+    }
+    const unsubscribeExternal = subscribeStateChanges(applyExternalMetadata);
     const unsubscribe = store.subscribe(persist);
     switchChat();
     return {
-        switchChat, ensureActive, ensureBound, scope: () => binding?.id ?? null, namespace,
+        switchChat, ensureActive, ensureReadable, ensureWritable, ensureBound, scope: () => binding?.id ?? null, namespace,
+        saving: () => !!binding?.saves,
+        suspended: () => loading || operations.busy() || operations.dirty(),
+        subscribeSettled(callback) { settledListeners.add(callback); return () => settledListeners.delete(callback); },
         token: () => generation,
         importDocument(document, token) {
+            ensureWritable(true);
             if (token !== generation) throw new Error('导入期间聊天已切换，请重新选择文件');
             const valid = structuredClone(validateDocument(document));
             if (!binding || chatIdentity(getContext()) !== binding.id || getContext().chatMetadata !== binding.metadata) throw new Error('请先打开聊天');
@@ -86,6 +128,6 @@ export function bindChatStore(store, { getContext, storage, namespace, report = 
         },
         exportDocument: () => binding?.invalid ? (binding.raw ?? binding.metadata[STORAGE_KEY]) : store.snapshot(),
         retry() { ensureActive(); return persist(store.snapshot()); },
-        destroy() { disposed = true; unsubscribe(); store.setGuard(() => { throw new Error('地图已关闭'); }); },
+        destroy() { disposed = true; unsubscribe(); unsubscribeExternal(); operations.dispose(); settledListeners.clear(); store.setGuard(() => { throw new Error('地图已关闭'); }); },
     };
 }
