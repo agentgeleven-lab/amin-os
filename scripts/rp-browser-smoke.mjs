@@ -114,18 +114,31 @@ try {
     for (const width of [1280, 320]) {
         await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 600 });
         await evaluate("AminOS.openApp('status')");
-        assert.equal(await evaluate("document.querySelector('.amin-drawer').hidden"), true);
-        await evaluate("(async()=>{document.querySelector('.amin-launcher').click();await new Promise(resolve=>setTimeout(resolve,50));})()");
-        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!document.querySelector('.amin-home').hidden"), true, 'launcher returns to OS home after status floor handoff at '+width);
+        await waitFor("!!pane('status').querySelector('iframe')?.contentDocument?.getElementById('mode')", 'embedded status ready');
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!pane('status').hidden&&!!pane('status').querySelector('.amin-status-embedded')"), true, 'OS entry stays inside the OS at '+width);
+        assert.equal(await evaluate("document.querySelectorAll('.wsh-floor-host .wsh-workbench').length"), 0);
+        await recordLayout('status', width, 'status-os-'+width);
+        await evaluate("document.querySelector('.amin-launcher').click();document.querySelector('.amin-launcher').click()");
+        await waitFor("!!pane('status').querySelector('iframe')?.contentDocument?.getElementById('mode')", 'launcher reopens embedded status');
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!pane('status').hidden"), true);
         await evaluate('AminOS.close();AminOS.open()');
-        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!document.querySelector('.amin-home').hidden"), true, 'programmatic reopen also resumes OS home');
+        await waitFor("!!pane('status').querySelector('.amin-status-embedded')", 'API reopens embedded status');
+        await evaluate("AminOS.close();document.querySelector('[mesid=\"1\"] .wsh-floor-button').click()");
+        await waitFor("!!document.querySelector('[mesid=\"1\"] .wsh-workbench iframe')?.contentDocument?.getElementById('mode')", 'floor entry opens floor editor');
+        assert.equal(await evaluate("document.querySelector('.amin-drawer').hidden"), true, 'floor entry does not open OS');
+        await evaluate("AminOS.openApp('status')");
+        await waitFor("!!pane('status').querySelector('.amin-status-embedded')", 'return from floor to OS');
+        assert.equal(await evaluate("document.querySelector('[mesid=\"1\"] .wsh-floor-button').getAttribute('aria-expanded')"), 'false');
+        await evaluate("pane('status').querySelector('#wsh-display-tab').click();pane('status').querySelector('#wsh-display-page input[type=checkbox]').click()");
+        await evaluate("AminOS.openApp('status')");
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!!pane('status').querySelector('.amin-status-embedded')"), true, 'OS works with floor buttons hidden: '+await evaluate("JSON.stringify({hidden:document.querySelector('.amin-drawer').hidden,pane:pane('status').innerHTML,notice:document.querySelector('.amin-notice').textContent})"));
+        await evaluate("pane('status').querySelector('#wsh-display-page input[type=checkbox]').click();pane('status').querySelector('#wsh-state-tab').click()");
         await evaluate("Promise.all([AminOS.openApp('status'),AminOS.openApp('dice')])");
-        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!pane('dice').hidden"), true, 'late status handoff cannot close another application');
-        assert.equal(await evaluate("document.querySelectorAll('.wsh-workbench').length"), 1);
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!pane('dice').hidden"), true, 'status load does not close another application');
+        assert.ok(await evaluate("document.querySelectorAll('.wsh-workbench').length<=1"), 'no duplicate editor after concurrent app switch');
     }
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
-    checks.push('World-status floor handoff resets OS resume to home; launcher and AminOS.open reopen OS, and a late handoff preserves another app at desktop/mobile widths');
-    await evaluate("[...document.querySelectorAll('.wsh-floor-button[aria-expanded=true]')].forEach(button=>button.click())");
+    checks.push('World status has OS and floor entries; OS launcher/API resume stays embedded, floor controls stay independent, hidden floor buttons do not disable OS, desktop/mobile layouts pass');
     checks.push('Character status update is adopted by current world-status history before reopening the actual status iframe');
 
     await app('inventory'); await click('inventory', '登记新物品'); await fill('inventory', '物品名称', '治疗药剂'); await fill('inventory', '所属人物', 'pc-a'); await fill('inventory', '数量', '3'); await fill('inventory', '变更原因', '旅途补给'); await click('inventory', '预览保存物品'); assert.equal(await evaluate('ctx.chatMetadata.amin_os_inventory_v1'), undefined); await click('inventory', '确认操作');
@@ -182,6 +195,15 @@ try {
         }
     }
     checks.push('Each new app floor window opens/closes/reopens exactly once and labels current-chat scope honestly');
+    await evaluate("AminOS.close();ctx.chat=[];ctx.chatMetadata={variables:{}};ctx.currentChat='empty-status-fixture';document.getElementById('chat').replaceChildren();ctx.eventSource.emit('CHAT_CHANGED')");
+    await evaluate("AminOS.openApp('status')");
+    await waitFor("!!pane('status').querySelector('iframe')?.contentDocument?.getElementById('mode')", 'empty chat status');
+    await evaluate("window.emptyStatusPanel=pane('status').querySelector('.wsh-workbench');ctx.chat.push({is_user:true,name:'艾琳',mes:'第一条消息',extra:{}});document.getElementById('chat').innerHTML='<div class=mes mesid=0><div class=mes_block><div class=mes_text>第一条消息</div><div class=mes_buttons></div></div></div>';ctx.eventSource.emit('MESSAGE_SENT',0)");
+    await waitFor("!!document.querySelector('[mesid=\"0\"] .wsh-floor-button')", 'first message floor mounted');
+    await evaluate("ctx.eventSource.emit('CHARACTER_MESSAGE_RENDERED',0)");
+    assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&pane('status').contains(emptyStatusPanel)&&emptyStatusPanel.isConnected"), true, 'first message retains the existing OS workbench');
+    assert.equal(await evaluate("document.querySelectorAll('.wsh-floor-host .wsh-workbench').length"), 0);
+    checks.push('Empty chat opens inside OS and first message/render retains the same workbench without floor migration');
     assert.deepEqual(errors, [], 'uncaught browser runtime errors');
     fs.writeFileSync(path.join(artifacts, 'report.json'), JSON.stringify({ passed: true, environment: 'Headless Edge with isolated mock SillyTavern host; emulated viewport, no real host/model/phone', checks, layouts, runtimeErrors: errors }, null, 2));
     console.log('PASS RP browser smoke: ' + checks.join('; ') + '.'); console.log('Artifacts: ' + artifacts);

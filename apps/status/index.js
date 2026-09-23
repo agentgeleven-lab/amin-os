@@ -7,7 +7,7 @@ import { checkpointState } from './state-checkpoint.js';
 import { compileRules, createRulesPage } from './rules.js';
 import { installUpdateEntry, boundWorldbook } from './lorebook.js';
 import { createHistory } from './history.js';
-import { historyView, installFloorButtons, latestStatusFloor } from './history-ui.js';
+import { historyView, installFloorButtons } from './history-ui.js';
 import { createTemplatesPage, copyPrompt } from './templates.js';
 import { buildUpdatePrompt } from './state-tools.js';
 import { generateStatus } from './generator.js';
@@ -15,21 +15,12 @@ import { setLocalVariable } from '/scripts/variables.js';
 
 const KEY = 'world_status_hud_v1';
 const context = () => SillyTavern.getContext();
-let embeddedMount, embeddedClose = () => {}, activeIdentity;
-export function initialize({mount: target, onClose = () => {}} = {}) { embeddedMount=target; embeddedClose=onClose; mount(); return {open: openEmbedded}; }
+let embeddedMount, activeIdentity;
+export function initialize({mount: target} = {}) { embeddedMount=target; mount(); return {open: openEmbedded}; }
 async function openEmbedded(page = selectedPage){
   identity();
-  if (await floorButtons.openCurrent(page)) { embeddedClose(); return; }
-  if (!embeddedMount) { notify('请加载最新聊天楼层，并在设置中显示世界状态按钮。'); return; }
-  if (latestStatusFloor(context().chat) < 0) {
-    await showHud(page,{target:embeddedMount,emptyChat:true}); return;
-  }
-  closeHud(); embeddedMount.replaceChildren();
-  const notice=node('section',undefined,'amin-page amin-ui wsh-floor-notice');
-  const open=node('button','显示入口并打开最新楼层','amin-primary');open.type='button';
-  const message=node('p','世界状态已移至楼层窗口。请加载最新消息；编辑器、生成设置、规则和模板都在当前状态工作台中。','amin-notice');
-  open.onclick=async()=>{try{context().extensionSettings[KEY]={...context().extensionSettings[KEY],floorButtons:true};context().saveSettingsDebounced();if(await floorButtons.openCurrent(page))embeddedClose();else message.textContent='最新楼层尚未显示，或统一外观中隐藏了世界状态入口。请加载最新消息并在统一外观中开启世界状态按钮后重试。';}catch(e){message.textContent=e.message;}};
-  notice.append(message,open);embeddedMount.append(notice);
+  if (!embeddedMount) { notify('世界状态应用窗口尚未就绪，请重新打开 Amin OS。'); return; }
+  return showHud(page,{target:embeddedMount,embedded:true});
 }
 let running = null;
 let sessionKey = '';
@@ -39,7 +30,6 @@ let generationForm, formHome, sourceHost, sourcePicker, sourceIdentity, restoreP
 let selectedPage = 'state';
 let selectHudPage = null;
 let requestUpdate = null;
-let migratingEmptyChat = false;
 const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, includePersona: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096 };
 const getSettings = () => {const legacy={...defaults,...context().extensionSettings[KEY]};return {...legacy,...sourceSettings(context(),'status',{legacyBindings:true,includeGlobalBooks:legacy.includeGlobalBooks,extraBooks:legacy.extraBooks})};};
 function refreshSourceControls(){
@@ -82,12 +72,6 @@ async function persistStatusChange(write) {
 function syncHistory() {
   try {
     history.sync(); floorButtons.refresh();
-    if(hudPanel?.dataset.emptyChat==='true'&&latestStatusFloor(context().chat)>=0&&!migratingEmptyChat){
-      // MESSAGE_SENT can precede the host's DOM mount. Retain the fallback until
-      // the scheduler has observed the new floor, then move the workbench once.
-      migratingEmptyChat=true;
-      void floorButtons.openCurrent(selectedPage).then(opened=>{if(opened)embeddedClose();}).catch(e=>notify(e.message,true)).finally(()=>{migratingEmptyChat=false;});
-    }
   } catch (e) { console.warn('[世界状态栏] 记录同步失败', e); }
 }
 function createDisplaySettings() {
@@ -123,7 +107,7 @@ function closeHud() {
   hudEpoch++;
   hudPanel?.close();
 }
-async function showHud(page = selectedPage, {target = embeddedMount, onClose = () => {}, validate = () => {}, emptyChat = false} = {}) {
+async function showHud(page = selectedPage, {target = embeddedMount, onClose = () => {}, validate = () => {}, embedded = false} = {}) {
   if (typeof page !== 'string') page = selectedPage;
   closeHud();
   const epoch = hudEpoch;
@@ -137,12 +121,13 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   checkIdentity(id);
   validate();
   const dialog = node('section', undefined, 'wsh-workbench wsh-floor-window amin-ui');
-  dialog.dataset.emptyChat=String(emptyChat);
+  dialog.dataset.placement=embedded ? 'os' : 'floor';
   dialog.setAttribute('aria-label','世界状态 · 当前状态工作台');
   const close = node('button', '收起', 'menu_button'); close.type='button';
   const heading = node('div', undefined, 'wsh-panel-heading');
   const title=node('strong','世界状态 · 当前剧情');title.title=context().characters[context().characterId].name+' · 当前状态工作台';
-  heading.append(title, close);
+  heading.append(title);
+  if (!embedded) heading.append(close);
   const tabs = node('div', undefined, 'wsh-tabs'); tabs.setAttribute('role', 'tablist');
   const stateTab = node('button', '状态栏', 'wsh-tab');
   const generateTab = node('button', '生成设置', 'wsh-tab');
@@ -252,11 +237,11 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   };
   quickActions.append(update, copy);
   const mapLink=createMapLink({check:()=>{checkIdentity(id);validate();}});
-  dialog.append(heading,node('p',emptyChat?'当前聊天还没有消息，暂在这里编辑；发送第一条消息后，从最新楼层继续。':'编辑将更新当前剧情状态，历史快照仅供浏览。','wsh-workbench-note'), tabs, quickActions, quickStatus, body);
+  dialog.append(heading,node('p','编辑将更新当前剧情状态，历史快照仅供浏览。','wsh-workbench-note'), tabs, quickActions, quickStatus, body);
   displayPage.append(mapLink.element);
-  if(emptyChat)target.replaceChildren();
+  if(embedded)target.replaceChildren();
   target.append(dialog);
-  if(emptyChat)dialog.classList.add('amin-status-embedded');
+  if(embedded)dialog.classList.add('amin-status-embedded');
   hudPanel = dialog; readyHtml = html; selectPage(selectedPage);
   return {element:dialog,selectPage,dispose:()=>dialog.close()};
 }
