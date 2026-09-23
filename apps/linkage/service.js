@@ -37,7 +37,11 @@ function pathModule(path) {
 const sourceFor = (ctx, index = (ctx.chat?.length ?? 0) - 1) => ({ identity: chatIdentity(ctx), path: chatPath(ctx.chat), index, swipe: ctx.chat?.[index]?.swipe_id ?? 0, text: ctx.chat?.[index]?.mes ?? '' });
 const sourceEqual = (a,b) => a.identity === b.identity && a.index === b.index && a.swipe === b.swipe && a.text === b.text && same(a.path,b.path);
 
-export function createLinkageService(getContext = () => globalThis.SillyTavern?.getContext?.(), { adapters = allAdapters, createId = uuid, now = () => new Date().toISOString(), buildPrompt = buildUnifiedPrompt } = {}) {
+export function createLinkageService(getContext = () => globalThis.SillyTavern?.getContext?.(), { adapters = allAdapters, createId = uuid, now = () => new Date().toISOString(), buildPrompt = buildUnifiedPrompt, manualModules = null } = {}) {
+    if (manualModules !== null && (!Array.isArray(manualModules) || !manualModules.length || manualModules.some(id => !['characters','inventory','relationships','scene','journal'].includes(id)) || new Set(manualModules).size !== manualModules.length)) throw Error('手动生成范围无效。');
+    const manualScope = manualModules === null ? null : new Set(manualModules);
+    const canWrite = (ctx, id) => manualScope ? manualScope.has(id) : mayWrite(ctx,id);
+    const batchLabel = manualScope ? 'AI 资料生成' : '跨应用剧情更新';
     const operation = createOperationService(getContext), listeners = new Set(), candidates = new Map();
     const paths = [...new Map([[KEY], ...adapters.flatMap(a => a.paths).filter(path => !derivedHistories.has(path[0]))].map(path => [JSON.stringify(path), path])).values()];
     let pending = null, generation = null, message = '', hostMessage = '', disposed = false;
@@ -46,7 +50,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     const rawData = ctx => Object.fromEntries(adapters.map(a => [a.id, a.read(ctx)]));
     function allowedPatch(ctx, patch) {
         const id = pathModule(patch.path);
-        if (!id || !mayWrite(ctx,id)) throw Error(`联动更新没有修改 ${id ? MODULES[id][0] : patch.path.join('.')} 的权限。`);
+        if (!id || !canWrite(ctx,id)) throw Error(`本次操作没有修改 ${id ? MODULES[id][0] : patch.path.join('.')} 的权限。`);
         if (patch.path[0] === 'variables' && patch.path.length < 2) throw Error('不能整体替换聊天变量。');
         if (patch.path[0] === 'amin_os_organizations_v1' && !['locks','assessment','backups'].includes(patch.path[1])) throw Error('不能通过剧情更新修改势力应用设置。');
     }
@@ -59,7 +63,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     function stage(raw, options = {}) {
         const ctx = options.candidate ? ensureGeneration(options.candidate) : context();
         const settings = readLinkageState(ctx);
-        if (!settings.enabled) throw Error('请先启用统一联动更新。');
+        if (!settings.enabled && !manualScope) throw Error('请先启用统一联动更新。');
         const parsed = parseUpdate(raw);
         if (!parsed.changes.length) throw Error('本次没有需要更新的内容。');
         const source = options.candidate?.source ?? sourceFor(ctx);
@@ -68,7 +72,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         const operationId = createId(), at = now(), sandbox = { ...ctx, chatMetadata: clone(ctx.chatMetadata) };
         const touched = [], descriptions = [], changes = [], beforeData = rawData(sandbox);
         for (const [index, change] of parsed.changes.entries()) {
-            if (!mayWrite(ctx,change.module)) throw Error(`${MODULES[change.module][0]} 未启用模型更新权限。`);
+            if (!canWrite(ctx,change.module)) throw Error(`${MODULES[change.module][0]} 未在本次操作的更新范围内。`);
             const adapter = adapters.find(a => a.id === change.module);
             if (!adapter?.apply) throw Error('这个模块目前只支持读取。');
             const before = clone(adapter.read(sandbox)), original = JSON.stringify(sandbox.chatMetadata);
@@ -102,8 +106,8 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
             const before = valueAt(ctx.chatMetadata,path), after = valueAt(sandbox.chatMetadata,path);
             return same(before,after) ? [] : [{ path, ...(after.exists ? { value: after.value } : { remove:true }) }];
         });
-        operation.stage({ label:'跨应用剧情更新', patches, summary:descriptions },token);
-        pending = { label:'跨应用剧情更新', changes, summary:descriptions, warnings:afterRefs.unresolved.length ? ['已有未解析引用保持原样，请在关联目录检查。'] : [], operationId, candidateId:options.candidate?.id };
+        operation.stage({ label:batchLabel, patches, summary:descriptions },token);
+        pending = { label:batchLabel, changes, summary:descriptions, warnings:afterRefs.unresolved.length ? ['已有未解析引用保持原样，请在关联目录检查。'] : [], operationId, candidateId:options.candidate?.id };
         message = '全部变更已校验；确认后作为同一次操作保存。'; notify(); return preview();
     }
     function preview() { if (!operation.preview()) return null; return clone(pending ?? { label:'保存联动设置', changes:[], summary:[], warnings:[] }); }
@@ -114,6 +118,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         finally { notify(); }
     }
     async function saveSettings(input) {
+        if (manualScope) throw Error('手动资料生成不能修改统一联动设置。');
         const ctx = context(), token = operation.capture([[KEY]]), previous = readLinkageState(ctx);
         const next = validateLinkageState({ ...clone(input), version:1, applied:previous.applied });
         operation.stage({ label:'保存联动设置', patches:[{path:[KEY],value:next}] },token); pending = null;
@@ -122,6 +127,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     }
     function captureGeneration(type = 'normal') {
         generation = null;
+        if (manualScope) return false;
         if (!['normal','regenerate','swipe'].includes(type)) return false;
         const ctx = context(); if (!readLinkageState(ctx).enabled || operation.busy() || operation.dirty()) return false;
         const chat = [...(ctx.chat ?? [])];

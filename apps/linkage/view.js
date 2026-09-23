@@ -1,3 +1,4 @@
+import { mountGeneration } from '../generation/view.js';
 import { getSharedService } from './service.js';
 import { installUnifiedWorldbook, inspectUnifiedWorldbook } from './lorebook.js';
 import { uuid } from '../../uuid.js';
@@ -28,6 +29,7 @@ export function mount(target, options = {}) {
     const promptPanel = make('details', '', 'amin-card amin-stack'), referencesPanel = make('details', '', 'amin-card amin-stack');
     const manualPanel = make('details', '', 'amin-card amin-stack');
     page.append(context, notice, retryPanel, reviewPanel, settingsPanel, suggestionsPanel, promptPanel, referencesPanel, manualPanel); target.append(page);
+    const generationView = mountGeneration(page, { joint: true, getContext, document, service: options.generationService, ai: options.ai });
     let disposed = false, unavailable = false, localBusy = false, message = '', failed = false;
     let lastServiceStatus = '';
     let saved = null, draft = null, settingsDirty = false, moduleRows = [], inputNodes = [], draftNotice, saveButton;
@@ -270,6 +272,6 @@ export function mount(target, options = {}) {
         if(disposed)return;render();
         if(section==='prompt'){promptPanel.open=true;promptPanel.scrollIntoView?.({block:'start'});promptValue.focus?.({preventScroll:true});}
         else if(section==='updates')(api.preview()?reviewPanel:suggestionsPanel).scrollIntoView?.({block:'start'});
-    }, dispose() { if (disposed) return; disposed = true; unsubscribe?.(); page.remove(); mounted.delete(target); } };
+    }, dispose() { if (disposed) return; disposed = true; generationView.dispose(); unsubscribe?.(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); return view;
 }

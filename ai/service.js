@@ -20,8 +20,12 @@ export const AI_APPS = [
     {id:'effects',name:'能力面板',tasks:['持续效果 · 规则起草']},
     {id:'information',name:'信息面板',tasks:['信息面板','信息面板 · 模拟推演']},
     {id:'organizations',name:'势力概览',tasks:['势力概览']},
-    {id:'journal',name:'剧情档案',tasks:['剧情档案 · 编年史']},
-    {id:'relationships',name:'人物关系',tasks:['人物关系 · 剧情更新']},
+    {id:'journal',name:'剧情档案',tasks:['剧情档案 · 编年史','剧情档案 · 资料生成']},
+    {id:'relationships',name:'人物关系',tasks:['人物关系 · 剧情更新','人物关系 · 资料生成']},
+    {id:'characters',name:'人物卡',tasks:['人物卡 · 资料生成']},
+    {id:'inventory',name:'背包与账本',tasks:['背包与账本 · 资料生成']},
+    {id:'scene',name:'场景与时间',tasks:['场景与时间 · 资料生成']},
+    {id:'linkage',name:'联合初始化',tasks:['联合初始化 · 资料生成']},
 ];
 const appId = app => AI_APPS.find(a=>a.id===app||a.tasks.includes(app))?.id;
 const renderMessages = messages => messages.map(m => `[${m?.role ?? '未知'}]\n${typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? m) ?? ''}`).join('\n\n');

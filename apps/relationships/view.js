@@ -1,3 +1,4 @@
+import { mountGeneration } from '../generation/view.js';
 import { createRelationshipsService, getSharedRelationshipsService } from './service.js';
 import { personLabel, renderRelationshipGraph } from './graph.js';
 import { evidenceMatches } from './model.js';
@@ -18,6 +19,7 @@ export function mount(target, options = {}) {
     const listPanel = make('section', '', 'amin-stack'), settingsPanel = make('details', '', 'amin-card amin-stack');
     const aiPanel = make('details', '', 'amin-card amin-stack'), rulesPanel = make('details', '', 'amin-card amin-stack'), alertsPanel = make('section', '', 'amin-stack');
     page.append(context, notice, retryPanel, controls, aiPanel, alertsPanel, graphPanel, editorHost, review, listPanel, rulesPanel, settingsPanel); target.append(page);
+    const generationView = mountGeneration(page, { modules: ['relationships'], getContext: options.getContext ?? (() => api.context()), document: document, service: options.generationService, ai: options.ai });
     let state = null, characters = [], focusId = '', direction = 'all', query = '', editor = null, disposed = false, error = '', committedEditor = false, unavailable = false, graphWidth = 0;
     const aiDraft = { start: null, end: null, instruction: '' };
     const locked = () => unavailable || api.busy() || api.dirty() || !!api.preview();
@@ -234,6 +236,6 @@ export function mount(target, options = {}) {
         focusId = event.detail.characterId; direction = 'all'; query = ''; api.sync?.(); render(); controls.querySelector?.('select')?.focus();
     };
     document.addEventListener?.('amin:select-character', selectCharacter);
-    const view = { open() { if (!disposed) { api.sync?.(); render(); } }, dispose() { if (disposed) return; disposed = true; document.removeEventListener?.('amin:select-character', selectCharacter); observer?.disconnect(); unsubscribe(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
+    const view = { open() { if (!disposed) { api.sync?.(); render(); } }, dispose() { if (disposed) return; disposed = true; generationView.dispose(); document.removeEventListener?.('amin:select-character', selectCharacter); observer?.disconnect(); unsubscribe(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); return view;
 }

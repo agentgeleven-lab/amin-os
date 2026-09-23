@@ -1,3 +1,4 @@
+import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { STATUSES, KINDS, TRUTHS, KNOWLEDGE_STATES, change, changeWithContext, compile, inspectEntries, filterEntries, sourceFromRange, exportRecords, parseImport,
     parsePriorImport, memoryEntries, autoSettings, configureAuto, dueRanges, currentDrafts, resolveAutoDraft } from './model.js';
@@ -21,6 +22,7 @@ export function mount(target, options = {}) {
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     body.id = instance + '-body'; body.setAttribute('role', 'tabpanel');
     page.append(context, tabs, notice, body); target.append(page);
+    const generationView = mountGeneration(page, { modules: ['journal'], getContext: options.getContext ?? (() => api.context()), document: doc, service: options.generationService, ai: options.ai });
     let selected = options.characterId ? 'memory' : 'hook', memoryCharacterId = options.characterId ?? '', form = null, controller = null, disposed = false;
     const filters = { query: '', status: '', scope: 'current', dueOnly: false };
     const say = (text, state = '') => { if (!disposed) { notice.textContent = text; notice.dataset.state = state; } };
@@ -465,6 +467,6 @@ export function mount(target, options = {}) {
         go(() => { selected = 'memory'; memoryCharacterId = event.detail.characterId; render(); });
     }
     doc.addEventListener?.('amin:select-character', selectCharacter);
-    const view = { open(options = {}) { if (!form) { if (options.tab && Object.hasOwn(tabNames, options.tab)) selected = options.tab; if (options.characterId) { selected = 'memory'; memoryCharacterId = options.characterId; } render(); } }, dispose() { if (disposed) return; disposed = true; stop(); unsubscribe(); doc.removeEventListener?.('amin:select-character', selectCharacter); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
+    const view = { open(options = {}) { if (!form) { if (options.tab && Object.hasOwn(tabNames, options.tab)) selected = options.tab; if (options.characterId) { selected = 'memory'; memoryCharacterId = options.characterId; } render(); } }, dispose() { if (disposed) return; disposed = true; generationView.dispose(); stop(); unsubscribe(); doc.removeEventListener?.('amin:select-character', selectCharacter); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); render(); say(api.status()); return view;
 }

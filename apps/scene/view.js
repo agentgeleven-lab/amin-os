@@ -1,3 +1,4 @@
+import { mountGeneration } from '../generation/view.js';
 import { getSharedSceneService } from './service.js';
 import { formatGameTime, formatPeriods, parsePeriods, createSceneId, validateCalendar, validateState, clockWeekday, characterReferences, absencePreview } from './model.js';
 import { contextExpiryPreview } from '../effects/model.js';
@@ -9,7 +10,7 @@ const ACTIVITY_LABELS = { dialogue: '一次对话', shortRest: '短休', longRes
 const minuteText = value => String(Math.floor(value / 60)).padStart(2, '0') + ':' + String(value % 60).padStart(2, '0');
 const parseTime = (value, end = false) => { const parts = /^(\d{1,2}):(\d{2})$/.exec(value); if (!parts || +parts[1] > 23 || +parts[2] > 59) throw Error('时间需填写 HH:MM。'); const minute = +parts[1] * 60 + +parts[2]; return end && !minute ? 1440 : minute; };
 const mountedViews = new WeakMap();
-export function mount(target, { service = getSharedSceneService(), travelService, expiryPreview = contextExpiryPreview } = {}) {
+export function mount(target, { service = getSharedSceneService(), travelService, expiryPreview = contextExpiryPreview, generationService, ai } = {}) {
     const existing = mountedViews.get(target); if (existing) { existing.open(); return existing; }
     const api = service, instance = 'amin-scene-' + createSceneId();
     const peopleFor = () => api.characterReferences?.() ?? characterReferences(api.context());
@@ -19,6 +20,7 @@ export function mount(target, { service = getSharedSceneService(), travelService
     tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '场景与时间页面');
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     body.id = instance + '-body'; body.setAttribute('role', 'tabpanel'); page.append(intro, tabs, notice, review, body); target.append(page);
+    const generationView = mountGeneration(page, { modules: ['scene'], getContext: () => api.context(), service: generationService, ai });
     const travelHost = node('div', null, 'amin-stack'), travelView = mountTravel(travelHost, { service: travelService, periods: () => api.read().periods });
     let tab = '时钟', token = null, selected = '', clockDraft = null, sceneDraft = null, periodsDraft = '', settingDraft = null, disposed = false;
     let timeReason = '', sceneReason = '', advanceReason = '', amount = 10, unit = 'minutes', message = '', error = false;
@@ -257,7 +259,7 @@ export function mount(target, { service = getSharedSceneService(), travelService
     const unsubscribe = api.subscribe(render); render();
     const view = {
         open() { if (disposed) return; api.sync(); render(); },
-        dispose() { if (disposed) return; disposed = true; unsubscribe(); document.removeEventListener?.('amin:select-character', selectCharacter); travelView.dispose(); page.remove(); if (mountedViews.get(target) === view) mountedViews.delete(target); },
+        dispose() { if (disposed) return; disposed = true; generationView.dispose(); unsubscribe(); document.removeEventListener?.('amin:select-character', selectCharacter); travelView.dispose(); page.remove(); if (mountedViews.get(target) === view) mountedViews.delete(target); },
     };
     mountedViews.set(target, view); return view;
 }

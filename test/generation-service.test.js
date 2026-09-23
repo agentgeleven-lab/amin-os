@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createGenerationService } from '../apps/generation/service.js';
+import { adapter as characters } from '../apps/linkage/adapters/characters.js';
+import { adapter as inventory } from '../apps/linkage/adapters/inventory.js';
+const change=(module,action,target,data)=>({module,action,target,data,reason:'所选设定明确说明'});
+const person=change('characters','create-character','alice',{name:'艾琳',kind:'npc',notes:''});
+const item=change('inventory','create-item','potion',{name:'药水',ownerId:'alice',quantity:2});
+function setup(initial=[person,item]) {
+    let changes=initial,saves=0,fail=false,sourceText='选定来源',callback=null;
+    const ctx={chat:[{name:'玩家',is_user:true,mes:'艾琳有两瓶药水。'}],chatMetadata:{},getCurrentChatId:()=> 'generation',saveMetadata:async()=>{saves++;if(fail)throw Error('offline');}};
+    const calls=[];
+    const api=createGenerationService(()=>ctx,{ai:{capture:route=>({route}),async generate(...args){calls.push(args);await callback?.();return JSON.stringify({version:1,changes});}},collectSources:async()=>({text:sourceText,provenance:{chat:ctx.chat.length?{start:0,end:0,indices:[0]}:null}})});
+    return {ctx,api,calls,get saves(){return saves;},set fail(v){fail=v;},set changes(v){changes=v;},set source(v){sourceText=v;},set callback(v){callback=v;}};
+}
+const options={modules:['characters','inventory'],mode:'create',sources:{includeChat:true,start:0,end:0}};
+test('joint generation and preview stay read-only then commit once with master off',async()=>{
+    const t=setup();const draft=await t.api.generate(options);assert.deepEqual(t.ctx.chatMetadata,{});assert.equal(t.saves,0);
+    t.api.stage(draft.changes);assert.deepEqual(t.ctx.chatMetadata,{});await t.api.confirm();
+    assert.equal(t.saves,1);assert.equal(inventory.read(t.ctx).items[0].ownerId,'alice');assert.equal(t.ctx.chatMetadata.amin_os_linkage_v1.enabled,false);
+    assert.equal(t.calls[0][3].includeLinkage,false);assert.equal(t.calls[0][3].snapshot.route,'linkage');t.api.dispose();
+});
+test('supplement rejects overwriting populated values but permits filling notes',async()=>{
+    const t=setup([person]);await t.api.generate({...options,modules:['characters']});t.api.stage(t.api.draft().changes);await t.api.confirm();
+    t.changes=[change('characters','save-character','alice',{name:'改名'})];
+    await assert.rejects(t.api.generate({...options,modules:['characters'],mode:'supplement'}),/不能覆盖/);
+    t.changes=[change('characters','save-character','alice',{notes:'补充背景'})];await t.api.generate({...options,modules:['characters'],mode:'supplement'});t.api.stage(t.api.draft().changes);await t.api.confirm();
+    assert.equal(characters.read(t.ctx).characters[0].notes,'补充背景');t.api.dispose();
+});
+test('create refuses existing targets and source changes reject confirm without writes',async()=>{
+    const t=setup([person]);await t.api.generate({...options,modules:['characters']});t.api.stage(t.api.draft().changes);t.source='已编辑来源';await assert.rejects(t.api.confirm(),/来源已变化/);assert.deepEqual(t.ctx.chatMetadata,{});
+    t.api.discard();await t.api.generate({...options,modules:['characters']});t.api.stage(t.api.draft().changes);await t.api.confirm();
+    t.changes=[change('characters','save-character','alice',{notes:'修改'})];await assert.rejects(t.api.generate({...options,modules:['characters']}),/仅允许新增/);t.api.dispose();
+});
+test('unchecked module and spending cannot enter edited previews',async()=>{
+    const t=setup([person]);await t.api.generate({...options,modules:['characters']});assert.throws(()=>t.api.stage([item]),/未选择/);assert.equal(t.api.preview(),null);
+    t.changes=[person,item];await t.api.generate(options);assert.throws(()=>t.api.stage([person,item,change('inventory','consume-item','potion',{quantity:1})]),/不允许/);assert.deepEqual(t.ctx.chatMetadata,{});t.api.dispose();
+});
+test('dependency removal rejects the entire selected batch',async()=>{
+    const t=setup();await t.api.generate(options);assert.throws(()=>t.api.stage([item]),/人物|持有/);assert.deepEqual(t.ctx.chatMetadata,{});t.api.dispose();
+});
+test('data changes while model runs reject stale draft',async()=>{
+    const t=setup([person]);t.callback=()=>{t.ctx.chat[0].mes='新的正文';};await assert.rejects(t.api.generate(options),/已变化/);assert.equal(t.api.draft(),null);assert.equal(t.saves,0);t.api.dispose();
+});
+test('failed persistence retries without applying the changes twice',async()=>{
+    const t=setup();await t.api.generate(options);t.api.stage(t.api.draft().changes);t.fail=true;await assert.rejects(t.api.confirm(),/offline/);assert.equal(t.api.dirty(),true);t.fail=false;await t.api.retrySave();assert.equal(inventory.read(t.ctx).items[0].quantity,2);assert.equal(t.ctx.chatMetadata.amin_os_linkage_v1.applied.length,1);assert.equal(t.saves,2);t.api.dispose();
+});
+test('empty chat skips journal while other modules initialize and journal sources stay bounded',async()=>{
+    const t=setup([person]);t.ctx.chat=[];const draft=await t.api.generate({...options,modules:['characters','journal']});assert.deepEqual(draft.modules,['characters']);assert.equal(draft.warnings.length,1);t.api.stage(draft.changes);await t.api.confirm();
+    await assert.rejects(t.api.generate({...options,modules:['journal']}),/真实聊天楼层/);t.api.dispose();
+    const u=setup([change('journal','set_fact','fact',{title:'事实',body:'内容',sourceStart:1,sourceEnd:1})]);await assert.rejects(u.api.generate({...options,modules:['journal']}),/超出/);u.api.dispose();
+});
+test('cancelled model result is never accepted even if provider ignores abort',async()=>{
+    const t=setup([person]);t.callback=()=>t.api.cancel();await assert.rejects(t.api.generate(options),/已取消/);assert.equal(t.api.draft(),null);assert.equal(t.saves,0);t.api.dispose();
+});
+test('blank requests cannot invent sources and reference catalogs resolve existing people',async()=>{
+    const t=setup([person]);await assert.rejects(t.api.generate({modules:['characters'],sources:{},instruction:' '}),/请选择资料来源/);assert.equal(t.calls.length,0);
+    await t.api.generate({...options,modules:['characters']});t.api.stage(t.api.draft().changes);await t.api.confirm();t.changes=[item];
+    await t.api.generate({...options,modules:['inventory']});const prompt=JSON.parse(t.calls.at(-1)[2].prompt);
+    assert.deepEqual(prompt.references.characters,[{id:'alice',name:'艾琳'}]);assert.equal(prompt.existing.characters,undefined);t.api.dispose();
+});
+test('supplement preserves zero amounts and false equipment flags',async()=>{
+    const t=setup([person,{...item,data:{...item.data,quantity:0}}]);await t.api.generate(options);t.api.stage(t.api.draft().changes);await t.api.confirm();
+    t.changes=[change('inventory','save-item','potion',{quantity:2})];await assert.rejects(t.api.generate({...options,modules:['inventory'],mode:'supplement'}),/不能覆盖/);
+    t.changes=[change('inventory','save-item','potion',{equipped:true})];await assert.rejects(t.api.generate({...options,modules:['inventory'],mode:'supplement'}),/不能覆盖|数量/);t.api.dispose();
+});

@@ -1,3 +1,4 @@
+import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { createCharactersService, getSharedCharactersService } from './service.js';
 import { createDiceService, getSharedDiceService } from '../dice/service.js';
@@ -20,6 +21,7 @@ export function mount(target, options = {}) {
     const body = make('div', '', 'amin-stack'), recovery = make('div', '', 'amin-toolbar');
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     page.append(context, notice, body, recovery); target.append(page);
+    const generationView = mountGeneration(page, { modules: ['characters'], getContext: options.getContext ?? (() => api.context()), document: doc, service: options.generationService, ai: options.ai });
     let disposed = false, running = false, form = null, selected = '', filter = '', contextStamp = '', deferredRefresh = false;
     const controls = new Set();
     const say = (text, state = '') => { if (!disposed) { notice.textContent = text; notice.dataset.state = state; } };
@@ -331,7 +333,7 @@ export function mount(target, options = {}) {
     const result = {
         open: refresh, refresh,
         dispose() {
-            if (disposed) return; disposed = true; releasePreview(form); unsubscribe(); unsubscribeDice(); doc.removeEventListener?.('amin:select-character', selectCharacter);
+            if (disposed) return; disposed = true; generationView.dispose(); releasePreview(form); unsubscribe(); unsubscribeDice(); doc.removeEventListener?.('amin:select-character', selectCharacter);
             if (ownsService) api.dispose(); if (ownsDice) dice.dispose(); controls.clear(); page.remove(); mounted.delete(target);
         },
     };

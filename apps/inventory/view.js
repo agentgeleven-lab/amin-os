@@ -1,3 +1,4 @@
+import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { createInventoryService, getSharedInventoryService } from './service.js';
 import { WEAR_SLOTS, WEAR_LAYERS } from './model.js';
@@ -21,6 +22,7 @@ export function mount(target, options = {}) {
     body.id = instance + '-body'; body.setAttribute('role', 'tabpanel');
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     page.append(context, tabs, notice, review, body); target.append(page);
+    const generationView = mountGeneration(page, { modules: ['inventory'], getContext: options.getContext ?? (() => api.context()), document: doc, service: options.generationService, ai: options.ai });
     let selected = 'items', form = null, disposed = false, working = false;
     const filters = { owner: '', query: '', kind: '', count: 50 };
     let bodyControls = [], reviewControls = [], list = null, state = null, characters = [];
@@ -343,6 +345,6 @@ export function mount(target, options = {}) {
         filters.owner = event.detail.characterId; filters.query = ''; selected = 'wear'; render();
     };
     doc.addEventListener?.('amin:select-character', selectCharacter);
-    const view = { open() { render(); }, dispose() { if (disposed) return; disposed = true; doc.removeEventListener?.('amin:select-character', selectCharacter); unsubscribe?.(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
+    const view = { open() { render(); }, dispose() { if (disposed) return; disposed = true; generationView.dispose(); doc.removeEventListener?.('amin:select-character', selectCharacter); unsubscribe?.(); if (ownService) api.dispose(); page.remove(); mounted.delete(target); } };
     mounted.set(target, view); render(); return view;
 }
