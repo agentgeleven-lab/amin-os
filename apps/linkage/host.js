@@ -96,11 +96,14 @@ export function createLinkageHost(getContext, {
         // A dry-run prompt inspection must not invalidate a live generation.
         if (dryRun) return;
         cancel();
-        if (!supported || disposed) return;
+        if (disposed) return;
+        if (!supported) { say('当前宿主缺少联动生成接口或事件，本轮无法接收更新'); return; }
         const ctx = getContext();
-        if (!readSettings(ctx).enabled || options?.signal?.aborted || !ctx?.chatMetadata) return;
+        if (!readSettings(ctx).enabled) { say('当前聊天未启用统一联动更新；请在此分支启用并保存设置'); return; }
+        if (options?.signal?.aborted) { say('本轮生成已取消，未建立更新接收记录'); return; }
+        if (!ctx?.chatMetadata) { say('当前聊天资料尚未就绪，未建立更新接收记录'); return; }
         const id = ctx.getCurrentChatId?.() ?? ctx.chatId;
-        if (id == null || id === '') return;
+        if (id == null || id === '') { say('当前聊天尚无有效标识，未建立更新接收记录'); return; }
         type ||= 'normal';
         run = {
             id: ++sequence, type, metadata: ctx.chatMetadata, identity: chatIdentity(ctx), signal: options?.signal,
@@ -109,6 +112,7 @@ export function createLinkageHost(getContext, {
             excludedReply: ['regenerate', 'swipe'].includes(type) && !ctx.chat?.at(-1)?.is_user && !ctx.chat?.at(-1)?.is_system ? ctx.chat?.at(-1) : null,
             candidate: null, ended: false, failed: false,
         };
+        say(run.write ? '已收到当前聊天的生成事件，等待加载统一更新规则' : '本轮为续写或工具生成，仅提供资料，不接收自动更新');
         injectData(run);
         options?.signal?.addEventListener?.('abort', () => { if (run?.signal === options.signal) cancel('生成已停止，未接收本轮统一更新'); }, { once: true });
     }
@@ -138,7 +142,7 @@ export function createLinkageHost(getContext, {
         if (!selected) { say(owned.length ? '统一条目未启用、触发器不匹配或占位无效；本轮不会接收自动更新' : '本轮未加载统一条目；请检查世界书绑定和预设'); return; }
         try {
             const prompt = buildPrompt(promptContext(ctx, active), { purpose: active.purpose, write: active.write });
-            if (typeof prompt !== 'string' || !prompt.trim()) return;
+            if (typeof prompt !== 'string' || !prompt.trim()) { say('没有可用的变量更新规则；请检查当前分支的模块参与、读取与允许更新设置'); return; }
             // Replace by callback so dollar sequences in state stay literal.
             const expanded = {
                 ...selected.entry,
@@ -186,7 +190,12 @@ export function createLinkageHost(getContext, {
     function ended() {
         clearData();
         if (!run) return;
-        if (!run.write || !run.captured) { cancel(); return; }
+        if (!run.write) { cancel(); return; }
+        if (!run.captured) {
+            if (run.selected && !run.failed) say('本轮规则已展开，但未确认统一条目实际激活，未接收更新；请检查世界书预算与预设');
+            else if (!run.selected && message === '已收到当前聊天的生成事件，等待加载统一更新规则') say('本轮未收到世界书加载事件，未建立更新接收记录；请检查宿主和预设');
+            cancel(); return;
+        }
         run.ended = true; schedule();
     }
     async function finish() {

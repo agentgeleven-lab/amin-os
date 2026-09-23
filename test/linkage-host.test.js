@@ -366,3 +366,20 @@ test('a rejected data injection filter cannot authorize later update collection'
         f.reply(); await f.finish(); assert.deepEqual(f.replies, []);
     } finally { f.host.destroy(); }
 });
+
+
+test('new branch starts a fresh generation and receives its own reply',async()=>{
+    const f=hostFixture();await f.switchChat();assert.match(f.host.status().message,/聊天已切换/);
+    await f.start();assert.match(f.host.status().message,/已收到当前聊天/);
+    const payload=await f.load();await f.activate(payload);const index=f.reply();await f.finish(index);
+    assert.equal(f.captured.length,1);assert.deepEqual(f.replies,[index]);f.host.destroy();
+});
+
+test('disabled branch and missing worldbook stages replace stale switch status',async()=>{
+    const f=hostFixture();await f.switchChat();f.settings.enabled=false;
+    await f.start();assert.match(f.host.status().message,/当前聊天未启用/);
+    f.settings.enabled=true;await f.start();await f.source.emit('GENERATION_ENDED');
+    assert.match(f.host.status().message,/未收到世界书加载事件/);
+    await f.start();await f.load();await f.source.emit('GENERATION_ENDED');
+    assert.match(f.host.status().message,/未确认统一条目实际激活/);assert.equal(f.replies.length,0);f.host.destroy();
+});
