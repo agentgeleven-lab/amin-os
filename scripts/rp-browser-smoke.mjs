@@ -111,6 +111,20 @@ try {
 
     await evaluate("AminOS.openApp('status')"); await waitFor("!!document.querySelector('.wsh-workbench iframe')?.contentDocument?.getElementById('mode')", 'status iframe');
     assert.equal(await evaluate("ctx.chatMetadata.world_status_hud_history_v1.records[ctx.chat.at(-1).extra.wsh_message_id+':0'].state.项目.玩家.攻击修正"), 4);
+    for (const width of [1280, 320]) {
+        await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 600 });
+        await evaluate("AminOS.openApp('status')");
+        assert.equal(await evaluate("document.querySelector('.amin-drawer').hidden"), true);
+        await evaluate("(async()=>{document.querySelector('.amin-launcher').click();await new Promise(resolve=>setTimeout(resolve,50));})()");
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!document.querySelector('.amin-home').hidden"), true, 'launcher returns to OS home after status floor handoff at '+width);
+        await evaluate('AminOS.close();AminOS.open()');
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!document.querySelector('.amin-home').hidden"), true, 'programmatic reopen also resumes OS home');
+        await evaluate("Promise.all([AminOS.openApp('status'),AminOS.openApp('dice')])");
+        assert.equal(await evaluate("!document.querySelector('.amin-drawer').hidden&&!pane('dice').hidden"), true, 'late status handoff cannot close another application');
+        assert.equal(await evaluate("document.querySelectorAll('.wsh-workbench').length"), 1);
+    }
+    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+    checks.push('World-status floor handoff resets OS resume to home; launcher and AminOS.open reopen OS, and a late handoff preserves another app at desktop/mobile widths');
     await evaluate("[...document.querySelectorAll('.wsh-floor-button[aria-expanded=true]')].forEach(button=>button.click())");
     checks.push('Character status update is adopted by current world-status history before reopening the actual status iframe');
 

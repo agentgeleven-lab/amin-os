@@ -88,6 +88,12 @@ export function createShell(){
     function close(){endResize(true);tileDesktop?.leave();opened=false;drawer.hidden=true;root.dataset.open='false';launcher.setAttribute('aria-expanded','false');launcher.setAttribute('aria-label','打开 Amin os');launcher.focus();}
     function select(id){active=id;nav.hidden=id==='home';appHeading.textContent=APPS.find(a=>a.id===id)?.name??'';home.hidden=id!=='home';for(const [key,pane]of Object.entries(panes)){pane.hidden=key!==id;tabs[key].setAttribute('aria-current',key===id?'page':'false');}homeButton.setAttribute('aria-current',id==='home'?'page':'false');notice.hidden=true;}
     function showHome(){epoch++;select('home');open();if(blocked){message.textContent=blocked;retry.hidden=true;notice.hidden=false;}}
+    function closeToHome(id){
+        // A floor handoff must not become the launcher's next resume target.
+        // Ignore a late handoff if the user has already opened another app.
+        if(active!==id)return;
+        epoch++;select('home');close();
+    }
     async function showApp(id){
         if(!panes[id])return;
         if(blocked){showHome();return;}
@@ -107,5 +113,5 @@ export function createShell(){
     getAppearance()?.subscribe(()=>{const next=getAppearance().snapshot().window.height;if(next!==configuredHeight){configuredHeight=next;manualHeight=null;save();}place();});
     window.addEventListener('resize',place);window.visualViewport?.addEventListener('resize',place);window.visualViewport?.addEventListener('scroll',place);place();select('home');
     tileDesktop=createTileDesktop({home,cards,apps:APPS,createIcon:icon,openApp:showApp,onLayout:place});
-    return {panes,open:resume,close,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};
+    return {panes,open:resume,close,closeToHome,home:showHome,showApp,register(id,fn){handlers[id]=fn;},refreshActive(){if(opened&&active!=='home')showApp(active);},setBlocked(text){blocked=text;cards.querySelectorAll('button').forEach(b=>b.disabled=true);message.textContent=text;retry.hidden=true;notice.hidden=false;}};
 }

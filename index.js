@@ -46,7 +46,7 @@ export function initialize() {
         settings:()=>import('./settings/view.js').then(m=>m.mount(shell.panes.settings)),
         ai:()=>import('./ai/view.js').then(m=>m.mount(shell.panes.ai)),
         map:()=>import('./apps/map/index.js').then(m=>m.initialize({mount:shell.panes.map,onOpen:()=>shell.showApp('map')})),
-        status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.close()})),
+        status:()=>import('./apps/status/index.js').then(m=>m.initialize({mount:shell.panes.status,onClose:()=>shell.closeToHome('status')})),
         reply:()=>import('./apps/reply/workspace.js').then(m=>m.mount(shell.panes.reply)),
         stylewriter:()=>import('./apps/reply/workspace.js').then(m=>({open:()=>m.mount(shell.panes.reply).open('rewrite')})),
     };
@@ -65,7 +65,7 @@ export function initialize() {
     for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.13.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.13.1',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 
