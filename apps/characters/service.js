@@ -1,3 +1,4 @@
+import { chatRevision } from '../shared/chat-revision.js';
 import { uuid } from '../../uuid.js';
 import { createOperationService, subscribeStateChanges } from '../shared/operations.js';
 import { KEY, STATUS_PATH, readStore, readCharacters, resolveStat, bindings, validateCharacter, appendSnapshot, withStatValue } from './model.js';
@@ -14,7 +15,7 @@ export function createCharactersService(getContext = () => globalThis.SillyTaver
     function sync() {
         if (disposed) return;
         const ctx = getContext();
-        const next = JSON.stringify([ctx?.getCurrentChatId?.() ?? ctx?.chatId, ctx?.characterId, ctx?.groupId, ctx?.chat?.map(message => [message.name, message.is_user, message.mes, message.swipe_id]), ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[INVENTORY_KEY], ctx?.chatMetadata?.variables?.状态栏]);
+        const next = JSON.stringify([ctx?.getCurrentChatId?.() ?? ctx?.chatId, ctx?.characterId, ctx?.groupId, chatRevision(ctx?.chat), ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[INVENTORY_KEY], ctx?.chatMetadata?.variables?.状态栏]);
         if (next !== lastScope || ctx?.chatMetadata !== lastMetadata) { lastScope = next; lastMetadata = ctx?.chatMetadata; notify(); }
     }
     function stageCharacter(input, token = capture()) {

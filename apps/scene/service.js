@@ -1,4 +1,5 @@
-import { KEY, readStore, readCurrentScene, visibleEvents, chatPath, transition, appendEvent, mapReferences, characterReferences, assertReferences, scheduleForecast, absencePreview, floorGameTime, currentPrompt, createSceneId } from './model.js';
+import { chatRevision } from '../shared/chat-revision.js';
+import { KEY, readStore, readCurrentScene, visibleEvents, transition, appendEvent, mapReferences, characterReferences, assertReferences, scheduleForecast, absencePreview, floorGameTime, currentPrompt, createSceneId } from './model.js';
 import { acquireMetadataWrite, publishExternalMetadataChange, subscribeStateChanges } from '../shared/operations.js';
 import { prepareState2ManualWrite } from '../state2/runtime.js';
 export const PROMPT_KEY = 'amin-os-scene-time';
@@ -16,7 +17,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         const ctx = getContext();
         if (disposed) throw Error('场景服务已关闭。');
         if (!loaded(ctx)) throw Error('请先打开一个聊天。');
-        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx), epoch };
+        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx), epoch };
     }
     function check(token, { checkBasis = true, checkReferences = false } = {}) {
         const current = capture();
@@ -27,7 +28,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     }
     function sync() {
         if (disposed) return;
-        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
+        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
         const changed = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path || next?.basis !== lastScope?.basis || next?.references !== lastScope?.references;
         if (!changed) return;
         clearPrompt();
@@ -127,7 +128,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         if (!detail.paths.some(path => path[0] === KEY)) { sync(); return; }
         // A restore or travel operation can replace the scene without a host message event.
         epoch++; pending = null; clearPrompt();
-        lastScope = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: JSON.stringify(chatPath(ctx.chat)), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
+        lastScope = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
         lastMessage = '场景与时间已由其他应用更新，待确认预览已取消。请重新核对当前剧情。'; notify();
     }));
     const timer = poll ? setInterval(sync, 800) : null;

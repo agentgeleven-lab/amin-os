@@ -11,6 +11,13 @@ import { createLinkageHost } from './apps/linkage/host.js';
 import { buildUpdateRules, buildDataPrompt } from './apps/linkage/prompt.js';
 
 let instance;
+let surfaceLoads;
+// TauriTavern awaits this hook before projecting its first virtualized message.
+// Do not wait for APP_READY here: that event occurs after this startup barrier.
+export async function registerChatSurface() {
+    if (!initialize() || !surfaceLoads) throw Error('Amin OS 楼层入口未能初始化，请检查扩展冲突与宿主接口。');
+    for (const result of await Promise.all(surfaceLoads)) if (result.error) throw result.error;
+}
 export function initialize() {
     if(instance)return instance;
     const ctx=globalThis.SillyTavern?.getContext?.();
@@ -73,11 +80,12 @@ export function initialize() {
             await result.value?.open?.();
         });
     }
+    surfaceLoads = [ready.map, ready.status];
     installReplyFloorButtons();
     for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.16.2',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.16.3',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 

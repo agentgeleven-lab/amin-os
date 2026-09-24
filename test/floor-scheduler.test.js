@@ -48,6 +48,29 @@ test('multiple apps share their initial floor list, one observer and one host ev
     a.dispose(); b.dispose();
 });
 
+test('managed chat surface delivers coalesced events without observing or scanning projected DOM', () => {
+    const r = rig(), left = [], right = [];
+    r.document.defaultView.__TAURITAVERN__ = {api:{chatSurface:{isManagedOwnershipRequired:() => true}}};
+    const a = observeChatFloors(nodes => left.push(nodes), r.options);
+    const b = observeChatFloors(nodes => right.push(nodes), r.options);
+    assert.equal(r.queries(), 0);
+    assert.equal(r.observers.length, 0);
+    assert.deepEqual(left, [[]]);
+    assert.deepEqual(right, [[]]);
+    r.source.emit('MESSAGE_RECEIVED');
+    r.source.emit('MESSAGE_SWIPED');
+    a.refresh();
+    assert.equal(r.frames.size, 1);
+    r.flush();
+    assert.equal(r.queries(), 0);
+    assert.deepEqual(left, [[], []]);
+    assert.deepEqual(right, [[], []]);
+    a.dispose();
+    b.dispose();
+    assert.deepEqual(r.source.eventNames(), []);
+    assert.equal(r.frames.size, 0);
+});
+
 test('rendering or inserting owned windows and unrelated body updates never rescan chat', () => {
     const r = rig(), handle = observeChatFloors(() => {}, r.options);
     r.mutate(r.control, [r.element('', r.control)]);

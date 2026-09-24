@@ -1,9 +1,10 @@
+import { chatRevision } from '../shared/chat-revision.js';
 import { uuid } from '../../uuid.js';
 import { KEY as CHARACTERS_KEY, readCharacters } from '../characters/model.js';
 import { createOperationService, subscribeStateChanges, chatIdentity } from '../shared/operations.js';
 import { getAI } from '../../ai/service.js';
 import { managesModule } from '../linkage/policy.js';
-import { KEY, readStore, readRelationships, resolveRelationships, visibleEvents, chatPath, transition, appendSnapshot, currentPrompt, evaluateThresholds, validateEvidence, sourceReferences } from './model.js';
+import { KEY, readStore, readRelationships, resolveRelationships, visibleEvents, transition, appendSnapshot, currentPrompt, evaluateThresholds, validateEvidence, sourceReferences } from './model.js';
 import { validateEndpoints, applyRelationshipChange } from './updates.js';
 import { draftRelationships } from './draft.js';
 
@@ -89,7 +90,7 @@ export function createRelationshipsService(getContext = () => globalThis.SillyTa
     }
     function scope() {
         const ctx = getContext();
-        return { metadata: ctx?.chatMetadata, identity: chatIdentity(ctx), path: JSON.stringify(chatPath(ctx?.chat)),
+        return { metadata: ctx?.chatMetadata, identity: chatIdentity(ctx), path: chatRevision(ctx?.chat),
             basis: JSON.stringify([ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[CHARACTERS_KEY], managesModule(ctx, 'relationships')]) };
     }
     function sync() {

@@ -10,7 +10,7 @@ export function getHostRouteOptions(ctx) {
     let profiles = [], error = '';
     if (typeof service?.getSupportedProfiles === 'function' && typeof service?.sendRequest === 'function') {
         try {
-            profiles = service.getSupportedProfiles().map(p => ({
+            profiles = service.getSupportedProfiles().filter(p => !unsupportedTauriProfile(ctx, p)).map(p => ({
                 id: p.id, name: p.name || p.id, api: p.api || '', model: p.model || '', preset: p.preset || '',
             })).filter(p => typeof p.id === 'string' && p.id);
         } catch (cause) { error = cause?.message || '无法读取酒馆连接配置'; }
@@ -21,6 +21,50 @@ export function getHostRouteOptions(ctx) {
 function hostPreset(ctx) {
     try { return ctx?.getPresetManager?.(ctx.mainApi)?.getSelectedPresetName?.() || ''; }
     catch { return ''; }
+}
+
+function profileType(ctx, candidate) {
+    const selected = ctx?.CONNECT_API_MAP?.[candidate?.api]?.selected;
+    return typeof selected === 'string' ? selected : '';
+}
+
+function unsupportedTauriProfile(ctx, candidate) {
+    return globalThis.__TAURI_RUNNING__ === true && profileType(ctx, candidate) === 'textgenerationwebui';
+}
+
+function assertProfilePreset(ctx, candidate) {
+    const presetName = typeof candidate?.preset === 'string' ? candidate.preset.trim() : '';
+    if (!presetName) return;
+    const type = profileType(ctx, candidate);
+    if (!type) return;
+    if (typeof ctx?.getPresetManager !== 'function') {
+        if (globalThis.__TAURI_RUNNING__ === true) throw Error('当前 TauriTavern 无法验证酒馆连接配置的生成参数预设，请更新宿主');
+        return;
+    }
+    let manager;
+    try { manager = ctx.getPresetManager(type); }
+    catch (cause) { throw Error('无法验证酒馆连接配置的生成参数预设：' + (cause?.message || String(cause))); }
+    if (typeof manager?.getCompletionPresetByName !== 'function') {
+        if (globalThis.__TAURI_RUNNING__ === true) throw Error('当前 TauriTavern 无法验证酒馆连接配置的生成参数预设，请更新宿主');
+        return;
+    }
+    let preset;
+    try { preset = manager.getCompletionPresetByName(presetName); }
+    catch (cause) { throw Error('无法验证酒馆连接配置的生成参数预设：' + (cause?.message || String(cause))); }
+    if (!preset) throw Error(`酒馆连接配置绑定的生成参数预设“${presetName}”已删除或不可用，请重新选择`);
+}
+
+function completionChannelStamp(ctx) {
+    if ((ctx?.mainApi || '') !== 'openai') return '';
+    const settings = ctx?.chatCompletionSettings;
+    if (!settings || typeof settings !== 'object' || typeof ctx?.getChatCompletionModel !== 'function') return '';
+    const source = settings.chat_completion_source;
+    if (typeof source !== 'string' || !source) return '';
+    try {
+        const model = ctx.getChatCompletionModel(settings);
+        if (model === undefined) return '';
+        return JSON.stringify({ source, model: model ?? null });
+    } catch { return ''; }
 }
 
 function routeGuard(ctx) {
@@ -42,13 +86,15 @@ function profile(ctx, profileId) {
     try { found = service.getSupportedProfiles().find(p => p.id === profileId); }
     catch (cause) { throw Error('无法读取酒馆连接配置：' + (cause?.message || String(cause))); }
     if (!found) throw Error('所选酒馆连接配置已删除、停用或不支持，请重新选择');
+    if (unsupportedTauriProfile(ctx, found)) throw Error('TauriTavern 当前不支持 Text Completion 酒馆连接配置，请改用 Chat Completion 配置');
+    assertProfilePreset(ctx, found);
     return found;
 }
 
 export function captureHostRoute(ctx, route) {
     if (route.mode === 'tavern-current') {
         if (typeof ctx?.generateQuietPrompt !== 'function') throw Error('当前酒馆没有静默生成接口，请更新酒馆或改用 Amin API');
-        return { mode: route.mode, profileId: '', mainApi: ctx.mainApi || '', presetName: hostPreset(ctx), guard:routeGuard(ctx) };
+        return { mode: route.mode, profileId: '', mainApi: ctx.mainApi || '', presetName: hostPreset(ctx), channelStamp: completionChannelStamp(ctx), guard:routeGuard(ctx) };
     }
     if (route.mode === 'tavern-profile') {
         const p = profile(ctx, route.profileId);
@@ -153,7 +199,8 @@ export async function runHostGeneration({ ctx, route, request, messages, sharedP
         await awaitNormalGeneration(slot, signal);
         check();
         const live = current();
-        if ((live.mainApi || '') !== route.mainApi || hostPreset(live) !== route.presetName) {
+        if ((live.mainApi || '') !== route.mainApi || hostPreset(live) !== route.presetName ||
+            (route.channelStamp && completionChannelStamp(live) !== route.channelStamp)) {
             throw Error('酒馆当前连接或预设已变化，请重新发起生成');
         }
         return await withLinkageToolScope(current, () => live.generateQuietPrompt({ quietPrompt: quietPrompt(request, messages, sharedPrompt), responseLength: maxTokens }));

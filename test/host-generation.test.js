@@ -11,7 +11,9 @@ function harness() {
     const calls=[];
     const service={getSupportedProfiles:()=>[profile],sendRequest:async(...args)=>{calls.push(args);return {content:'host text'};}};
     const ctx={chatId:'chat-one',getCurrentChatId(){return this.chatId;},chatMetadata:{},chat:[{mes:'开场',swipe_id:0}],characterId:0,groupId:null,
-        mainApi:'openai',getPresetManager:()=>({getSelectedPresetName:()=> '完整预设甲'}),eventTypes,eventSource,
+        mainApi:'openai',CONNECT_API_MAP:{openai:{selected:'openai'}},chatCompletionSettings:{chat_completion_source:'openai',openai_model:'model-one'},
+        getChatCompletionModel:settings=>settings.openai_model,
+        getPresetManager:()=>({getSelectedPresetName:()=> '完整预设甲',getCompletionPresetByName:name=>name==='采样甲'?{name}:null}),eventTypes,eventSource,
         ConnectionManagerRequestService:service,generateQuietPrompt:async args=>{calls.push(args);return 'quiet text';}};
     return {ctx,profile,calls,eventSource};
 }
@@ -48,6 +50,29 @@ test('missing or changed native profile fails before sending, with no fallback',
     assert.equal(calls.length,0);
 });
 
+test('Tauri hides and rejects Text Completion profiles while ordinary SillyTavern keeps them',()=>{
+    const {ctx}=harness();
+    ctx.CONNECT_API_MAP.openai.selected='textgenerationwebui';
+    const hadMarker=Object.hasOwn(globalThis,'__TAURI_RUNNING__'),oldMarker=globalThis.__TAURI_RUNNING__;
+    try {
+        globalThis.__TAURI_RUNNING__=true;
+        assert.deepEqual(getHostRouteOptions(ctx).profiles,[]);
+        assert.throws(()=>captureHostRoute(ctx,{mode:'tavern-profile',profileId:'st-profile'}),/Text Completion/);
+        globalThis.__TAURI_RUNNING__=false;
+        assert.equal(getHostRouteOptions(ctx).profiles[0].id,'st-profile');
+        assert.equal(captureHostRoute(ctx,{mode:'tavern-profile',profileId:'st-profile'}).profileId,'st-profile');
+    } finally {
+        if(hadMarker)globalThis.__TAURI_RUNNING__=oldMarker;else delete globalThis.__TAURI_RUNNING__;
+    }
+});
+
+test('a deleted configured profile preset is rejected before the native request',async()=>{
+    const {ctx,calls}=harness(),route=captureHostRoute(ctx,{mode:'tavern-profile',profileId:'st-profile'});
+    ctx.getPresetManager=()=>({getSelectedPresetName:()=> '完整预设甲',getCompletionPresetByName:()=>null});
+    await assert.rejects(runHostGeneration({ctx,route,request,messages,maxTokens:100,getContext:()=>ctx}),/生成参数预设.*已删除/);
+    assert.equal(calls.length,0);
+});
+
 test('quiet route follows current full preset and rejects a changed preset before calling host',async()=>{
     const {ctx,calls}=harness(),route=captureHostRoute(ctx,{mode:'tavern-current'});
     assert.equal(await runHostGeneration({ctx,route,request,messages,sharedPrompt:'持续效果',maxTokens:200,getContext:()=>ctx}),'quiet text');
@@ -81,6 +106,18 @@ test('quiet route waits for active normal generation and protects next call afte
     assert.equal(await first,'late');
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(calls.length,1);
+});
+
+test('queued quiet route rejects an active model change before calling the host',async()=>{
+    const {ctx,eventSource,calls}=harness(),route=captureHostRoute(ctx,{mode:'tavern-current'});
+    observeHostGeneration(ctx);
+    eventSource.emit('started','normal',{},false);
+    const pending=runHostGeneration({ctx,route,request,messages,maxTokens:100,getContext:()=>ctx});
+    await new Promise(resolve=>setImmediate(resolve));
+    ctx.chatCompletionSettings.openai_model='model-two';
+    eventSource.emit('ended');
+    await assert.rejects(pending,/当前连接或预设已变化/);
+    assert.equal(calls.length,0);
 });
 
 test('quiet route rechecks when the stop button hides after the generation-ended event',async()=>{

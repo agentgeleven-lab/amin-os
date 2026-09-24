@@ -1,6 +1,7 @@
+import { chatRevision } from '../shared/chat-revision.js';
 import { KEY, readStore, readInventory, change } from './model.js';
 import { KEY as CHARACTERS_KEY, readCharacters } from '../characters/model.js';
-import { createOperationService, subscribeStateChanges, chatIdentity, chatPath } from '../shared/operations.js';
+import { createOperationService, subscribeStateChanges, chatIdentity } from '../shared/operations.js';
 
 const dependencies = [[KEY], [CHARACTERS_KEY]];
 const clone = value => structuredClone(value);
@@ -36,7 +37,7 @@ export function createInventoryService(getContext = () => globalThis.SillyTavern
     }
     function scope() {
         const ctx = getContext();
-        return { metadata: ctx?.chatMetadata, identity: chatIdentity(ctx), path: JSON.stringify(chatPath(ctx?.chat)), basis: JSON.stringify([ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[CHARACTERS_KEY]]) };
+        return { metadata: ctx?.chatMetadata, identity: chatIdentity(ctx), path: chatRevision(ctx?.chat), basis: JSON.stringify([ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[CHARACTERS_KEY]]) };
     }
     function sync() {
         if (disposed) return;

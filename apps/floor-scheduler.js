@@ -17,11 +17,13 @@ function relevant(record) {
 
 function createScheduler(document, getContext) {
     const view = document.defaultView ?? globalThis;
+    const surface = view.__TAURITAVERN__?.api?.chatSurface ?? globalThis.__TAURITAVERN__?.api?.chatSurface;
+    const managed = surface?.isManagedOwnershipRequired?.() === true;
     const requestFrame = view.requestAnimationFrame?.bind(view) ?? (fn => setTimeout(fn, 16));
     const cancelFrame = view.cancelAnimationFrame?.bind(view) ?? clearTimeout;
     const subscribers = new Set();
     let frame = null, disposed = false;
-    let floors = Array.from(document.querySelectorAll('#chat .mes[mesid]'));
+    let floors = managed ? [] : Array.from(document.querySelectorAll('#chat .mes[mesid]'));
     function deliver(subscriber) {
         try { subscriber.listener(floors); }
         catch (error) { console.error('[Amin os] Floor refresh failed:', error); }
@@ -31,11 +33,11 @@ function createScheduler(document, getContext) {
         frame = requestFrame(() => {
             frame = null;
             if (disposed) return;
-            floors = Array.from(document.querySelectorAll('#chat .mes[mesid]'));
+            if (!managed) floors = Array.from(document.querySelectorAll('#chat .mes[mesid]'));
             for (const subscriber of [...subscribers]) if (subscribers.has(subscriber)) deliver(subscriber);
         });
     }
-    const Observer = view.MutationObserver ?? globalThis.MutationObserver;
+    const Observer = managed ? null : view.MutationObserver ?? globalThis.MutationObserver;
     const observer = Observer ? new Observer(records => { if (records.some(relevant)) refresh(); }) : null;
     // Watching the body also catches a replaced #chat container and chats that
     // were not mounted when the first application subscribed.

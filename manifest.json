@@ -4,9 +4,10 @@
   "requires": [],
   "optional": [],
   "js": "index.js",
+  "hooks": { "chatSurface": "registerChatSurface" },
   "css": "style.css",
   "author": "agentgeleven-lab",
-    "version": "0.16.2",
+    "version": "0.16.3",
   "homePage": "https://github.com/agentgeleven-lab/amin-os",
   "auto_update": false
 }
