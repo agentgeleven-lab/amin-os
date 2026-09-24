@@ -23,6 +23,7 @@ import {
     emptyStore as emptySceneStore, readCurrentScene, transition as transitionScene,
 } from '../apps/scene/model.js';
 import { rollBatch, formatRoll } from '../apps/dice/engine.js';
+import { createState2Runtime } from '../apps/state2/runtime.js';
 
 const localFork = 'C:/Users/soh82/Documents/Codex/2026-09-14/referenced-chatgpt-conversation-this-is-an/work/LittleWhiteBox-AsyncPresets';
 const lwb = process.env.AMIN_LWB_PATH || localFork;
@@ -196,6 +197,39 @@ await engine.restoreStateV2ToFloor(1);
 const nativeStatusReplay = parse(statusOnly.chatMetadata.variables.状态栏 ?? '{}').项目?.HK416?.心智状态 === '稳定（严谨戒备）';
 if (strictReplay) assert.ok(nativeStatusReplay, 'Status root did not return at the migration floor.');
 
+// Model a newly opened branch whose metadata was copied from a later floor.
+// Amin's runtime must ask the real native engine to rewind first, then hydrate
+// an app view that was also stale at this branch's current path.
+const switched = { ...ctx, chatId: 'new-branch-lifecycle', chat: clone(ctx.chat), chatMetadata: clone(a.ctx.chatMetadata) };
+const staleCharacter = clone(readCharacters(switched));
+staleCharacter.characters[0].notes = '复制来的后续状态';
+switched.chatMetadata[CHARACTER_KEY] = appendCharacters(switched.chatMetadata[CHARACTER_KEY], switched.chat,
+    staleCharacter, { id: 'stale_branch_view', at: '2026-09-24T00:02:00Z' });
+assert.equal(readCharacters(switched).characters[0].notes, '复制来的后续状态');
+assert.equal(parse(switched.chatMetadata.variables[ROOTS.inventory]).items[0].quantity, 4);
+let nativeApplyCalls = 0;
+const replayCalls = [];
+const runtime = createState2Runtime(() => switched, {
+    interval: 0,
+    host: { LWB_StateV2: { applyText() { nativeApplyCalls++; throw Error('Amin must not execute a model state block.'); } } },
+    restoreNative: async floor => {
+        replayCalls.push(floor);
+        env.setContext(switched);
+        const result = await engine.restoreStateV2ToFloor(floor);
+        return { restored: result?.ok === true, stale: false, source: 'real-engine', result };
+    },
+});
+try {
+    await runtime.restoreChat();
+    assert.deepEqual(replayCalls, [1]);
+    assert.equal(runtime.ready(switched), true);
+    assert.equal(parse(switched.chatMetadata.variables[ROOTS.inventory]).items[0].quantity, 5);
+    assert.equal(parse(switched.chatMetadata.variables.状态栏).项目.HK416.心智状态, '稳定（严谨戒备）');
+    assert.equal(readCharacters(switched).characters[0].notes, '初始人物', 'Amin did not hydrate the branch app view after native replay.');
+    assert.equal(readInventory(switched).items[0].quantity, 5);
+    assert.equal(nativeApplyCalls, 0);
+} finally { runtime.destroy(); }
+
 // Dice rolls come from the local random generator. The native guard's $ro is
 // path-local, so separately inspect a nested set, delete and array append.
 // Regardless of native acceptance, Amin must refuse to project any such WAL.
@@ -229,9 +263,10 @@ assert.equal(b.ctx.chatMetadata.extensions.LittleWhiteBox.stateLogV2.floors['2']
 console.log(JSON.stringify({
     result: advancedReplay ? 'PASS' : 'PARTIAL',
     source: lwb, strictReplay,
-    checks: ['native migration', 'manual write checkpoint', 'real <state> changes', 'app hydration', 'floor replay', 'branch isolation', 'same-floor deduplication', 'trim ownership', 'unrelated variable preservation'],
+    checks: ['native migration', 'manual write checkpoint', 'real <state> changes', 'app hydration', 'floor replay', 'runtime branch restore', 'branch isolation', 'same-floor deduplication', 'trim ownership', 'unrelated variable preservation'],
     advancedReplay,
     nativeStatusReplay,
+    runtimeBranchReplay: true,
     diceGuard,
     limitations: [
         ...(!advancedReplay || !nativeStatusReplay ? ['This engine drops future checkpoints when restoring an earlier floor; migration baselines cannot replay.'] : []),

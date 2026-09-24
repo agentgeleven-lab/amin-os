@@ -3,7 +3,8 @@ import { acquireMetadataWrite, chatIdentity, createOperationService, metadataWri
 // History lives in chat metadata, never in the model-facing variable namespace.
 export const HISTORY_KEY = 'world_status_hud_history_v1';
 const copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
-export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {}, historyKey = HISTORY_KEY, messageKey = 'wsh_message_id', allowGroups = false }) {
+export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {}, historyKey = HISTORY_KEY, messageKey = 'wsh_message_id', allowGroups = false,
+  nativeState = () => ({ managed: false, ready: true }) }) {
   let metadata, chatId, previous = [], lastValue, blocked = false;
   let queuedSave = null, saving = false, syncing = 0, suppressSaves = 0;
   const listeners = new Set();
@@ -28,6 +29,8 @@ export function createHistory({ context, read, write, changed = () => {}, before
     if (!queuedSave || saving || syncing) return;
     const c = context();
     if (c?.chatMetadata !== queuedSave.metadata || chatIdentity(c) !== queuedSave.identity) return;
+    const native = nativeState();
+    if (native?.managed && !native.ready) return;
     const state = metadataWriteStatus(context);
     if (state.busy || state.dirty) return;
     let release;
@@ -63,6 +66,10 @@ export function createHistory({ context, read, write, changed = () => {}, before
   function syncCurrent() {
     const c = context();
     if (!c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return;
+    const native = nativeState();
+    // LittleWhiteBox may still be replaying a copied branch. Recording now
+    // would stamp a future value onto an older floor.
+    if (native?.managed && !native.ready) return;
     const switched = metadata !== c.chatMetadata || chatId !== c.getCurrentChatId();
     if (switched) { metadata = c.chatMetadata; chatId = c.getCurrentChatId(); previous = []; lastValue = undefined; blocked = false; }
     const store = metadata[historyKey] ||= { records: {} };
@@ -70,7 +77,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
     const tail = now.at(-1);
     const truncated = !switched && now.length < previous.length && now.every((m, i) => m.id === previous[i].id);
     const swipe = !switched && tail && previous.length === now.length && tail.id === previous.at(-1)?.id && tail.variant !== previous.at(-1)?.variant;
-    if (truncated || swipe) {
+    if (!native?.managed && (truncated || swipe)) {
       beforeRestore();
       const record = tail && store.records[key(tail)];
       if (record) { write(copy(record.state)); blocked = false; }
@@ -87,6 +94,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
     try { value = copy(read()); } catch { previous = now; return; }
     const serialized = JSON.stringify(value);
     const moved = switched || key(tail || {}) !== key(previous.at(-1) || {});
+    if (native?.managed) blocked = false;
     if (blocked && value !== null) blocked = false;
     if (tail && !blocked && (moved || serialized !== lastValue)) {
       store.records[key(tail)] = { state: value, savedAt: Date.now() };
@@ -109,6 +117,8 @@ export function createHistory({ context, read, write, changed = () => {}, before
   function adoptExternal() {
     const c = context();
     if (!c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return false;
+    const native = nativeState();
+    if (native?.managed && !native.ready) return false;
     // Read before changing the observer. A malformed external value must not
     // silently replace an existing record or erase the previous observation.
     const value = copy(read()), serialized = JSON.stringify(value);

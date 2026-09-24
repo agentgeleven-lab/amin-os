@@ -7,12 +7,12 @@ import { KEY as PERSON_KEY, emptyStore, appendSnapshot, readCharacters, readStor
 import { createOperationService } from '../apps/shared/operations.js';
 const person={id:'alice',name:'Alice',kind:'npc',notes:'',stats:[]};
 const parse=v=>typeof v==='string'?JSON.parse(v):v;
-function fixture(){
+function fixture(options={}){
     let calls=0,saves=0,fail=false;
     const ctx={chatId:'branch',getCurrentChatId(){return this.chatId;},chat:[{is_user:true,name:'User',mes:'start'}],characterId:0,characters:[{avatar:'fixture.png'}],extensionSettings:{LittleWhiteBox:{variablesMode:'2.0'}},chatMetadata:{variables:{other:'keep'},[KEY]:{...emptyLinkageState(),enabled:true,modules:{characters:{enabled:true,read:true,write:true}}}},saveMetadata:async()=>{saves++;if(fail)throw Error('offline');},saveMetadataDebounced(){}};
     ctx.chatMetadata[PERSON_KEY]=appendSnapshot(emptyStore(),ctx.chat,{version:1,characters:[person]},{id:'initial',at:'2026-09-24T00:00:00Z'});
     const logs=[],host={LWB_StateV2:{applyText(){calls++;throw Error('must never execute AI state twice');}}};
-    const runtime=createState2Runtime(()=>ctx,{host,interval:0,report:text=>logs.push(text)});
+    const runtime=createState2Runtime(()=>ctx,{host,interval:0,report:text=>logs.push(text),...options});
     return {ctx,runtime,logs,get calls(){return calls;},get saves(){return saves;},set fail(v){fail=v;}};
 }
 test('native runtime migrates, follows variables, and never executes model updates itself',async()=>{
@@ -52,4 +52,61 @@ test('empty-chat migration reports the unmet baseline instead of claiming succes
         assert.equal(f.runtime.status().migrated, false);
         assert.equal(f.saves, 0);
     } finally { f.runtime.destroy(); }
+});
+
+test('branch hydration waits for native replay instead of copying future variables', async () => {
+    let finish, restores = 0;
+    const f = fixture({ restoreNative: async (floor, { context }) => {
+        restores++;
+        assert.equal(floor, 0);
+        await new Promise(resolve => { finish = resolve; });
+        const ctx = context();
+        ctx.chatMetadata.variables[ROOTS.characters] = ctx.chatMetadata.extensions.LittleWhiteBox.stateCkptV2.points['0'].vars[ROOTS.characters];
+        return { restored: true, stale: false };
+    } });
+    const op = createOperationService(() => f.ctx);
+    try {
+        await f.runtime.migrate();
+        f.ctx.chat.push({ is_user: false, mes: 'future' });
+        const next = parse(f.ctx.chatMetadata.variables[ROOTS.characters]);
+        next.characters[0].name = 'Future';
+        f.ctx.chatMetadata.variables[ROOTS.characters] = JSON.stringify(next);
+        f.runtime.sync();
+        f.ctx.chatMetadata = structuredClone(f.ctx.chatMetadata);
+        f.ctx.chatId = 'earlier-branch'; f.ctx.chat.pop();
+        const pending = f.runtime.restoreChat();
+        assert.equal(f.runtime.ready(), false);
+        assert.equal(f.runtime.sync(), false);
+        assert.throws(() => op.capture([[PERSON_KEY]]), /尚未恢复/);
+        assert.equal(parse(f.ctx.chatMetadata.variables[ROOTS.characters]).characters[0].name, 'Future');
+        finish(); await pending;
+        assert.equal(f.runtime.ready(), true);
+        assert.equal(readCharacters(f.ctx).characters[0].name, 'Alice');
+        f.runtime.sync(); f.runtime.sync();
+        assert.equal(restores, 1);
+        assert.equal(f.calls, 0);
+    } finally { op.dispose(); f.runtime.destroy(); }
+});
+
+test('failed native replay blocks hydration and reports a recoverable error', async () => {
+    const f = fixture({ restoreNative: async () => { throw Error('missing native module'); } });
+    try {
+        await f.runtime.migrate();
+        f.ctx.chatMetadata = structuredClone(f.ctx.chatMetadata); f.ctx.chatId = 'branch';
+        const before = structuredClone(f.ctx.chatMetadata);
+        await f.runtime.restoreChat();
+        assert.equal(f.runtime.ready(), false);
+        assert.equal(f.runtime.sync(), false);
+        assert.deepEqual(f.ctx.chatMetadata, before);
+        assert.match(f.runtime.status().message, /missing native module/);
+    } finally { f.runtime.destroy(); }
+});
+
+test('read-free save leases do not serialize native checkpoints into their tokens', async () => {
+    const f = fixture(), op = createOperationService(() => f.ctx);
+    try {
+        await f.runtime.migrate();
+        assert.deepEqual(op.capture().paths, []);
+        assert.ok(op.capture([[PERSON_KEY]]).paths.some(path => path[0] === 'extensions'));
+    } finally { op.dispose(); f.runtime.destroy(); }
 });

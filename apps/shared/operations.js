@@ -125,7 +125,7 @@ function currentContext(getContext) {
     return ctx;
 }
 function makeToken(ctx, paths) {
-    if (patchDependencies) paths = distinctPaths([...paths, ...patchDependencies(ctx)]);
+    if (patchDependencies) paths = distinctPaths([...paths, ...patchDependencies(ctx, paths)]);
     const data = { metadata: ctx.chatMetadata, identity: chatIdentity(ctx), path: JSON.stringify(chatPath(ctx.chat)), paths, bases: paths.map(path => basis(ctx.chatMetadata, path)) };
     const token = Object.freeze({ metadata: data.metadata, identity: data.identity, path: data.path, paths: Object.freeze(paths.map(path => Object.freeze([...path]))), bases: Object.freeze([...data.bases]) });
     tokens.set(token, data); return token;

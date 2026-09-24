@@ -300,13 +300,19 @@ export function projectState2(ctx) {
     const status = nativeState2Status(ctx);
     if (!status.migrated || !status.enabled) return { patches: [], changed: [] };
     assertNativeUpdateScope(ctx);
-    const current = materialize(ctx), canonical = canonicalSnapshots(ctx, current), shadow = shadowOf(ctx), patches = [], changed = [];
-    const at = new Date().toISOString();
+    const current = materialize(ctx), canonical = canonicalSnapshots(ctx, current), desired = new Map();
     for (const module of ORDER) {
-        const latest = materialize(shadow)[module] ?? emptySnapshot(module, current[module]);
-        const desired = withLocalSettings(module, canonical[module], latest);
-        if (same(storySnapshot(module, latest), storySnapshot(module, desired))) continue;
-        const generated = restoreOne(shadow, module, desired, at);
+        const latest = current[module] ?? emptySnapshot(module, current[module]);
+        const target = withLocalSettings(module, canonical[module], latest);
+        if (!same(storySnapshot(module, latest), storySnapshot(module, target))) desired.set(module, target);
+    }
+    // History navigation calls this repeatedly. Nothing changed: avoid cloning
+    // the whole chat metadata (including LWB checkpoints) or rebuilding views.
+    if (!desired.size) return { patches: [], changed: [] };
+    const shadow = shadowOf(ctx), patches = [], changed = [];
+    const at = new Date().toISOString();
+    for (const [module, target] of desired) {
+        const generated = restoreOne(shadow, module, target, at);
         for (const patch of generated) { applyPatch(shadow.chatMetadata, patch); patches.push(patch); }
         changed.push(module);
     }

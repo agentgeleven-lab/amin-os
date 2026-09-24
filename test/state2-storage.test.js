@@ -77,6 +77,18 @@ test('story variables exclude app configuration and projection keeps it', () => 
     assert.deepEqual(materialize(ctx).scene.periods, [{ name: '昼', startMinute: 0 }]);
 });
 
+test('repeated unchanged projection skips cloning unrelated checkpoint metadata', () => {
+    const ctx = migrated();
+    // The extra host field is irrelevant to app state and cannot be cloned.
+    // A no-change history poll must not clone the complete metadata object.
+    ctx.chatMetadata.hostCallback = () => {};
+    for (let i = 0; i < 4; i++) assert.deepEqual(projectState2(ctx), { patches: [], changed: [] });
+    delete ctx.chatMetadata.hostCallback;
+    const next = parse(ctx.chatMetadata.variables[ROOTS.characters]); next.characters[0].notes = 'new floor';
+    ctx.chatMetadata.variables[ROOTS.characters] = JSON.stringify(next);
+    assert.deepEqual(projectState2(ctx).changed, ['characters']);
+});
+
 test('missing native root after rollback projects empty story instead of stale metadata', () => {
     const ctx = migrated();
     delete ctx.chatMetadata.variables[ROOTS.characters];

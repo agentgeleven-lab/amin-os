@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHistory, HISTORY_KEY } from '../apps/status/history.js';
 import { acquireMetadataWrite, createOperationService, metadataWriteStatus, subscribeStateChanges } from '../apps/shared/operations.js';
+import { createStore as createOrganizations, META } from '../apps/organizations/service.js';
+import { ROOT as ORGANIZATIONS_ROOT, empty as emptyOrganizations, entity as organizationEntity } from '../apps/organizations/model.js';
 
 function fixture(options = {}) {
     let state = { hp: 8 }, saves = 0, chatSaves = 0, writes = 0, restores = 0, changed = 0;
@@ -39,6 +41,58 @@ test('unobserved truncation followed by adoption establishes the explicit restor
     t.history.adoptExternal(); t.history.sync();
     assert.deepEqual(t.state, { hp: 99 }); assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0'].state, { hp: 99 });
     assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m2:0'], second); assert.equal(t.saves, saves); assert.equal(t.restores, 0);
+});
+
+test('native history waits for branch replay and never stamps a copied future value onto the older floor', () => {
+    const mode = { managed: true, ready: true }, t = fixture({ nativeState: () => mode });
+    t.history.sync();
+    t.ctx.chat.push({ mes: '第二楼', extra: { wsh_message_id: 'm2' } });
+    t.state = { hp: 4 }; t.history.sync();
+    const old = structuredClone(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0']);
+    t.ctx.chat.pop(); t.state = { hp: 99 }; mode.ready = false;
+    const saves = t.saves;
+    t.history.sync(); assert.equal(t.history.adoptExternal(), false);
+    assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0'], old);
+    assert.equal(t.saves, saves); assert.equal(t.writes, 0); assert.equal(t.restores, 0);
+    mode.ready = true; t.state = { hp: 7 }; t.history.sync();
+    assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0'].state, { hp: 7 });
+    assert.equal(t.writes, 0); assert.equal(t.restores, 0);
+    t.history.dispose();
+});
+
+test('native swipe records the replayed variable without restoring legacy snapshots', () => {
+    const mode = { managed: true, ready: true }, t = fixture({ nativeState: () => mode });
+    t.history.sync(); t.ctx.chat[0].swipe_id = 1;
+    t.state = { hp: 3 }; t.history.sync();
+    assert.deepEqual(t.state, { hp: 3 });
+    assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m1:1'].state, { hp: 3 });
+    assert.equal(t.writes, 0); assert.equal(t.restores, 0);
+    t.history.dispose();
+});
+
+test('native organization replay waits for the branch and cannot restore a locked future document', () => {
+    const mode = { managed: true, ready: true };
+    const first = emptyOrganizations(); first.organizations.a = organizationEntity('organizations', '旧名');
+    const ctx = { chatMetadata: { variables: { [ORGANIZATIONS_ROOT]: JSON.stringify(first) }, [META]: { locks: [], assessment: null, backups: [] } },
+        chat: [{ mes: '第一楼', extra: { amin_org_message_id: 'm1' } }], getCurrentChatId: () => 'a', saveMetadata: async () => {}, saveChat: async () => {} };
+    let variableWrites = 0;
+    const api = createOrganizations({ context: () => ctx, setVariable: (key, value) => { variableWrites++; ctx.chatMetadata.variables[key] = value; },
+        nativeState: () => mode });
+    ctx.chat.push({ mes: '第二楼', extra: { amin_org_message_id: 'm2' } });
+    const future = structuredClone(first); future.organizations.a.name = '未来名';
+    ctx.chatMetadata.variables[ORGANIZATIONS_ROOT] = JSON.stringify(future); api.sync();
+    ctx.chatMetadata[META].locks = ['organizations.a.name']; api.sync();
+    ctx.chat.pop(); mode.ready = false; api.sync();
+    assert.throws(() => api.capture(), /正在恢复/);
+    assert.equal(variableWrites, 0);
+    assert.equal(api.history()[0].state.doc.organizations.a.name, '旧名');
+    const branch = structuredClone(first); branch.organizations.a.name = '分支名';
+    ctx.chatMetadata.variables[ORGANIZATIONS_ROOT] = JSON.stringify(branch);
+    mode.ready = true; api.sync();
+    assert.equal(api.read().organizations.a.name, '分支名');
+    assert.equal(api.history()[0].state.doc.organizations.a.name, '分支名');
+    assert.equal(variableWrites, 0);
+    api.dispose();
 });
 
 test('external adoption clears a previous missing-history block and supports an explicit null value', () => {

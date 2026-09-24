@@ -15,6 +15,7 @@ import { setLocalVariable } from '/scripts/variables.js';
 import { mount as mountLinkage } from '../linkage/view.js';
 import { getSharedService as getLinkageService } from '../linkage/service.js';
 import { managesModule } from '../linkage/policy.js';
+import { state2HistoryMode } from '../state2/runtime.js';
 
 const KEY = 'world_status_hud_v1';
 const context = () => SillyTavern.getContext();
@@ -66,7 +67,8 @@ function parseState(raw) {
 }
 const history = createHistory({ context, read: () => parseState(context().chatMetadata.variables?.状态栏),
   write: value => { if (value === null) { delete context().chatMetadata.variables?.状态栏; } else setLocalVariable('状态栏', JSON.stringify(value)); },
-  beforeRestore: () => { running?.abort(); closeHud(); }, warn: message => notify(message, true) });
+  beforeRestore: () => { running?.abort(); closeHud(); }, warn: message => notify(message, true),
+  nativeState: () => state2HistoryMode(context()) });
 const floorButtons = installFloorButtons({ history, node, context, enabled: () => getSettings().floorButtons,
   openWorkbench:(target,{page,onClose,validate})=>showHud(page,{target,onClose,validate}) });
 async function persistStatusChange(write) {
@@ -83,7 +85,10 @@ function createDisplaySettings() {
   const page = node('section', undefined, 'wsh-generation-page');
   const label = node('label', '在楼层工具栏显示世界状态入口'); const input = node('input'); input.type = 'checkbox'; input.checked = getSettings().floorButtons;
   input.onchange = () => { context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], floorButtons: input.checked }; context().saveSettingsDebounced(); floorButtons.refresh(); };
-  label.append(input); page.append(node('h3', '显示与记录设置'), label, node('p', '最新楼层打开当前状态工作台，旧楼层打开只读记录。楼层记录随当前聊天自动保存。'), node('p', '翻页仅浏览；删除后续消息、回退剧情时才恢复末尾楼层的变量。没有记录的旧楼层不会自动推测数值。'));
+  const historyNote = state2HistoryMode(context()).managed
+    ? '小白X变量 2.0 负责分支和楼层回放；楼层记录只显示已回放的变量值。'
+    : '翻页仅浏览；删除后续消息、回退剧情时才恢复末尾楼层的变量。没有记录的旧楼层不会自动推测数值。';
+  label.append(input); page.append(node('h3', '显示与记录设置'), label, node('p', '最新楼层打开当前状态工作台，旧楼层打开只读记录。楼层记录随当前聊天自动保存。'), node('p', historyNote));
   const appearanceLink=node('button','打开设置 · 统一外观','menu_button');appearanceLink.type='button';appearanceLink.onclick=()=>globalThis.AminOS?.openApp('settings');page.append(appearanceLink,createLorebookControl());
   return page;
 }
