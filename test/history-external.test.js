@@ -110,12 +110,89 @@ test('new chat and empty chat synchronize observers without replay or metadata s
     assert.deepEqual(t.history.list(), []); assert.equal(t.writes, 0); assert.equal(t.saves, saves); assert.deepEqual(old[HISTORY_KEY].records['m1:0'].state, { hp: 8 });
 });
 
-test('new message IDs are saved to chat after observer adoption and reentrant sync cannot restore stale state', () => {
+test('adopted IDs wait for a real update before saveChat and reentrant sync cannot restore stale state', async () => {
     const t = fixture(); t.history.sync(); t.ctx.chat[0].swipe_id = 1; delete t.ctx.chat[0].extra.wsh_message_id;
     let savesChat = 0; t.ctx.saveChat = () => { savesChat++; t.history.sync(); return Promise.resolve(); }; t.state = { hp: 22 };
     const saves = t.saves; t.history.adoptExternal();
-    assert.equal(savesChat, 1); assert.equal(t.writes, 0); assert.equal(t.saves, saves); assert.equal(typeof t.ctx.chat[0].extra.wsh_message_id, 'string');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(savesChat, 0); assert.equal(t.writes, 0); assert.equal(t.saves, saves); assert.equal(typeof t.ctx.chat[0].extra.wsh_message_id, 'string');
     assert.deepEqual(t.history.list()[0].state, { hp: 22 });
+    t.ctx.chat.push({ mes: '新楼层', extra: {} }); t.state = { hp: 23 }; t.history.sync();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(savesChat, 1); assert.equal(t.writes, 0); assert.equal(t.saves, saves);
+    t.history.dispose();
+});
+
+test('reopening a recorded chat preserves its history timestamp without another host save', async () => {
+    const t = fixture();
+    t.history.sync(); await new Promise(resolve => setImmediate(resolve));
+    const first = structuredClone(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0']);
+    const saves = t.saves, chatSaves = t.chatSaves, original = t.ctx;
+    t.ctx = { ...original, chatMetadata: {}, chat: [], getCurrentChatId: () => 'other' };
+    t.history.sync();
+    t.ctx = original; t.history.sync(); await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0'], first);
+    assert.equal(t.saves, saves); assert.equal(t.chatSaves, chatSaves);
+    t.history.dispose();
+});
+
+test('rapidly observing chats without floor IDs does not start host saves', async () => {
+    const t = fixture(); delete t.ctx.chat[0].extra.wsh_message_id;
+    const first = t.ctx;
+    const second = { chatMetadata: {}, chat: [{ mes: '另一聊天', extra: {} }],
+        getCurrentChatId: () => 'b', saveChat: async () => { throw Error('unexpected chat save'); },
+        saveMetadata: async () => { throw Error('unexpected metadata save'); } };
+    for (let i = 0; i < 8; i++) {
+        t.ctx = i % 2 ? second : first;
+        t.state = { hp: i % 2 ? 3 : 8 };
+        t.history.sync();
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(t.saves, 0); assert.equal(t.chatSaves, 0);
+    assert.equal(typeof first.chat[0].extra.wsh_message_id, 'string');
+    assert.equal(typeof second.chat[0].extra.wsh_message_id, 'string');
+    t.history.dispose();
+});
+
+test('a real update with newly assigned IDs uses one full chat save carrying its history', async () => {
+    const t = fixture(); delete t.ctx.chat[0].extra.wsh_message_id;
+    let fullSaves = 0, snapshot;
+    t.ctx.saveChat = async () => { fullSaves++; snapshot = structuredClone(t.ctx.chatMetadata); };
+    t.history.sync(); assert.equal(fullSaves, 0); assert.equal(t.saves, 0);
+    t.ctx.chat.push({ mes: '新楼层', extra: {} }); t.state = { hp: 14 }; t.history.sync();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(fullSaves, 1); assert.equal(t.saves, 0);
+    const id = t.ctx.chat.at(-1).extra.wsh_message_id;
+    assert.deepEqual(snapshot[HISTORY_KEY].records[id + ':0'].state, { hp: 14 });
+    t.history.dispose();
+});
+
+test('adopted floor IDs do not start a save, then a real update queues behind a competing lease', async () => {
+    const t = fixture(); t.history.sync(); await new Promise(resolve => setImmediate(resolve));
+    delete t.ctx.chat[0].extra.wsh_message_id;
+    const saves = t.saves, release = acquireMetadataWrite(t.context);
+    t.state = { hp: 21 }; assert.equal(t.history.adoptExternal(), true);
+    assert.equal(t.chatSaves, 0); assert.equal(t.saves, saves);
+    release(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(t.chatSaves, 0); assert.equal(t.saves, saves);
+    assert.deepEqual(t.history.list()[0].state, { hp: 21 });
+    const held = acquireMetadataWrite(t.context);
+    t.ctx.chat.push({ mes: '新楼层', extra: {} }); t.state = { hp: 22 }; t.history.sync();
+    assert.equal(t.chatSaves, 0); assert.equal(t.saves, saves);
+    held(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(t.chatSaves, 1); assert.equal(t.saves, saves);
+    t.history.dispose();
+});
+
+test('persist false leaves floor ID and history persistence to the owning writer', async () => {
+    const t = fixture(); t.history.sync(); await new Promise(resolve => setImmediate(resolve));
+    const saves = t.saves;
+    delete t.ctx.chat[0].extra.wsh_message_id;
+    t.state = { hp: 24 }; t.history.sync({ persist: false });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(t.saves, saves); assert.equal(t.chatSaves, 0);
+    assert.deepEqual(t.history.list()[0].state, { hp: 24 });
+    t.history.dispose();
 });
 
 test('external state operation and adopted history are captured by the same single metadata save', async () => {
@@ -162,7 +239,7 @@ test('a pending history autosave holds the shared lease and blocks a later cross
     t.ctx.saveMetadata = () => new Promise(resolve => { complete = resolve; });
     const operations = createOperationService(t.context);
     operations.stage({ label: '角色', patches: [{ path: ['amin_os_characters_v1'], value: { version: 1 } }] });
-    t.history.sync(); assert.equal(metadataWriteStatus(t.context).busy, true);
+    t.history.sync(); t.state = { hp: 9 }; t.history.sync(); assert.equal(metadataWriteStatus(t.context).busy, true);
     await assert.rejects(operations.confirm(), error => error.code === 'BUSY');
     complete(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(metadataWriteStatus(t.context).busy, false);
@@ -188,7 +265,7 @@ test('native reconciliation during history lock acquisition cannot reenter autos
     const { registerOperationPatchExpansion } = await import('../apps/shared/operations.js');
     const warnings = [], t = fixture({ warn: value => warnings.push(value) });
     const release = acquireMetadataWrite(t.context);
-    t.history.sync();
+    t.history.sync(); t.state = { hp: 9 }; t.history.sync();
     let reconciled = false;
     const off = registerOperationPatchExpansion((_ctx, patches) => patches, null, () => {
         if (reconciled) return;
@@ -210,7 +287,7 @@ test('history still reports real persistence failures and releases the save lock
     const warnings = [], t = fixture({ warn: value => warnings.push(value) });
     t.ctx.saveMetadata = async () => { throw Error('network offline'); };
     try {
-        t.history.sync();
+        t.history.sync(); t.state = { hp: 9 }; t.history.sync();
         await new Promise(resolve => setImmediate(resolve));
         assert.deepEqual(warnings, ['楼层记录保存失败：network offline']);
         assert.equal(metadataWriteStatus(t.context).busy, false);

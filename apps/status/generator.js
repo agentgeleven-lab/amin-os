@@ -1,3 +1,4 @@
+import { saveChatMetadata } from '../shared/chat-save.js';
 import {collectStatusSources,readStatusPersona,requireStatusPersona} from './sources.js';
 import {readStatusChat, requireStatusChat} from './chat-context.js';
 import {canChangeType} from './type-permission.js';
@@ -220,7 +221,7 @@ try {
   checkpointState(ctx);
   if (!equal(readState(), finalState)) throw Error('本地写入后校验失败，请检查变量面板及生成前备份。');
   // setLocalVariable 本身会安排酒馆保存；此处主动等待当前聊天元数据保存。
-  try { await ctx.saveMetadata(); }
+  try { await saveChatMetadata(ctx); }
   catch { throw Error('变量已写入内存，但聊天保存失败。请保持当前聊天并重试保存；备份仍在变量面板。'); }
   guard();
   window.toastr?.success((CONFIG.mode === 'update' ? '状态栏已更新：' : '状态栏已生成：新增/生成 ') + added + ' 个变量，前端刷新即可显示。');

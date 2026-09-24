@@ -1,4 +1,5 @@
 import { uuid } from '../../../../uuid.js';
+import { isChatReady } from '../../../shared/chat-lifecycle.js';
 import { managesModule } from '../../../linkage/policy.js';
 import { chatIdentity, STORAGE_KEY } from '../adapters/chat.js';
 import { mapPath } from '../core/hierarchy.js';
@@ -58,7 +59,7 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
   }
  }
  async function sync(){
-  if(stopped||busy||persistence.suspended?.())return;busy=true;
+  if(stopped||busy||!isChatReady(getContext())||persistence.suspended?.())return;busy=true;
   try{
    const ctx=bound();if(!ctx){report('尚未保存聊天地图，不发布示例数据');return;}
    if(metadata!==ctx.chatMetadata){metadata=ctx.chatMetadata;previous=metadata[HISTORY_KEY]?.sequence??[];movement='';lastRequest=JSON.stringify(metadata.variables?.地图移动请求);}

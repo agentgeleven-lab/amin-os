@@ -1,4 +1,5 @@
 import { initializeState2 } from './apps/state2/runtime.js';
+import { initializeChatLifecycle } from './apps/shared/chat-lifecycle.js';
 import { uuid } from './uuid.js';
 import {cleanupRetiredData} from './retired-data.js';
 import {installExtraFloorButtons} from './apps/extra-floor-ui.js';
@@ -22,6 +23,7 @@ export function initialize() {
     if(instance)return instance;
     const ctx=globalThis.SillyTavern?.getContext?.();
     if(!ctx?.extensionSettings)return;
+    initializeChatLifecycle(() => globalThis.SillyTavern?.getContext?.());
     const existing = [];
     if(globalThis.SillyTavernDynamicMap || document.querySelector('.dynamic-map-panel'))existing.push('动态地图');
     if(document.getElementById('wsh-launcher'))existing.push('世界状态栏');
@@ -85,7 +87,7 @@ export function initialize() {
     for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.16.4',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.16.5',open:()=>shell.open(),openApp:id=>shell.showApp(id),openRewrite:async(text,identity)=>{const result=await ready.reply;if(result.error)throw result.error;result.value.acceptSource(text,identity);await shell.showApp('reply');},close:()=>shell.close()});
     return shell;
 }
 

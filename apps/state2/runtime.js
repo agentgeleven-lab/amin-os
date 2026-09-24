@@ -1,5 +1,6 @@
 import { migrateState2, projectState2, manualState2Patches, ROOTS, MIGRATION_KEY, nativeState2Status as storageStatus, prepareState2ManualWrite as prepareManual } from './storage.js';
 import { restoreNativeState2ToFloor } from './native-bridge.js';
+import { isChatReady } from '../shared/chat-lifecycle.js';
 import { createOperationService, registerOperationPatchExpansion, metadataWriteStatus, acquireMetadataWrite, captureContext, publishExternalMetadataChange, chatIdentity, chatPath } from '../shared/operations.js';
 export function prepareState2ManualWrite(ctx, paths) {
     if (shared && storageStatus(ctx).migrated && !shared.ready(ctx)) throw Error('正在恢复当前聊天的楼层变量，请等待恢复完成。');
@@ -51,7 +52,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         if (storageStatus(ctx).migrated && !ready(ctx)) throw Error('当前聊天的楼层变量尚未恢复完成，请稍后重试。');
     });
     const sameChat = ctx => activeMetadata === ctx?.chatMetadata && activeIdentity === chatIdentity(ctx);
-    function ready(ctx = getContext()) { return !storageStatus(ctx).migrated || sameChat(ctx) && settled && !restoring && !restoreFailed; }
+    function ready(ctx = getContext()) { return isChatReady(ctx) && (!storageStatus(ctx).migrated || sameChat(ctx) && settled && !restoring && !restoreFailed); }
     function signature(ctx) {
         const tail = ctx.chat?.at(-1), meta = ctx.chatMetadata;
         return JSON.stringify([ctx.chat?.length, tail?.mes, tail?.swipe_id,
@@ -60,7 +61,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     }
     async function restoreChat() {
         const ctx = getContext();
-        if (!ctx?.chatMetadata || !storageStatus(ctx).migrated || disposed) return;
+        if (!isChatReady(ctx) || !ctx?.chatMetadata || !storageStatus(ctx).migrated || disposed) return;
         if (sameChat(ctx) && restoring) return restoreTask;
         activeMetadata = ctx.chatMetadata; activeIdentity = chatIdentity(ctx);
         settled = false; restoreFailed = false; cached = null;
@@ -100,7 +101,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     function sync() {
         if (disposed || projecting || migrating) return false;
         const ctx=getContext();
-        if (!ctx?.chatMetadata || !storageStatus(ctx).migrated) return false;
+        if (!isChatReady(ctx) || !ctx?.chatMetadata || !storageStatus(ctx).migrated) return false;
         if (!sameChat(ctx) || !settled && !restoring && !restoreFailed) { void restoreChat(); return false; }
         if (!ready(ctx)) return false;
         const lock = metadataWriteStatus(getContext);
@@ -120,7 +121,8 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 // These are validated derived app views only. Never write native roots while replaying.
                 setPatches(ctx.chatMetadata,result.patches);
                 publishExternalMetadataChange(getContext,result.patches.map(p=>p.path));
-                ctx.saveMetadataDebounced?.();
+                // Derived views are reconstructible from native variables. Reading
+                // a chat must not schedule a delayed write into another chat.
             } finally { projecting=false;release(); }
             cached = currentSignature;
             say('已从小白变量 2.0 同步应用窗口；变量是当前剧情状态来源。');

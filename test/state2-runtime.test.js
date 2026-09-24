@@ -110,3 +110,17 @@ test('read-free save leases do not serialize native checkpoints into their token
         assert.ok(op.capture([[PERSON_KEY]]).paths.some(path => path[0] === 'extensions'));
     } finally { op.dispose(); f.runtime.destroy(); }
 });
+
+
+test('projecting native variables updates derived views without scheduling a host save',async()=>{
+    const f=fixture();let delayed=0;f.ctx.saveMetadataDebounced=()=>{delayed++;};
+    try{
+        await f.runtime.prepareGeneration();
+        const before=f.saves, state=parse(f.ctx.chatMetadata.variables[ROOTS.characters]);
+        state.characters[0].name='Native display';
+        f.ctx.chatMetadata.variables[ROOTS.characters]=JSON.stringify(state);
+        assert.equal(f.runtime.sync(),true);
+        assert.equal(readCharacters(f.ctx).characters[0].name,'Native display');
+        assert.equal(delayed,0);assert.equal(f.saves,before);
+    }finally{f.runtime.destroy();}
+});

@@ -1,19 +1,22 @@
 import { uuid } from '../../uuid.js';
 import { acquireMetadataWrite, chatIdentity, createOperationService, metadataWriteStatus } from '../shared/operations.js';
+import { isChatReady } from '../shared/chat-lifecycle.js';
+import { markChatIdsDirty, saveChatMetadata } from '../shared/chat-save.js';
 // History lives in chat metadata, never in the model-facing variable namespace.
 export const HISTORY_KEY = 'world_status_hud_history_v1';
 const copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
 export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {}, historyKey = HISTORY_KEY, messageKey = 'wsh_message_id', allowGroups = false,
   nativeState = () => ({ managed: false, ready: true }) }) {
   let metadata, chatId, previous = [], lastValue, blocked = false;
-  let queuedSave = null, saving = false, syncing = 0, suppressSaves = 0;
+  let queuedSave = null, pendingIds = null, saving = false, syncing = 0, suppressSaves = 0;
   const listeners = new Set();
   const saveGate = createOperationService(context);
   const offSaveGate = saveGate.subscribe(flushSave);
   const emit = () => { changed(); for (const fn of listeners) fn(); };
   function messages(beforeSave) {
+    const c = context();
     let assigned = false;
-    const result = (context().chat || []).map(m => {
+    const result = (c.chat || []).map(m => {
       m.extra ||= {};
       if (!m.extra[messageKey]) { m.extra[messageKey] = uuid(); assigned = true; }
       return { id: m.extra[messageKey], variant: String(m.swipe_id ?? 0), message: m };
@@ -21,14 +24,38 @@ export function createHistory({ context, read, write, changed = () => {}, before
     // External atomic operations update the observer before saveChat can emit a
     // synchronous host event and call sync again.
     beforeSave?.(result);
-    if (assigned) Promise.resolve(context().saveChat?.()).catch(e => warn('楼层标识保存失败：' + e.message));
+    // Newly observed chats are only cached in memory. Their history can be
+    // rebuilt from the authoritative variables if the user switches away.
+    if (assigned) {
+      pendingIds = { metadata: c.chatMetadata, identity: chatIdentity(c) };
+      markChatIdsDirty(c);
+    }
     return result;
   }
   const key = m => m.id + ':' + m.variant;
+  function queueSave(kind) {
+    if (suppressSaves) return;
+    const c = context();
+    if (!isChatReady(c)) return;
+    const identity = chatIdentity(c);
+    if (!queuedSave || queuedSave.metadata !== c.chatMetadata || queuedSave.identity !== identity) {
+      queuedSave = { metadata: c.chatMetadata, identity, chat: false, metadataSave: false };
+    }
+    if (kind === 'chat') { queuedSave.chat = true; queuedSave.idsMark = pendingIds; }
+    else queuedSave.metadataSave = true;
+    saveGate.capture();
+    flushSave();
+  }
+  function savePendingIds() {
+    const c = context();
+    if (pendingIds?.metadata === c.chatMetadata && pendingIds.identity === chatIdentity(c) && typeof c.saveChat === 'function') {
+      queueSave('chat');
+    }
+  }
   function flushSave() {
     if (!queuedSave || saving || syncing) return;
     const c = context();
-    if (c?.chatMetadata !== queuedSave.metadata || chatIdentity(c) !== queuedSave.identity) return;
+    if (!isChatReady(c) || c?.chatMetadata !== queuedSave.metadata || chatIdentity(c) !== queuedSave.identity) return;
     const native = nativeState();
     if (native?.managed && !native.ready) return;
     const state = metadataWriteStatus(context);
@@ -44,19 +71,25 @@ export function createHistory({ context, read, write, changed = () => {}, before
       if (!['BUSY', 'DIRTY'].includes(error.code)) warn('楼层记录保存失败：' + error.message);
       return;
     }
+    const pending = queuedSave;
     queuedSave = null;
     const finish = () => { saving = false; release(); flushSave(); };
-    try {
-      Promise.resolve(c.saveMetadata()).catch(error => warn('楼层记录保存失败：' + error.message)).finally(finish);
-    } catch (error) { warn('楼层记录保存失败：' + error.message); finish(); }
+    const stillCurrent = () => {
+      const current = context();
+      return !!current && isChatReady(current) && current.chatMetadata === pending.metadata && chatIdentity(current) === pending.identity;
+    };
+    const persist = async () => {
+      if (!stillCurrent()) return;
+      try {
+        await saveChatMetadata(c);
+        if (pending.chat && pendingIds === pending.idsMark) pendingIds = null;
+      } catch (error) {
+        warn((pending.chat ? '楼层标识保存失败：' : '楼层记录保存失败：') + error.message);
+      }
+    };
+    persist().catch(error => warn('楼层记录保存失败：' + error.message)).finally(finish);
   }
-  function save() {
-    if (suppressSaves) return;
-    const c = context();
-    queuedSave = { metadata: c.chatMetadata, identity: chatIdentity(c) };
-    saveGate.capture();
-    flushSave();
-  }
+  function save() { queueSave('metadata'); }
   function sync({ persist = true } = {}) {
     syncing++;
     if (!persist) suppressSaves++;
@@ -65,13 +98,17 @@ export function createHistory({ context, read, write, changed = () => {}, before
   }
   function syncCurrent() {
     const c = context();
-    if (!c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return;
+    if (!isChatReady(c) || !c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return;
     const native = nativeState();
     // LittleWhiteBox may still be replaying a copied branch. Recording now
     // would stamp a future value onto an older floor.
     if (native?.managed && !native.ready) return;
     const switched = metadata !== c.chatMetadata || chatId !== c.getCurrentChatId();
-    if (switched) { metadata = c.chatMetadata; chatId = c.getCurrentChatId(); previous = []; lastValue = undefined; blocked = false; }
+    if (switched) {
+      metadata = c.chatMetadata; chatId = c.getCurrentChatId(); previous = [];
+      lastValue = undefined; blocked = false; pendingIds = null;
+      if (queuedSave && (queuedSave.metadata !== metadata || queuedSave.identity !== chatIdentity(c))) queuedSave = null;
+    }
     const store = metadata[historyKey] ||= { records: {} };
     const now = messages();
     const tail = now.at(-1);
@@ -96,10 +133,12 @@ export function createHistory({ context, read, write, changed = () => {}, before
     const moved = switched || key(tail || {}) !== key(previous.at(-1) || {});
     if (native?.managed) blocked = false;
     if (blocked && value !== null) blocked = false;
-    if (tail && !blocked && (moved || serialized !== lastValue)) {
+    const recorded = tail && store.records[key(tail)];
+    if (tail && !blocked && (!recorded || JSON.stringify(recorded.state) !== serialized)) {
       store.records[key(tail)] = { state: value, savedAt: Date.now() };
-      save();
+      if (!switched) save();
     }
+    if (!switched && (moved || serialized !== lastValue)) savePendingIds();
     const dirty = moved || serialized !== lastValue || truncated || swipe || now.length !== previous.length;
     previous = now;
     lastValue = serialized;
@@ -116,7 +155,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
   }
   function adoptExternal() {
     const c = context();
-    if (!c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return false;
+    if (!isChatReady(c) || !c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return false;
     const native = nativeState();
     if (native?.managed && !native.ready) return false;
     // Read before changing the observer. A malformed external value must not

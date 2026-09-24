@@ -1,4 +1,6 @@
+import { saveChatMetadata } from './chat-save.js';
 import { uuid } from '../../uuid.js';
+import { assertChatReady } from './chat-lifecycle.js';
 
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
@@ -116,6 +118,7 @@ export function pathBelongs(anchor, path) {
 }
 function currentContext(getContext) {
     if (typeof getContext !== 'function') fail('INVALID_CONTEXT', '缺少聊天上下文接口。');
+    assertChatReady(getContext());
     if (patchPreparation && !preparing) {
         preparing = true;
         try { patchPreparation(getContext()); } finally { preparing = false; }
@@ -290,7 +293,7 @@ export function createOperationService(getContext = () => globalThis.SillyTavern
         const state = observe(ctx.chatMetadata);
         state.active = operation.operationId; active = true; message = retry ? '正在重试保存已确认的操作。' : '正在保存已确认的操作。'; notifyCoordinator(state);
         try {
-            await ctx.saveMetadata();
+            await saveChatMetadata(ctx);
             try { assertContext(getContext, token); }
             catch (error) {
                 emitStateChange(operation, 'stale', ctx.chatMetadata);

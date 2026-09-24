@@ -1,3 +1,4 @@
+import { saveChatMetadata } from '../shared/chat-save.js';
 import {ROOT,read,empty,clone,equal,validate,diff,enforceLocks} from './model.js';
 import {checkpointState} from '../status/state-checkpoint.js';
 import {createHistory} from '../status/history.js';
@@ -10,7 +11,7 @@ export function chatIdentity(ctx){
  const id=ctx?.getCurrentChatId?.();if(id==null||id===''||!ctx.chatMetadata)throw Error('请先打开聊天');
  return JSON.stringify([roleIdentity(ctx),id]);
 }
-export function createStore({context,setVariable,saveMetadata=ctx=>ctx.saveMetadata(),poll=false,nativeState=()=>state2HistoryMode(context())}){
+export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetadata(ctx),poll=false,nativeState=()=>state2HistoryMode(context())}){
  let disposed=false,busy=false,epoch=0,pending=null,lastError='',lastIdentity='',lastMetadata=null,accepted=null,lastLocks=[],controller=null,requestToken=null;
  const listeners=new Set();
  const notify=()=>{for(const fn of listeners)fn();};

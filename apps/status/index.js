@@ -1,3 +1,4 @@
+import { saveChatMetadata } from '../shared/chat-save.js';
 import { uuid } from '../../uuid.js';
 import { subscribeStateChanges, chatIdentity, captureContext, assertContext, acquireMetadataWrite } from '../shared/operations.js';
 import {mountWorldbookSources} from '../worldbook-source-ui.js';
@@ -73,7 +74,7 @@ const floorButtons = installFloorButtons({ history, node, context, enabled: () =
   openWorkbench:(target,{page,onClose,validate})=>showHud(page,{target,onClose,validate}) });
 async function persistStatusChange(write) {
   const token=captureContext(context),ctx=assertContext(context,token),release=acquireMetadataWrite(context,token);
-  try { write();history.adoptExternal();await ctx.saveMetadata();assertContext(context,token); }
+  try { write();history.adoptExternal();await saveChatMetadata(ctx);assertContext(context,token); }
   finally { release(); }
 }
 function syncHistory() {

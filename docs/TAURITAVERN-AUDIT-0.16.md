@@ -59,3 +59,12 @@ Quiet 渠道检查覆盖宿主提供的 source 与解析后的 model，尚不覆
 - [迁移指南：完整历史与公开保存接口](https://github.com/Darkatse/TauriTavern/blob/a1855be4a4f8b6ee7cd0374a84dbb3709c3e5375/docs/API/Migration.md)
 - [ChatSurface 生命周期与启动 hook](https://github.com/Darkatse/TauriTavern/blob/a1855be4a4f8b6ee7cd0374a84dbb3709c3e5375/docs/API/ChatSurface.md)
 - [宿主扩展加载实现](https://github.com/Darkatse/TauriTavern/blob/a1855be4a4f8b6ee7cd0374a84dbb3709c3e5375/src/scripts/extensions.js)
+
+
+## 0.16.5：快速切聊保存保护
+
+宿主 `APP_READY` 不等同于聊天加载完成：自动加载是异步启动的。宿主 `saveMetadataDebounced` 只核对角色／群组，排队的保存闭包又会在执行时读取当前上下文；同一角色快速切换聊天时尤其需要避免扩展在加载中安排保存。
+
+Amin 在应用初始化前监听 `CHAT_CHANGED`，只有完成事件对应的聊天 ID、角色／群组、metadata 引用与 integrity 一致才允许共享写入及后台历史／地图／变量同步。聊天首次观察不再因补充历史记录而触发完整保存；原生变量的派生显示同步不触发延迟保存。记录真正变化时仍正常保存，用户确认的资料操作不会被静默丢弃。
+
+这是对已发现的 Amin 触发路径的修复，不会修改 TauriTavern 的保存队列，也不能证明其他扩展没有相同问题。出现完整性弹窗时不要输入 OVERWRITE；保留宿主的拒绝覆盖与重新加载保护。

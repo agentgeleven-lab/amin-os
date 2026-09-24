@@ -18,6 +18,7 @@ const sandbox = vm.createContext({
     document: { readyState: 'loading', querySelector: () => null, getElementById: () => null, addEventListener: (_name, fn) => callbacks.push(fn) },
 });
 const stubs = {
+    './apps/shared/chat-lifecycle.js': { initializeChatLifecycle() {} },
     './apps/state2/runtime.js': { initializeState2: () => ({}) },
     './uuid.js': { uuid: () => 'fixture' },
     './retired-data.js': { cleanupRetiredData: () => ({ errors: [] }) },
