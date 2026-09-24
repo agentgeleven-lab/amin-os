@@ -48,6 +48,11 @@
 .ro-panel .ro-direction-item button {flex:0 0 auto}
 .ro-panel .ro-candidate {display:grid;gap:6px;min-width:0}
 .ro-panel .ro-candidate-actions {margin:0;display:flex;flex-wrap:wrap;gap:6px}
+.ro-panel .ro-refine textarea {display:block;width:100%;min-height:72px;resize:vertical;margin:6px 0}
+.ro-panel .ro-references {margin:10px 0;max-width:100%;min-width:0}
+.ro-panel .ro-references .amin-check,.ro-panel .ro-candidate .amin-check {display:inline-flex;align-items:center;gap:6px}
+.ro-panel .ro-references input[type=checkbox],.ro-panel .ro-candidate input[type=checkbox] {width:auto;flex:0 0 auto}
+.ro-panel .ro-reference pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;font:inherit}
 .ro-panel .ro-configuration {align-items:start}
 .ro-panel .ro-content-settings {margin:var(--amin-gap,10px) 0}
 .amin-writing-workspace,.amin-writing-page,.amin-stylewriter,.amin-writing-content {min-width:0;max-width:100%}

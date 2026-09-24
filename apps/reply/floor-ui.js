@@ -5,7 +5,7 @@ import {observeChatFloors} from '../floor-scheduler.js';
 
 export function floorContext(ctx,index,message){
  if(!Number.isInteger(index)||index<0||ctx.chat?.[index]!==message)throw Error('楼层内容已变化，请重新打开此窗口。');
- return {...ctx,chat:ctx.chat.slice(0,index+1)};
+ return {...ctx,chat:ctx.chat.slice(0,index+1),replyFloorIndex:index,replyLiveChatLength:ctx.chat.length};
 }
 export function installReplyFloorButtons({rewriteOptions}={}){
  const getContext=()=>globalThis.SillyTavern?.getContext?.(),mounted=new Map(),owned=new Set();let serial=0,disposed=false;

@@ -190,6 +190,28 @@ try {
     assert.equal(await evaluate('__candidateRequests.length'),1);
     assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/BROWSER-THEME/);
     assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/目标文风/);
+    // Candidate refinement uses production controls, preserves the other card and input.
+    await evaluate(`(async()=>{
+        window.__savedCandidateGenerator=__ctx.generateRaw;
+        __ctx.generateRaw=async request=>{__candidateRequests.push(request);return JSON.stringify({options:[{text:'候选甲，更委婉地询问。'}]});};
+        __set(__replyLabel('候选 1 修改要求'),'更委婉');
+        __set(__replyLabel('候选 1 保留原句'),'候选甲');
+        window.__inputBeforeRefine=document.getElementById('send_textarea').value;
+        await __workClick(__reply(),'按要求调整');
+    })()`);
+    assert.deepEqual(await evaluate('[...__reply().querySelectorAll(".ro-card span")].map(n=>n.textContent)'),['候选甲，更委婉地询问。','候选乙']);
+    assert.equal(await evaluate('document.getElementById("send_textarea").value===__inputBeforeRefine'),true);
+    await evaluate(`(async()=>{
+        __ctx.generateRaw=async request=>JSON.stringify({options:[{text:'未保留指定文字'}]});
+        await __workClick(__reply(),'按要求调整');
+        __reply().querySelector('.ro-refine').open=true;
+        __reply().querySelector('.ro-references').open=true;
+    })()`);
+    assert.match(await evaluate('__reply().querySelector(".ro-status").textContent'),/未原样保留/);
+    assert.equal(await evaluate('__reply().querySelector(".ro-card span").textContent'),'候选甲，更委婉地询问。');
+    const refineLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
+    assert.ok(refineLayout.scroll<=Math.max(refineLayout.client,390),'expanded candidate controls overflow mobile width');
+    await evaluate(`(async()=>{__ctx.generateRaw=__savedCandidateGenerator;await __workClick(__reply(),'生成 / 换一批');})()`);
     const rewritesBefore=await evaluate('__requests.length');
     await evaluate('__workClick(__reply(),"继续改写")');
     assert.equal(await evaluate('__label("原文").value'),'候选甲');
@@ -271,6 +293,8 @@ try {
     // A replaced floor cannot accept its old pending result or retain the previous UI.
     await evaluate('__workClick(__floor(1),"转换文风")');
     await evaluate('__ctx.chat[1]={name:"新楼层",mes:"替换内容"};__floorInstaller.refresh()');
+    // refresh is frame-coalesced, so wait for that frame before asserting teardown.
+    for(let i=0;i<40 && !(await evaluate('__floorCalls.at(-1).signal.aborted'));i++)await delay(25);
     assert.equal(await evaluate('__floorCalls.at(-1).signal.aborted'),true);
     await evaluate('__floorCalls.at(-1).resolve("替换后迟到")');await delay(60);
     assert.equal(await evaluate('__floor(1)'),null);
