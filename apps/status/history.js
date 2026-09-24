@@ -31,9 +31,17 @@ export function createHistory({ context, read, write, changed = () => {}, before
     const state = metadataWriteStatus(context);
     if (state.busy || state.dirty) return;
     let release;
+    // Capturing a token can reconcile native variables and synchronously notify
+    // this subscriber. Reserve our local guard before that work begins.
+    saving = true;
     try { release = acquireMetadataWrite(context, saveGate.capture()); }
-    catch (error) { warn('楼层记录保存失败：' + error.message); return; }
-    queuedSave = null; saving = true;
+    catch (error) {
+      saving = false;
+      // A competing writer owns the lease; its completion will flush the queue.
+      if (!['BUSY', 'DIRTY'].includes(error.code)) warn('楼层记录保存失败：' + error.message);
+      return;
+    }
+    queuedSave = null;
     const finish = () => { saving = false; release(); flushSave(); };
     try {
       Promise.resolve(c.saveMetadata()).catch(error => warn('楼层记录保存失败：' + error.message)).finally(finish);

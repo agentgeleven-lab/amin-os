@@ -129,3 +129,36 @@ test('native writer can include synchronous history changes in its own save with
     await t.ctx.saveMetadata(); release(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(t.saves, 1); assert.deepEqual(t.ctx.chatMetadata[HISTORY_KEY].records['m1:0'].state, { hp: 8 }); t.history.dispose();
 });
+
+test('native reconciliation during history lock acquisition cannot reenter autosave', async () => {
+    const { registerOperationPatchExpansion } = await import('../apps/shared/operations.js');
+    const warnings = [], t = fixture({ warn: value => warnings.push(value) });
+    const release = acquireMetadataWrite(t.context);
+    t.history.sync();
+    let reconciled = false;
+    const off = registerOperationPatchExpansion((_ctx, patches) => patches, null, () => {
+        if (reconciled) return;
+        reconciled = true;
+        const releaseNative = acquireMetadataWrite(t.context);
+        releaseNative();
+    });
+    try {
+        release();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(reconciled, true);
+        assert.deepEqual(warnings, []);
+        assert.equal(t.saves, 1);
+        assert.equal(metadataWriteStatus(t.context).busy, false);
+    } finally { off(); t.history.dispose(); }
+});
+
+test('history still reports real persistence failures and releases the save lock', async () => {
+    const warnings = [], t = fixture({ warn: value => warnings.push(value) });
+    t.ctx.saveMetadata = async () => { throw Error('network offline'); };
+    try {
+        t.history.sync();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(warnings, ['楼层记录保存失败：network offline']);
+        assert.equal(metadataWriteStatus(t.context).busy, false);
+    } finally { t.history.dispose(); }
+});
