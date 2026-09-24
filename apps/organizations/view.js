@@ -6,13 +6,14 @@ import {generate,followPrompt} from './ai.js';
 import {syncWorldbook} from './lorebook.js';
 const el=(tag,text='',cls='')=>{const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;};
 const show=v=>v===null||v===undefined||v===''?'未明确':typeof v==='object'?JSON.stringify(v,null,2):String(v);
+const storyReference=m=>JSON.stringify([m?.extra?.amin_story_v2??null,m?.swipe_info?.[m.swipe_id??0]?.extra?.amin_story_v2??null]);
 const tabsMap={overview:'总览',organizations:'组织',alliances:'联盟／阵营',regions:'地区',assessment:'评估排行',settings:'生成与规则'};
 const mounted=new WeakMap();
 export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
  mounted.get(target)?.dispose();const api=provided??await getStore();mounted.get(target)?.dispose();
  const page=el('div','','amin-page amin-app-page amin-organizations'),header=el('header','','amin-context amin-stack'),tabs=el('div','','amin-tabs'),actions=el('div','','amin-stack'),notice=el('div','','amin-notice'),body=el('section','','amin-stack'),viewId='amin-organizations-'+uid();
  notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','势力资料页面');body.id=viewId+'-panel';body.setAttribute('role','tabpanel');body.tabIndex=0;page.append(header,tabs,actions,notice,body);target.append(page);
- let selected='overview',chosen={},search='',editing=false,disposed=false,historyIndex=null,lastIdentity='',requesting=false;
+ let selected='overview',chosen={},search='',editing=false,disposed=false,historyIndex=null,historyRecord=null,historyMetadata=null,historyRequest=0,lastIdentity='',requesting=false;
  const say=t=>{notice.textContent=t;};
  const btn=(parent,label,fn,primary=false)=>{const b=el('button',label,primary?'amin-primary':'');b.type='button';b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){say(e.message);}finally{if(!disposed)b.disabled=false;}};parent.append(b);return b;};
  const card=(title,parent=body)=>{const c=el('section','','amin-card amin-stack');if(title)c.append(el('h3',title,'amin-section-heading'));parent.append(c);return c;};
@@ -23,12 +24,12 @@ export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
  const check=(parent,label,value=false)=>{const row=el('label','','amin-check'),i=el('input');i.type='checkbox';i.setAttribute('aria-label',label);i.checked=!!value;row.append(i,el('span',label));parent.append(row);return i;};
  const select=(parent,label,options,value)=>{const row=el('label','','amin-field'),i=el('select');row.append(el('span',label));i.setAttribute('aria-label',label);for(const[v,n]of options){const o=el('option',n);o.value=v;i.append(o);}i.value=value??options[0]?.[0]??'';row.append(i);parent.append(row);return i;};
  const leave=()=>!editing||globalThis.confirm?.('离开将放弃尚未保存的表单草稿，是否继续？');
- const navigate=(tab,id)=>{if(!leave())return false;editing=false;if(tab==='settings')historyIndex=null;selected=tab;if(id)chosen[tab]=id;render();return true;};
+ const navigate=(tab,id)=>{if(!leave())return false;editing=false;historyRequest++;if(tab==='settings'){historyIndex=null;historyRecord=null;historyMetadata=null;}selected=tab;if(id)chosen[tab]=id;render();return true;};
  function draftStart(title){editing=true;body.replaceChildren();return card(title);}
  function cancelEdit(){editing=false;render();}
  async function run(mode,targetEntity=null){
   if(requesting||api.busy())throw Error('已有操作进行中');
-  if(!leave())return;editing=false;historyIndex=null;requesting=true;drawActions();say('正在准备资料并请求AI…');
+  if(!leave())return;editing=false;historyRequest++;historyIndex=null;historyRecord=null;historyMetadata=null;requesting=true;drawActions();say('正在准备资料并请求AI…');
   try{await generate({api,ai:ai(),mode,target:targetEntity,sourceOptions});render();say('结果已生成，请检查变更后确认；尚未写入');}
   finally{requesting=false;if(!disposed)drawActions();}
  }
@@ -38,7 +39,7 @@ export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
  }
  function drawActions(){
   actions.replaceChildren();const busy=requesting||api.busy();body.setAttribute('aria-busy',String(!!busy));
-  if(historyIndex!==null){btn(toolbar(actions),'返回当前资料',()=>{historyIndex=null;render();},true);return;}
+  if(historyIndex!==null){btn(toolbar(actions),'返回当前资料',()=>{historyRequest++;historyIndex=null;historyRecord=null;historyMetadata=null;render();},true);return;}
   const main=toolbar(actions);btn(main,'生成／补充',()=>run('fill'),true).disabled=busy;btn(main,'按当前剧情更新',()=>run('update')).disabled=busy;
   if(busy){main.append(el('span','正在处理请求…','amin-meta'));btn(main,'取消请求',()=>{api.cancel();say('已取消请求');});}
   const advanced=details(actions,'更多操作'),tools=toolbar(advanced);
@@ -66,7 +67,13 @@ export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
   const h=details(body,'楼层记录 · 只读');h.append(el('p','仅记录启用后的资料。回退或切换候选会恢复相应状态；未记录的过去不补造数据。','amin-meta'));
   const records=api.history().filter(r=>r.available).slice(-40);
   if(!records.length)h.append(el('p','暂无可查看的楼层记录。','amin-empty'));const recordList=el('div','','amin-stack');h.append(recordList);
-  for(const r of records)btn(recordList,'第'+(r.index+1)+'楼 · '+r.name,()=>{if(!leave())return;editing=false;historyIndex=r.index;selected='overview';render();});
+  for(const r of records)btn(recordList,'第'+(r.index+1)+'楼 · '+r.name,async()=>{
+   if(!leave())return;
+   const request=++historyRequest;
+   const loaded=await api.readHistory(r.index);
+   if(disposed||request!==historyRequest)return;
+   editing=false;historyRecord=loaded;historyMetadata=api.context().chatMetadata;historyIndex=r.index;selected='overview';render();
+  });
  }
  function drawGroup(doc,group){
   const catalog=card(LABELS[group]+'资料'),filters=grid(catalog),query=field(filters,'搜索名称、类型或概况',search);query.type='search';query.onchange=()=>{search=query.value;render();};
@@ -128,12 +135,12 @@ export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
  }
  function drawAssessment(a,parent=body){
   const c=card(a.title||'AI评估',parent);c.append(el('p',a.summary,'amin-result'),el('p','评估口径：'+a.criteria,'amin-meta'),el('p','局限：'+a.limitations,'amin-meta'));
-  const doc=historyIndex===null?api.read():api.history().find(r=>r.index===historyIndex)?.state?.doc??api.read();for(const row of a.rows??[]){const item=card((row.rank==null?'未排名':row.rank+'名')+' · '+(doc[row.group]?.[row.id]?.name??row.id),c);for(const[k,label]of Object.entries({assessment:'结论',basis:'依据',strengths:'优势',weaknesses:'短板',confidence:'资料充分程度'})){const text=el('p');text.append(el('strong',label+'：'),el('span',row[k]||'未明确'));item.append(text);}}
+  const doc=historyIndex===null?api.read():historyRecord.state.doc;for(const row of a.rows??[]){const item=card((row.rank==null?'未排名':row.rank+'名')+' · '+(doc[row.group]?.[row.id]?.name??row.id),c);for(const[k,label]of Object.entries({assessment:'结论',basis:'依据',strengths:'优势',weaknesses:'短板',confidence:'资料充分程度'})){const text=el('p');text.append(el('strong',label+'：'),el('span',row[k]||'未明确'));item.append(text);}}
  }
  function assessmentPage(doc){
   const c=card('个人评估参考');c.append(el('p','AI评估用于比较与参考，不默认注入日常聊天。评估范围与口径可在生成与规则中设置。','amin-meta'));
   if(historyIndex===null)btn(toolbar(c),'生成／刷新AI评估',()=>run('assessment'),true).disabled=requesting||api.busy();
-  const a=historyIndex===null?api.assessment():api.history().find(r=>r.index===historyIndex)?.state?.assessment;
+  const a=historyIndex===null?api.assessment():historyRecord.state.assessment;
   if(a){c.append(el('p',(a.stale?'资料已变化，评估待刷新。 ':'')+'评估时间：'+new Date(a.at).toLocaleString(),'amin-meta'));drawAssessment(a);}else c.append(el('p','尚无评估。生成后可先查看结论与依据，再确认保存。','amin-empty'));
   const rank=card('按明确指标排序'),filters=grid(rank),g=select(filters,'主体类型',GROUPS.map(g=>[g,LABELS[g]]),'organizations'),key=field(filters,'指标标识',''),unit=field(filters,'比较单位',''),ascending=check(filters,'从小到大',false),result=el('div','','amin-stack');result.setAttribute('aria-live','polite');
   btn(toolbar(rank),'查看数值排行',()=>{result.replaceChildren();const r=rankMetrics(doc,{group:g.value,key:key.value,unit:unit.value,ascending:ascending.checked});for(const row of r.included)result.append(el('p',row.rank+' · '+row.name+'：'+row.value+' '+unit.value,'amin-result'));if(!r.included.length)result.append(el('p','没有同标识、同单位的明确数值，未生成排行。','amin-empty'));if(r.excluded.length){const excluded=details(result,'未参与排行 · '+r.excluded.length+' 项');for(const row of r.excluded)excluded.append(el('p',row.name+'：'+row.reason,'amin-meta'));}});rank.append(result);
@@ -189,15 +196,21 @@ export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
    body.setAttribute('aria-labelledby',viewId+'-tab-'+selected);
    const pending=api.pending();if(pending&&historyIndex===null){drawPreview(pending);return;}
    let doc=api.read();
-   if(historyIndex!==null){const r=api.history().find(r=>r.index===historyIndex);if(!r?.available)throw Error('该楼层没有资料记录');doc=r.state.doc;}
+   if(historyIndex!==null){
+    const message=api.context().chat?.[historyIndex];
+    if(!historyRecord?.available||!message||api.context().chatMetadata!==historyMetadata||historyRecord.external&&
+      (String(message.swipe_id??0)!==historyRecord.variant||storyReference(message)!==historyRecord.reference||message.mes!==historyRecord.content))
+      throw Error('该楼层记录已变化，请返回当前资料重新打开。');
+    doc=historyRecord.state.doc;
+   }
    if(selected==='overview')drawOverview(doc);else if(GROUPS.includes(selected))drawGroup(doc,selected);else if(selected==='assessment')assessmentPage(doc);else settingsPage();
   }catch(e){say(e.message);body.append(el('p','请打开聊天，或检查变量资料格式。现有资料将保留。','amin-empty'));}
  }
  const unsubscribe=api.subscribe(()=>{
-  if(disposed)return;try{const id=chatIdentity(api.context());if(lastIdentity!==id){editing=false;historyIndex=null;lastIdentity=id;render();return;}}catch{editing=false;historyIndex=null;render();return;}
+  if(disposed)return;try{const id=chatIdentity(api.context());if(lastIdentity!==id||historyIndex!==null&&api.context().chatMetadata!==historyMetadata){editing=false;historyRequest++;historyIndex=null;historyRecord=null;historyMetadata=null;lastIdentity=id;render();return;}}catch{editing=false;historyRequest++;historyIndex=null;historyRecord=null;historyMetadata=null;render();return;}
   if(api.error())say(api.error());
   if(!editing)render();else if(!api.pending())say(api.error()||'资料可能已更新；表单草稿保留，保存时会检查冲突。');
  });
- const handle={open(){if(!editing)render();},dispose(){disposed=true;unsubscribe();page.remove();if(mounted.get(target)===handle)mounted.delete(target);}};
+ const handle={open(){if(!editing)render();},dispose(){disposed=true;historyRequest++;unsubscribe();page.remove();if(mounted.get(target)===handle)mounted.delete(target);}};
  mounted.set(target,handle);render();return handle;
 }

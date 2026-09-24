@@ -48,6 +48,11 @@ function fallbackDigest(bytes) {
     return result;
 }
 
+/** Synchronous SHA-256 for persisted identities used by synchronous state readers. */
+export function sha256HexSync(text) {
+    return hex(fallbackDigest(new TextEncoder().encode(String(text))));
+}
+
 /** SHA-256 for stable text identity. WebCrypto is preferred but is unavailable on insecure LAN origins. */
 export async function sha256Hex(text, cryptoSource = globalThis.crypto) {
     const bytes = new TextEncoder().encode(String(text));

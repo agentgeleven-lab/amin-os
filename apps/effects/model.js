@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 import {LIBRARY_KEY,mergeLibrary} from './library.js';
 import {readCurrentScene} from '../scene/model.js';
 import {createTiming,pauseTiming,timingStatus,validateTiming} from './timing.js';
@@ -8,8 +9,8 @@ export const KEY='amin_os_effects_v1';
 export const empty=()=>({version:1,skills:[],events:[],enabled:true,limit:30000});
 export function readStore(ctx){const s=ctx?.chatMetadata?.[KEY];if(s!==undefined&&(!s||s.version!==1||!Array.isArray(s.skills)||!Array.isArray(s.events)))throw Error('持续效果数据版本或格式不兼容，原记录未改写');const result=structuredClone(s??empty());const library=mergeLibrary(ctx?.extensionSettings?.[LIBRARY_KEY],result.skills);result.skills=library.skills;result.trash=library.trash;result.groups=library.groups;return result;}
 // Exact prefix evidence also survives reloads and copied chat branches. No message mutations.
-export const anchor=chat=>(chat??[]).map(m=>JSON.stringify([m.name??'',!!m.is_user,m.mes??'',m.swipe_id??0]));
-export const belongs=(event,now)=>Array.isArray(event?.anchor)&&event.anchor.length<=now.length&&event.anchor.every((v,i)=>v===now[i]);
+export const anchor=chat=>chatRevisions(chat??[]);
+export const belongs=(event,now)=>pathBelongs(event?.anchor,now);
 export function activeEffects(store,chat){
  const now=anchor(chat),effects=new Map();
  for(const e of store.events){if(!belongs(e,now))continue;

@@ -175,7 +175,15 @@ export function mount(target, options = {}) {
                 const evidence = make('details'); evidence.append(make('summary', '更新依据与来源'), make('p', edge.evidence.reason, 'amin-relationship-notes'));
                 evidence.append(make('p', `${{ manual: '手动确认', ai: 'AI 建议确认', linkage: '统一联动更新' }[edge.evidence.origin]}${edge.evidence.sources.length ? ` · 第 ${edge.evidence.sources.map(source => source.index + 1).join('、')} 楼` : ' · 未绑定聊天楼层'}`, 'amin-meta'));
                 if (!evidenceMatches(edge.evidence, api.context?.()?.chat ?? [])) evidence.append(make('p', '来源楼层已变化或不在当前分支，保留原来源证据；不会按同名人物或新正文替换。', 'amin-meta'));
-                for (const source of edge.evidence.sources) { let original; try { original = JSON.parse(source.revision)[2]; } catch { original = source.revision; } evidence.append(make('pre', `第 ${source.index + 1} 楼：${original}`)); }
+                for (const source of edge.evidence.sources) {
+                    let original = null;
+                    if (source.revision.startsWith('[')) {
+                        try { original = JSON.parse(source.revision)[2]; } catch { /* Damaged old evidence is reported below. */ }
+                    } else if (evidenceMatches({ sources: [source] }, api.context?.()?.chat ?? [])) {
+                        original = api.context?.()?.chat?.[source.index]?.mes ?? null;
+                    }
+                    evidence.append(make('pre', `第 ${source.index + 1} 楼：${original ?? '来源正文不在当前分支；保留来源指纹，切回原消息可查看。'}`));
+                }
                 item.append(evidence);
             }
             if (person(edge.fromId).missing || person(edge.toId).missing) item.append(make('p', '部分人物在当前分支不存在。保留原 ID 引用；可编辑为当前人物，不会按同名人物自动替换。', 'amin-meta'));

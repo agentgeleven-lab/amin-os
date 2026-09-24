@@ -9,16 +9,11 @@ export function historyView({ history, node, floor = null }) {
   for (const button of [left, right, latest]) button.type = 'button';
   nav.append(left, label, right, latest);
   root.append(nav, node('p', '只读记录 · 翻页不会恢复变量，复制和模型更新仍使用当前剧情状态。', 'wsh-note'), body);
-  function render() {
-    const rows = history.list();
-    const index = floor === null ? rows.length - 1 : Math.min(floor, rows.length - 1);
-    const row = rows[index];
-    label.textContent = row ? `第 ${index + 1} 楼 · ${row.name}` : '暂无楼层记录';
-    left.disabled = index <= 0; right.disabled = index >= rows.length - 1;
+  let ticket = 0, disposed = false;
+  function showState(state) {
     body.replaceChildren();
-    if (!row?.available) { body.append(node('p', '此楼层尚无记录。安装前的历史状态无法自动还原。')); return; }
-    if (!row.state) { body.append(node('p', '此楼层还没有状态栏。')); return; }
-    for (const [name, fields] of Object.entries(row.state.项目 || {})) {
+    if (!state) { body.append(node('p', '此楼层还没有状态栏。')); return; }
+    for (const [name, fields] of Object.entries(state.项目 || {})) {
       const card = node('section', undefined, 'wsh-history-card'); card.append(node('strong', name));
       for (const [field, value] of Object.entries(fields)) {
         const line = node('div', undefined, 'wsh-history-field');
@@ -29,11 +24,31 @@ export function historyView({ history, node, floor = null }) {
       body.append(card);
     }
   }
+  function render() {
+    const request = ++ticket;
+    const rows = history.list();
+    const index = floor === null ? rows.length - 1 : Math.min(floor, rows.length - 1);
+    const row = rows[index];
+    label.textContent = row ? `第 ${index + 1} 楼 · ${row.name}` : '暂无楼层记录';
+    left.disabled = index <= 0; right.disabled = index >= rows.length - 1;
+    body.replaceChildren();
+    if (!row?.available) { body.append(node('p', '此楼层尚无记录。安装前的历史状态无法自动还原。')); return; }
+    if (row.external) {
+      body.append(node('p', '正在读取此楼层的状态…'));
+      Promise.resolve().then(() => history.readFloor(index)).then(loaded => {
+        if (!disposed && request === ticket) showState(loaded.state);
+      }).catch(error => {
+        if (!disposed && request === ticket) { body.replaceChildren(); body.append(node('p', '无法读取此楼层：' + error.message)); }
+      });
+      return;
+    }
+    showState(row.state);
+  }
   left.onclick = () => { floor = Math.max(0, (floor ?? history.list().length - 1) - 1); render(); };
   right.onclick = () => { floor = Math.min(history.list().length - 1, (floor ?? history.list().length - 1) + 1); render(); };
   latest.onclick = () => { floor = null; render(); };
-  render(); const dispose = history.subscribe(render);
-  return { element: root, dispose };
+  render(); const unsubscribe = history.subscribe(render);
+  return { element: root, dispose() { disposed = true; ticket++; unsubscribe(); } };
 }
 
 // The editable workbench belongs to the current conversation, never to an old snapshot.

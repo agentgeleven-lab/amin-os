@@ -1,13 +1,15 @@
-import { KEY, FORMAT, LIMITS, readStore, validateStore, validateSnapshot, parseImport, validateCheckpointSettings } from './model.js';
+import { KEY, FORMAT, LIMITS, readStore, validateStore, validateSnapshot, parseImport, validateCheckpointSettings, candidateBinding } from './model.js';
 import { MODULE_LABELS, RESTORE_DEPENDENCIES, materialize, restorePatches, moduleChanges } from './adapters.js';
 import { createOperationService, chatIdentity, chatPath, subscribeStateChanges, acquireMetadataWrite } from '../shared/operations.js';
 import { branchAvailability, assertOpenedBranch, loadBranchHost as defaultLoadBranchHost } from './branch.js';
 import { uuid } from '../../uuid.js';
 import { assertMapReady } from '../map/src/integrations/runtime.js';
+import { STORY_STORAGE_KEY } from '../state2/storage.js';
 
 const clone = value => structuredClone(value);
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const names = saved => Object.keys(MODULE_LABELS).filter(key => saved.modules[key] != null).map(key => MODULE_LABELS[key]);
+const externalHistory = ctx => ctx?.chatMetadata?.[STORY_STORAGE_KEY]?.version === 2;
 
 export function createSavesService(getContext = () => globalThis.SillyTavern?.getContext?.(), {
     createId = uuid, now = () => new Date().toISOString(), loadBranchHost = defaultLoadBranchHost, autoCheckpoints = true,
@@ -23,8 +25,9 @@ export function createSavesService(getContext = () => globalThis.SillyTavern?.ge
     });
 
     function snapshot(ctx, { name, note = '' }) {
+        const path = chatPath(ctx.chat), candidate = ctx.chat?.at(-1)?.swipe_id ?? 0;
         return validateSnapshot({ format: FORMAT, version: 1, id: createId(), name: String(name ?? '').trim(), note, createdAt: now(),
-            source: { identity: chatIdentity(ctx), floor: ctx.chat?.length ?? 0, candidate: ctx.chat?.at(-1)?.swipe_id ?? 0, path: chatPath(ctx.chat) }, modules: materialize(ctx) });
+            source: { identity: chatIdentity(ctx), floor: path.length, candidate, path, candidateBinding: candidateBinding(path,candidate) }, modules: materialize(ctx) });
     }
     function find(id) {
         const store = readStore(getContext()), value = [...store.saves, ...store.backups, ...store.checkpoints].find(item => item.id === id);
@@ -91,9 +94,12 @@ export function createSavesService(getContext = () => globalThis.SillyTavern?.ge
         }
     }
     async function captureCheckpoint({ automatic = false } = {}) {
+        if (automatic && externalHistory(getContext())) return null;
         ensureIdle();
         if (operations.preview()) throw Error('请先确认或取消当前预览，再记录检查点。');
-        const token = capture(), ctx = operations.check(token), store = readStore(ctx);
+        const token = capture(), ctx = operations.check(token);
+        if (automatic && externalHistory(ctx)) return null;
+        const store = readStore(ctx);
         if (automatic && !store.checkpointSettings.enabled) return null;
         if (!ctx.chat?.length) return null;
         assertMapReady(ctx, { allowEmpty: true });
@@ -158,7 +164,7 @@ export function createSavesService(getContext = () => globalThis.SillyTavern?.ge
         branchMessage = ''; return operations.confirm();
     }
     function scheduleCheckpoint() {
-        if (!autoCheckpoints || !hostListeners.length || disposed || branching) return;
+        if (!autoCheckpoints || !hostListeners.length || disposed || branching || externalHistory(getContext())) return;
         clearTimeout(timer);
         let token;
         try { token = capture(); } catch { return; }
@@ -180,7 +186,8 @@ export function createSavesService(getContext = () => globalThis.SillyTavern?.ge
         scheduleCheckpoint();
     }
     return { context: getContext, capture, check: operations.check, read: () => readStore(getContext()), stageSave, stageRestore, stageImport, stageDelete, stageCheckpointSettings, captureCheckpoint, stageBranch,
-        branchAvailability: id => branchAvailability(getContext(), find(id)), checkpointStatus: () => checkpointMessage,
+        branchAvailability: id => branchAvailability(getContext(), find(id)), checkpointStatus: () => checkpointMessage || (externalHistory(getContext())
+            ? '剧情历史已由外置存储按楼层记录；自动完整检查点已暂停。仍可手动建立检查点或命名存档。' : ''),
         inspectImport: parseImport, exportSave: id => JSON.stringify(validateSnapshot(find(id)), null, 2), preview, confirm,
         async retrySave() { const result = await operations.retrySave(); branchMessage = ''; checkpointMessage = ''; return result; },
         discard() { branchPending = null; branchMessage = ''; operations.discard(); }, status: () => branchMessage || operations.status(), busy: () => branching || operations.busy(), dirty: operations.dirty,

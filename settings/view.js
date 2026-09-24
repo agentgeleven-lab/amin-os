@@ -1,20 +1,22 @@
 import {resetTileLayout} from '../tile-layout.js';
 import {getAppearance,PALETTES,APP_NAMES,defaults,mergeFloorToolbarDraft} from './appearance.js';
+import {mountStoryStorage} from './story-storage-view.js';
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function mount(target){
  const service=getAppearance();target.classList.add('amin-ai','amin-settings','amin-app-page');
- let page='global',draft=service.snapshot(),message='',messageState='';
+ let page='global',draft=service.snapshot(),message='',messageState='',storyView=null,noticeNode=null;
  const editedToolbarFields=new Set();
  function draw(){
+  storyView?.dispose();storyView=null;
   draft=mergeFloorToolbarDraft(draft,service.snapshot(),editedToolbarFields);
-  target.replaceChildren();const heading=el('header',null,'amin-context');heading.append(el('h2','外观设置'),el('p','统一主题、布局与楼层窗口。分页切换会保留未保存的修改。'));target.append(heading);
-  const nav=el('nav',null,'amin-tabs'),body=el('section',null,'amin-stack'),notice=el('p',message,'amin-result');nav.setAttribute('aria-label','外观设置分类');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.dataset.state=messageState;notice.hidden=!message;target.append(nav,notice,body);
-  const report=(text,state='success')=>{message=text;messageState=state;notice.textContent=text;notice.dataset.state=state;notice.hidden=!text;};
+  target.replaceChildren();const heading=el('header',null,'amin-context');heading.append(el('h2',page==='story'?'剧情存储':'外观设置'),el('p',page==='story'?'管理当前聊天的剧情文件、备份与跨设备同步。':'统一主题、布局与楼层窗口。分页切换会保留未保存的修改。'));target.append(heading);
+  const nav=el('nav',null,'amin-tabs'),body=el('section',null,'amin-stack'),notice=el('p',message,'amin-result');nav.setAttribute('aria-label','设置分类');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.dataset.state=messageState;notice.hidden=!message;target.append(nav,notice,body);noticeNode=notice;
+  const report=(text,state='success')=>{message=text;messageState=state;if(noticeNode){noticeNode.textContent=text;noticeNode.dataset.state=state;noticeNode.hidden=!text;}};
   const button=(parent,label,fn)=>{const e=el('button',label);e.type='button';e.onclick=()=>{try{fn();}catch(error){report(error.message,'error');}};parent.append(e);return e;};
   const section=(title,description)=>{const box=el('section',null,'amin-card amin-stack');box.append(el('h3',title,'amin-section-heading'));if(description)box.append(el('p',description,'amin-meta'));body.append(box);return box;};
   const grid=parent=>{const wrap=el('div',null,'amin-form-grid');parent.append(wrap);return wrap;};
   const toolbar=parent=>{const bar=el('div',null,'amin-toolbar');parent.append(bar);return bar;};
-  for(const [id,name]of [['global','整体外观'],['apps','单个应用'],['floor','楼层窗口'],['effects','背景与动效']]){const b=button(nav,name,()=>{page=id;draw();});b.setAttribute('aria-pressed',String(page===id));}
+  for(const [id,name]of [['global','整体外观'],['apps','单个应用'],['floor','楼层窗口'],['effects','背景与动效'],['story','剧情存储']]){const b=button(nav,name,()=>{page=id;draw();});b.setAttribute('aria-pressed',String(page===id));}
   function select(parent,label,items,value,onchange){const wrap=el('label',null,'amin-field'),control=el('select');for(const [id,name]of items){const o=el('option',name);o.value=id;control.append(o);}control.value=value;control.onchange=()=>onchange(control.value);wrap.append(el('span',label),control);parent.append(wrap);return control;}
   function numeric(parent,label,value,min,max,onchange){const wrap=el('label',null,'amin-field'),control=el('input');control.type='number';control.min=min;control.max=max;control.value=value;control.oninput=()=>onchange(Number(control.value));wrap.append(el('span',`${label}（${min}–${max}）`),control);parent.append(wrap);return control;}
   function fields(parent,value){
@@ -23,7 +25,9 @@ export function mount(target){
    numeric(parent,'字号',value.fontSize,11,20,v=>value.fontSize=v);numeric(parent,'圆角',value.radius,0,24,v=>value.radius=v);
    numeric(parent,'背景不透明度 %',value.opacity,70,100,v=>value.opacity=v);numeric(parent,'背景模糊',value.blur,0,24,v=>value.blur=v);
   }
-  if(page==='global'){
+  if(page==='story'){
+   storyView=mountStoryStorage(body,report);
+  }else if(page==='global'){
    const desktop=section('主页与窗口','自动模式为 Windows 10 磁贴搭配深色直角窗口。'),desktopGrid=grid(desktop);
    select(desktopGrid,'主页磁贴风格',[['classic','风格 1 · 跟随主题'],['win10','风格 2 · Windows 10']],draft.desktop.style,v=>draft.desktop.style=v);
    select(desktopGrid,'窗口主题',[['auto','自动搭配磁贴风格'],['current','保留原有主题'],['win10','Windows 10 深色'],['win10light','Windows 10 浅色']],draft.desktop.windowTheme,v=>draft.desktop.windowTheme=v);
@@ -75,9 +79,11 @@ export function mount(target){
    const overrides=section('各应用窗口尺寸','需要不同尺寸时，展开应用并选择“单独设置”。');
    for(const [id,name]of names){const card=el('details',null,'amin-card');card.append(el('summary',name));overrides.append(card);const content=el('div',null,'amin-stack'),editor=el('div',null,'amin-form-grid');card.append(content);select(content,'尺寸来源',[['inherit','跟随统一尺寸'],['own','单独设置']],draft.floor.overrides[id]?'own':'inherit',v=>{if(v==='own')draft.floor.overrides[id]={width:draft.floor.width,desktopHeight:draft.floor.desktopHeight,mobileHeight:draft.floor.mobileHeight};else delete draft.floor.overrides[id];render();});content.append(editor);const render=()=>{editor.replaceChildren();if(draft.floor.overrides[id])dimensions(editor,draft.floor.overrides[id]);else editor.append(el('p','使用上方统一窗口尺寸。','amin-meta amin-span-full'));};render();}
   }
-  const actions=toolbar(body);
-  button(actions,'保存并应用',()=>{service.save(mergeFloorToolbarDraft(draft,service.snapshot(),editedToolbarFields));draft=service.snapshot();editedToolbarFields.clear();report('已应用所有分页的修改。打开的窗口同步更新。');draw();}).className='amin-primary';
-  button(actions,'恢复本页默认',()=>{const d=defaults();if(page==='global'){draft.global=d.global;draft.window=d.window;draft.desktop.style=d.desktop.style;draft.desktop.windowTheme=d.desktop.windowTheme;}else if(page==='apps')draft.apps={};else if(page==='effects')draft.desktop.effects=d.desktop.effects;else{draft.floor=d.floor;for(const key of ['buttonOrder','moreButtons','toolbarAlignment'])editedToolbarFields.add(key);}message='本页已恢复默认，点击“保存并应用”生效。';messageState='';draw();});
+  if(page!=='story'){
+   const actions=toolbar(body);
+   button(actions,'保存并应用',()=>{service.save(mergeFloorToolbarDraft(draft,service.snapshot(),editedToolbarFields));draft=service.snapshot();editedToolbarFields.clear();report('已应用所有分页的修改。打开的窗口同步更新。');draw();}).className='amin-primary';
+   button(actions,'恢复本页默认',()=>{const d=defaults();if(page==='global'){draft.global=d.global;draft.window=d.window;draft.desktop.style=d.desktop.style;draft.desktop.windowTheme=d.desktop.windowTheme;}else if(page==='apps')draft.apps={};else if(page==='effects')draft.desktop.effects=d.desktop.effects;else{draft.floor=d.floor;for(const key of ['buttonOrder','moreButtons','toolbarAlignment'])editedToolbarFields.add(key);}message='本页已恢复默认，点击“保存并应用”生效。';messageState='';draw();});
+  }
  }
- draw();return {open(){},dispose(){target.replaceChildren();}};
+ draw();return {open(){},dispose(){storyView?.dispose();noticeNode=null;target.replaceChildren();}};
 }

@@ -16,6 +16,8 @@ import { rollBatch,formatRoll } from '../apps/dice/engine.js';
 import { registerMapRuntime } from '../apps/map/src/integrations/runtime.js';
 import * as Linkage from '../apps/linkage/policy.js';
 import { chatIdentity, chatPath } from '../apps/shared/operations.js';
+import { branchAvailability, assertOpenedBranch } from '../apps/saves/branch.js';
+import { STORY_STORAGE_KEY } from '../apps/state2/storage.js';
 
 const at='2026-09-23T00:00:00.000Z';
 function fixture({populated=true}={}){
@@ -43,6 +45,20 @@ function fixture({populated=true}={}){
     return {get ctx(){return ctx;},api,writes:()=>writes,fail:v=>{fail=v;},switch(){ctx={...ctx,chatId:'two',chat:[{name:'玩家',is_user:true,mes:'另一条剧情',swipe_id:0}],chatMetadata:{variables:{other:'NEW'},unrelated:{new:true}},extensionSettings:ctx.extensionSettings};return ctx;}};
 }
 async function save(h,name='旅店'){h.api.stageSave({name});await h.api.confirm();return h.api.read().saves.at(-1);}
+
+test('old full-message save paths still validate and open the exact matching branch',async()=>{
+    const h=fixture(),snapshot=structuredClone(await save(h));
+    snapshot.source.path=h.ctx.chat.map(m=>JSON.stringify([m.name??'',!!m.is_user,m.mes??'',m.swipe_id??0]));
+    delete snapshot.source.candidateBinding;
+    assert.deepEqual(validateSnapshot(snapshot).source.path,snapshot.source.path);
+    assert.equal(branchAvailability(h.ctx,snapshot).available,true);
+    const branch={...h.ctx,chatId:'branch-chat',chat:structuredClone(h.ctx.chat)};
+    assert.equal(assertOpenedBranch(branch,snapshot.source,'branch-chat'),branch);
+    branch.chat[0].swipe_id=1;
+    assert.equal(branchAvailability({...branch,chatId:'one'},snapshot).available,false);
+    assert.throws(()=>assertOpenedBranch(branch,snapshot.source,'branch-chat'),/不一致/);
+    h.api.dispose();
+});
 
 test('current materialized snapshots include all apps and exclude global settings and chat replacement',async()=>{
     const h=fixture(),metadata=structuredClone(h.ctx.chatMetadata),chat=structuredClone(h.ctx.chat),settings=structuredClone(h.ctx.extensionSettings);
@@ -133,6 +149,21 @@ test('restoring into a clean initial map view may establish saved map metadata',
     const source=fixture(),saved=await save(source),target=fixture({populated:false});
     const release=registerMapRuntime({context:()=>target.ctx,persistence:{ensureActive(){},saving:()=>false},draft:{status:()=>({dirty:false})},store:{snapshot:()=>createDemoDocument()}});
     target.api.stageRestore(saved);await target.api.confirm();assert.deepEqual(target.ctx.chatMetadata.dynamicMapV1.document,saved.modules.map);release();source.api.dispose();target.api.dispose();
+});
+
+test('external story history pauses automatic full checkpoints while preserving manual saves', async () => {
+    const h = fixture({ populated: false });
+    h.ctx.chatMetadata[STORY_STORAGE_KEY] = { version: 2 };
+    const before = structuredClone(h.ctx.chatMetadata);
+    assert.equal(await h.api.captureCheckpoint({ automatic: true }), null);
+    assert.deepEqual(h.ctx.chatMetadata, before);
+    assert.equal(h.writes(), 0);
+    assert.match(h.api.checkpointStatus(), /自动完整检查点已暂停/);
+    await h.api.captureCheckpoint();
+    assert.equal(h.api.read().checkpoints.length, 1);
+    await save(h, '手工存档');
+    assert.equal(h.api.read().saves.length, 1);
+    h.api.dispose();
 });
 
 test('linked appearance, schedule, memories, relationship reminders and effect rules survive one complete restore',async()=>{

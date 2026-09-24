@@ -4,10 +4,11 @@
   "requires": [],
   "optional": [],
   "js": "index.js",
+  "generate_interceptor": "AminOSStoryGenerationGuard",
   "hooks": { "chatSurface": "registerChatSurface" },
   "css": "style.css",
   "author": "agentgeleven-lab",
-    "version": "0.16.6",
+    "version": "0.17.0",
   "homePage": "https://github.com/agentgeleven-lab/amin-os",
   "auto_update": false
 }

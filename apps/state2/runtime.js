@@ -1,6 +1,10 @@
 import { migrateState2, projectState2, manualState2Patches, ROOTS, MIGRATION_KEY, nativeState2Status as storageStatus, prepareState2ManualWrite as prepareManual } from './storage.js';
 import { restoreNativeState2ToFloor } from './native-bridge.js';
 import { isChatReady } from '../shared/chat-lifecycle.js';
+import { createStoryStorage } from './story-storage.js';
+import { createStoryFileStore } from '../shared/story-file-store.js';
+import { createStoryStateGraph } from '../shared/story-state-graph.js';
+import { registerChatSavePreparation, markChatIdsDirty, saveChatMetadata } from '../shared/chat-save.js';
 import { createOperationService, registerOperationPatchExpansion, metadataWriteStatus, acquireMetadataWrite, captureContext, publishExternalMetadataChange, chatIdentity, chatPath } from '../shared/operations.js';
 export function prepareState2ManualWrite(ctx, paths) {
     if (shared && storageStatus(ctx).migrated && !shared.ready(ctx)) throw Error('正在恢复当前聊天的楼层变量，请等待恢复完成。');
@@ -35,10 +39,20 @@ function combine(original, extra) {
     return [...values.values()];
 }
 /** The native engine is the sole executor of chat <state> blocks. */
-export function createState2Runtime(getContext = context, { report = () => {}, interval = 700, host = globalThis, document = globalThis.document, restoreNative = restoreNativeState2ToFloor } = {}) {
+export function createState2Runtime(getContext = context, { report = () => {}, interval = 700, host = globalThis, document = globalThis.document, restoreNative = restoreNativeState2ToFloor, storyStorage } = {}) {
     let disposed = false, projecting = false, migrating = false, lastMessage = '', timer = null, lastErrors = null;
     let activeMetadata = null, activeIdentity = null, restoring = false, restoreTask = null, restoreFailed = false, settled = false, epoch = 0, cached = null, eventTimer = null;
     const subscriptions = [], operation = createOperationService(getContext);
+    const files = createStoryFileStore({ getHostWindow: () => host.window ?? host });
+    const story = storyStorage ?? createStoryStorage(getContext, { graph: createStoryStateGraph(files), available: () => files.available(), host, document });
+    let archiveTask = null, archiveAgain = false, observedNative = null;
+    const external = () => getContext()?.chatMetadata?.amin_os_story_storage_v2?.version === 2;
+    const removeSavePreparation = registerChatSavePreparation(async ctx => {
+        if (!external() || ctx.chatMetadata !== getContext()?.chatMetadata || restoring) return;
+        if (!ready(ctx)) throw Error('外置剧情状态尚未恢复，不能保存新的状态引用。');
+        const result = await story.capture();
+        if (result.changed) markChatIdsDirty(ctx);
+    });
     const say = text => { if (text !== lastMessage) { lastMessage = text; report(text); } };
     const available = () => getContext()?.extensionSettings?.LittleWhiteBox?.variablesMode === '2.0' && typeof host.LWB_StateV2?.applyText === 'function';
     const removeExpansion = registerOperationPatchExpansion((ctx, patches) => {
@@ -55,10 +69,14 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     function ready(ctx = getContext()) { return isChatReady(ctx) && (!storageStatus(ctx).migrated || sameChat(ctx) && settled && !restoring && !restoreFailed); }
     function signature(ctx) {
         const tail = ctx.chat?.at(-1), meta = ctx.chatMetadata;
-        return JSON.stringify([ctx.chat?.length, tail?.mes, tail?.swipe_id,
+        const wal = meta.extensions?.LittleWhiteBox?.stateLogV2?.floors?.[String((ctx.chat?.length ?? 0) - 1)];
+        // Canonical native variables are strings. Comparing them directly avoids
+        // serializing the entire live state again on every reconciliation tick.
+        return [ctx.chat?.length, tail?.mes, tail?.swipe_id,
             ...Object.values(ROOTS).map(root => meta.variables?.[root]), meta.variables?.状态栏, meta.variables?.势力资料,
-            meta.extensions?.LittleWhiteBox?.stateLogV2?.floors?.[String((ctx.chat?.length ?? 0) - 1)]]);
+            wal?.signature, JSON.stringify(wal?.roots ?? [])].map(value => value && typeof value === 'object' ? JSON.stringify(value) : value);
     }
+    const sameSignature = (left, right) => left && left.length === right.length && left.every((value, index) => value === right[index]);
     async function restoreChat() {
         const ctx = getContext();
         if (!isChatReady(ctx) || !ctx?.chatMetadata || !storageStatus(ctx).migrated || disposed) return;
@@ -77,10 +95,13 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 projecting = true;
                 try { release = acquireMetadataWrite(getContext, captureContext(getContext)); }
                 finally { projecting = false; }
-                const result = await restoreNative((ctx.chat?.length ?? 0) - 1, { context: getContext, host, document });
+                const result = external()
+                    ? await story.restoreFloor((ctx.chat?.length ?? 0) - 1)
+                    : await restoreNative((ctx.chat?.length ?? 0) - 1, { context: getContext, host, document });
                 if (disposed || ticket !== epoch || !sameChat(getContext())) return;
                 if (!result?.restored || result.stale) throw Error('回放期间聊天或楼层已变化，请重试。');
                 settled = true; restoring = false;
+                if (external()) observedNative = signature(ctx);
                 // Native replay owns variables. Notify observers only after it finishes.
                 projecting = true;
                 try { publishExternalMetadataChange(getContext, [['variables','状态栏'], ['variables','势力资料']]); }
@@ -98,6 +119,29 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         })();
         return restoreTask;
     }
+    async function archive() {
+        if (!external() || !ready() || disposed) return;
+        if (archiveTask) { archiveAgain = true; return archiveTask; }
+        const ctx = getContext();
+        if (metadataWriteStatus(getContext).busy || metadataWriteStatus(getContext).dirty) return;
+        observedNative = signature(ctx);
+        archiveTask = (async () => {
+            let release = () => {};
+            try {
+                release = acquireMetadataWrite(getContext, captureContext(getContext));
+                const result = await story.capture();
+                if (result.changed) { markChatIdsDirty(ctx); await saveChatMetadata(ctx); }
+            } catch (error) {
+                if (error?.code === 'INCOMPLETE_CANDIDATE') return;
+                say('外置剧情状态保存未完成：' + error.message); return { error };
+            }
+            finally { release(); }
+        })();
+        try { return await archiveTask; } finally {
+            archiveTask = null;
+            if (archiveAgain) { archiveAgain = false; queueMicrotask(() => { if (!disposed) void archive(); }); }
+        }
+    }
     function sync() {
         if (disposed || projecting || migrating) return false;
         const ctx=getContext();
@@ -111,7 +155,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
             if (errors && errors !== lastErrors) say('小白变量 2.0 反馈：'+errors);
             lastErrors = errors;
             const currentSignature = signature(ctx);
-            if (cached === currentSignature) return false;
+            if (sameSignature(cached, currentSignature)) return false;
             const result = projectState2(ctx);
             if (!result.patches.length) { cached = currentSignature; return false; }
             projecting = true;
@@ -150,17 +194,35 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         }
         if (getContext()?.chatMetadata!==ctx.chatMetadata || chatIdentity(getContext())!==identity || JSON.stringify(chatPath(getContext().chat))!==source) throw Error('迁移已保存到原聊天，请重新打开当前聊天。');
         activeMetadata = ctx.chatMetadata; activeIdentity = chatIdentity(ctx); settled = true; cached = null;
+        if (ctx.chat.length <= 1 && story.status().available && !external()) {
+            await story.enable();
+            markChatIdsDirty(ctx);
+            await saveChatMetadata(ctx);
+        }
         sync();say('当前聊天剧情资料已迁移到小白变量 2.0；旧记录已保留。');
         return {changed:true,message:lastMessage};
     }
-    async function prepareGeneration() {
+    async function prepareGeneration(type) {
         if (!available()) throw Error('请先启用小白 X 变量管理 2.0，再生成剧情。');
         if (!storageStatus(getContext()).migrated) await migrate();
-        if (!ready()) await restoreChat();
+        if (external() && ['swipe', 'regenerate'].includes(type) && !getContext()?.chat?.at(-1)?.is_user) {
+            const ctx = getContext(), release = acquireMetadataWrite(getContext, captureContext(getContext));
+            restoring = true;
+            try {
+                await story.restoreBeforeCandidate(type);
+                activeMetadata = ctx.chatMetadata; activeIdentity = chatIdentity(ctx);
+                settled = true; restoreFailed = false; cached = null;
+                observedNative = signature(ctx);
+            } finally { restoring = false; release(); }
+        } else if (!ready()) await restoreChat();
         if (!ready()) throw Error('当前分支变量恢复失败，请先处理联动更新页的错误提示。');
         sync();
         // Re-run validation even if sync reported an invalid projection.
         projectState2(getContext());
+        if (external() && !['swipe','regenerate'].includes(type)) {
+            const result = await archive();
+            if (result?.error) throw result.error;
+        }
     }
     function collectReply(index) {
         const text=getContext()?.chat?.[index]?.mes??'';
@@ -170,22 +232,63 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         say(message);return {outcome:'native',message};
     }
     const source=getContext()?.eventSource, events=getContext()?.eventTypes??getContext()?.event_types??{};
-    for(const name of ['CHAT_CHANGED','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_DELETED','GENERATION_ENDED'])if(source?.on&&events[name]){
+    for(const name of ['CHAT_CHANGED','MESSAGE_SENT','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_DELETED','GENERATION_ENDED'])if(source?.on&&events[name]){
         const fn=()=>{
             cached = null;
             if (name === 'CHAT_CHANGED') return restoreChat();
-            clearTimeout(eventTimer);eventTimer=setTimeout(sync,25);
+            if (external() && ['MESSAGE_SWIPED','MESSAGE_DELETED','MESSAGE_UPDATED'].includes(name)) {
+                settled = false; restoreFailed = false;
+                return restoreChat();
+            }
+            clearTimeout(eventTimer);eventTimer=setTimeout(() => { sync(); void archive(); },25);
         };source.on(events[name],fn);subscriptions.push([events[name],fn]);
+    }
+    if (source?.on && events.GENERATION_AFTER_COMMANDS) {
+        const gate = async (type, _options, dryRun) => {
+            if (dryRun || !external()) return;
+            try { await prepareGeneration(type); }
+            catch (error) { restoreFailed = true; say('剧情状态未就绪，已阻止生成：' + error.message); }
+        };
+        source.on(events.GENERATION_AFTER_COMMANDS, gate); subscriptions.push([events.GENERATION_AFTER_COMMANDS, gate]);
     }
     const jq=host.jQuery??host.$;
     const nativeEvent='xiaobaix:variables:stateAtomsGenerated.aminState2';
-    if(typeof jq==='function'&&document)jq(document).on(nativeEvent,sync);
+    const nativeChanged = () => { sync(); void archive(); };
+    if(typeof jq==='function'&&document)jq(document).on(nativeEvent,nativeChanged);
     // LWB restoration has no stable public completion event in supported versions.
     // A cheap periodic reconciliation also covers variable-panel edits and delayed replay.
-    if(interval>0){timer=setInterval(sync,interval);timer.unref?.();}
-    return { sync,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),message:lastMessage||nativeState2Status(getContext()).message}),
+    function reconcile() {
+        sync();
+        // Some LWB versions signal before applying variables. Reconcile a late
+        // native write once; unchanged reads and unchanged failures never save.
+        if (external() && ready() && !sameSignature(observedNative, signature(getContext()))) return archive();
+    }
+    if(interval>0){timer=setInterval(reconcile,interval);timer.unref?.();}
+    return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),message:lastMessage||nativeState2Status(getContext()).message}),
+        readStoryFloor: index => story.readFloor(index), storyStatus: () => story.status(),
+        async archiveStory() { const ctx = getContext(), result = await story.capture(); if (result.changed) markChatIdsDirty(ctx); return result; },
+        readStoryState: id => story.readState(id),
+        exportStory: () => story.exportStory(), importStory: bundle => story.importStory(bundle),
+        async inspectStoryStorage() {
+            const bundle = await story.exportStory(), nodes = Object.values(bundle.graph.nodes);
+            const bytes = value => new TextEncoder().encode(JSON.stringify(value)).length;
+            const ctx = getContext();
+            return { bytes: nodes.reduce((sum, node) => sum + bytes(node), 0), records: nodes.length,
+                checkpointCount: nodes.filter(node => node.kind === 'snapshot').length,
+                deltaCount: nodes.filter(node => node.kind === 'delta').length,
+                referenceBytes: (ctx.chat ?? []).reduce((sum, message) => sum + (message.extra?.amin_story_v2 ? bytes(message.extra.amin_story_v2) : 0)
+                    + (message.swipe_info ?? []).reduce((n, swipe) => n + (swipe?.extra?.amin_story_v2 ? bytes(swipe.extra.amin_story_v2) : 0), 0), 0) };
+        },
+        async enableStoryStorage() {
+            if (!storageStatus(getContext()).migrated) await migrate();
+            if (!ready()) await restoreChat();
+            if (!ready()) throw Error('当前变量尚未恢复，不能启用外置存储。');
+            const ctx = getContext(), release = acquireMetadataWrite(getContext, captureContext(getContext));
+            try { const result = await story.enable(); markChatIdsDirty(ctx); await saveChatMetadata(ctx); cached = null; return result; }
+            finally { release(); sync(); }
+        },
         async retrySave(){return operation.retrySave();},
-        destroy(){disposed=true;epoch++;clearInterval(timer);clearTimeout(eventTimer);removeExpansion();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,sync);},
+        destroy(){disposed=true;epoch++;clearInterval(timer);clearTimeout(eventTimer);removeSavePreparation();removeExpansion();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,nativeChanged);},
     };
 }
 export function initializeState2(getContext = context, options = {}) { return shared ??= createState2Runtime(getContext,options); }

@@ -14,6 +14,7 @@ import { checkpointState } from '../status/state-checkpoint.js';
 
 export const MIGRATION_KEY = 'amin_os_state2_v1';
 export const BACKUP_KEY = 'amin_os_state2_backup_v1';
+export const STORY_STORAGE_KEY = 'amin_os_story_storage_v2';
 export const MIGRATION_OWNER = 'amin-os/state2-v1';
 export const OWNERSHIP_FLOOR = '-1';
 export const ROOTS = Object.freeze({
@@ -274,6 +275,41 @@ function restoreOne(ctx, module, target, at) {
     if (module === 'dice') return [{ path: [META.dice], value: clone(target) }];
     throw Error('未知 Amin OS 变量模块。');
 }
+function externalStoryHistory(ctx) {
+    const marker = ctx.chatMetadata[STORY_STORAGE_KEY];
+    if (marker === undefined) return false;
+    if (!plain(marker) || marker.version !== 2 || marker.owner !== 'amin-os/story-v2'
+        || !/^sha256:[a-f0-9]{64}$/u.test(marker.baseStateId ?? '')) {
+        throw Error('Amin OS 剧情存储标记不兼容，原资料未改写。');
+    }
+    return true;
+}
+function accumulatedProjection(ctx, module, target) {
+    const store = ctx.chatMetadata[META[module]];
+    if (!plain(store)) return false;
+    if (module === 'information') return (store.history?.length ?? 0) > (target?.records?.length ?? 0);
+    if (module === 'journal') return (store.events?.length ?? 0) > (target?.entries?.length ?? 0)
+        || (store.draftEvents?.length ?? 0) > 1 + 2 * (target?.drafts?.length ?? 0);
+    if (module === 'effects' || ['characters', 'inventory', 'relationships', 'scene'].includes(module)) {
+        return (store.events?.length ?? 0) > 1;
+    }
+    return false;
+}
+function compactProjectionShadow(ctx) {
+    // The app views are rebuilt from the canonical variable, so old app event
+    // arrays must not be passed to restoreOne. Keep unrelated metadata by
+    // reference and replace only roots written by this transaction.
+    return { ...ctx, chatMetadata: { ...ctx.chatMetadata }, saveMetadataDebounced() {} };
+}
+function clearProjectionStore(shadow, module) {
+    if (module === 'effects') {
+        // Skills are user configuration; only effect events are story history.
+        const existing = shadow.chatMetadata[Effects.KEY];
+        shadow.chatMetadata[Effects.KEY] = existing === undefined ? Effects.empty() : { ...existing, events: [] };
+    } else if (!['map', 'dice'].includes(module)) {
+        delete shadow.chatMetadata[META[module]];
+    }
+}
 function assertNativeUpdateScope(ctx) {
     const floor = currentFloor(ctx), log = ctx.chatMetadata.extensions?.LittleWhiteBox?.stateLogV2?.floors;
     const ops = log?.[String(floor)]?.ops ?? [];
@@ -294,24 +330,27 @@ function assertNativeUpdateScope(ctx) {
     }
 }
 
-/** Project canonical LWB variables into legacy event stores, one changed module at a time. */
+/** Project canonical LWB variables into the app's current materialized view. */
 export function projectState2(ctx) {
     ensureContext(ctx);
     const status = nativeState2Status(ctx);
     if (!status.migrated || !status.enabled) return { patches: [], changed: [] };
     assertNativeUpdateScope(ctx);
+    const compact = externalStoryHistory(ctx);
     const current = materialize(ctx), canonical = canonicalSnapshots(ctx, current), desired = new Map();
     for (const module of ORDER) {
         const latest = current[module] ?? emptySnapshot(module, current[module]);
         const target = withLocalSettings(module, canonical[module], latest);
-        if (!same(storySnapshot(module, latest), storySnapshot(module, target))) desired.set(module, target);
+        if (!same(storySnapshot(module, latest), storySnapshot(module, target))
+            || (compact && accumulatedProjection(ctx, module, target))) desired.set(module, target);
     }
     // History navigation calls this repeatedly. Nothing changed: avoid cloning
     // the whole chat metadata (including LWB checkpoints) or rebuilding views.
     if (!desired.size) return { patches: [], changed: [] };
-    const shadow = shadowOf(ctx), patches = [], changed = [];
+    const shadow = compact ? compactProjectionShadow(ctx) : shadowOf(ctx), patches = [], changed = [];
     const at = new Date().toISOString();
     for (const [module, target] of desired) {
+        if (compact) clearProjectionStore(shadow, module);
         const generated = restoreOne(shadow, module, target, at);
         for (const patch of generated) { applyPatch(shadow.chatMetadata, patch); patches.push(patch); }
         changed.push(module);
@@ -362,8 +401,20 @@ export function manualState2Patches(ctx, input = []) {
     const checkpoint = checkpointPatch(shadow);
     const extra = [...candidate, ...[ownership, ...diceRules].filter(Boolean)];
     if (checkpoint) { extra.push(checkpoint); applyPatch(shadow.chatMetadata, checkpoint); }
+    // In external-history mode the caller's app patch may contain the old
+    // event array plus one new event. Replace that same path with its single
+    // current view inside the same save transaction.
+    const compactPaths = new Set();
+    if (externalStoryHistory(shadow)) {
+        for (const patch of projectState2(shadow).patches) {
+            applyPatch(shadow.chatMetadata, patch);
+            extra.push(patch);
+            compactPaths.add(JSON.stringify(patch.path));
+        }
+    }
     const originalPaths = new Set(original.map(patch => JSON.stringify(patch.path)));
-    return { patches: extra.filter(patch => !originalPaths.has(JSON.stringify(patch.path)) && diffPath(ctx.chatMetadata, shadow.chatMetadata, patch.path)),
+    return { patches: extra.filter(patch => (!originalPaths.has(JSON.stringify(patch.path)) || compactPaths.has(JSON.stringify(patch.path)))
+        && diffPath(ctx.chatMetadata, shadow.chatMetadata, patch.path)),
         changed: touched, migrated: true };
 }
 

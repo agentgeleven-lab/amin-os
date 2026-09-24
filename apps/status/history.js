@@ -5,14 +5,32 @@ import { markChatIdsDirty, saveChatMetadata } from '../shared/chat-save.js';
 // History lives in chat metadata, never in the model-facing variable namespace.
 export const HISTORY_KEY = 'world_status_hud_history_v1';
 const copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
+const referenceSnapshot = m => JSON.stringify([m?.extra?.amin_story_v2 ?? null,
+  m?.swipe_info?.[m.swipe_id ?? 0]?.extra?.amin_story_v2 ?? null]);
 export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {}, historyKey = HISTORY_KEY, messageKey = 'wsh_message_id', allowGroups = false,
-  nativeState = () => ({ managed: false, ready: true }) }) {
+  nativeState = () => ({ managed: false, ready: true }), externalRead = null }) {
   let metadata, chatId, previous = [], lastValue, blocked = false;
+  let externalObserved = [];
   let queuedSave = null, pendingIds = null, saving = false, syncing = 0, suppressSaves = 0;
   const listeners = new Set();
   const saveGate = createOperationService(context);
   const offSaveGate = saveGate.subscribe(flushSave);
   const emit = () => { changed(); for (const fn of listeners) fn(); };
+  const external = c => c?.chatMetadata?.amin_os_story_storage_v2?.version === 2;
+  function syncExternal(c) {
+    const switched = metadata !== c.chatMetadata || chatId !== c.getCurrentChatId();
+    const observed = (c.chat || []).map(m => ({ message: m, variant: String(m.swipe_id ?? 0), name: m.name, content: m.mes,
+      reference: referenceSnapshot(m) }));
+    const dirty = switched || observed.length !== externalObserved.length || observed.some((m, i) =>
+      m.message !== externalObserved[i]?.message || m.variant !== externalObserved[i]?.variant || m.content !== externalObserved[i]?.content ||
+      m.name !== externalObserved[i]?.name || m.reference !== externalObserved[i]?.reference);
+    metadata = c.chatMetadata; chatId = c.getCurrentChatId(); previous = [];
+    lastValue = undefined; blocked = false; externalObserved = observed;
+    queuedSave = null; pendingIds = null;
+    // External state is authoritative. Merely opening or observing a floor never
+    // allocates IDs, snapshots, or a metadata save in the chat file.
+    if (dirty) emit();
+  }
   function messages(beforeSave) {
     const c = context();
     let assigned = false;
@@ -36,6 +54,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
   function queueSave(kind) {
     if (suppressSaves) return;
     const c = context();
+    if (external(c)) return;
     if (!isChatReady(c)) return;
     const identity = chatIdentity(c);
     if (!queuedSave || queuedSave.metadata !== c.chatMetadata || queuedSave.identity !== identity) {
@@ -55,6 +74,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
   function flushSave() {
     if (!queuedSave || saving || syncing) return;
     const c = context();
+    if (external(c)) { queuedSave = null; pendingIds = null; return; }
     if (!isChatReady(c) || c?.chatMetadata !== queuedSave.metadata || chatIdentity(c) !== queuedSave.identity) return;
     const native = nativeState();
     if (native?.managed && !native.ready) return;
@@ -99,6 +119,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
   function syncCurrent() {
     const c = context();
     if (!isChatReady(c) || !c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return;
+    if (external(c)) { syncExternal(c); return; }
     const native = nativeState();
     // LittleWhiteBox may still be replaying a copied branch. Recording now
     // would stamp a future value onto an older floor.
@@ -145,17 +166,39 @@ export function createHistory({ context, read, write, changed = () => {}, before
     if (dirty) emit();
   }
   function list() {
-    if (metadata !== context().chatMetadata || chatId !== context().getCurrentChatId()) return [];
+    const c = context();
+    if (metadata !== c.chatMetadata || chatId !== c.getCurrentChatId()) return [];
+    if (external(c)) return (c.chat || []).map((m, index) => ({
+      index, name: m.name || (m.is_user ? '用户' : '角色'), available: true, external: true,
+    }));
     const records = metadata?.[historyKey]?.records || {};
-    return (context().chat || []).map((m, index) => {
+    return (c.chat || []).map((m, index) => {
       const id = m.extra?.[messageKey];
       const record = records[id + ':' + String(m.swipe_id ?? 0)];
       return { index, name: m.name || (m.is_user ? '用户' : '角色'), available: !!record, state: copy(record?.state), savedAt: record?.savedAt };
     });
   }
+  async function readFloor(index) {
+    const c = context();
+    if (!Number.isInteger(index) || index < 0 || index >= (c?.chat?.length ?? 0)) throw Error('楼层不存在。');
+    const identity = chatIdentity(c), metadataAtStart = c.chatMetadata, message = c.chat[index], variant = String(message.swipe_id ?? 0), reference = referenceSnapshot(message), content = message.mes;
+    if (external(c)) {
+      if (typeof externalRead !== 'function') throw Error('外置楼层读取尚未就绪。');
+      const state = await externalRead(index, c);
+      const current = context();
+      if (current?.chatMetadata !== metadataAtStart || chatIdentity(current) !== identity ||
+          current.chat?.[index] !== message || String(message.swipe_id ?? 0) !== variant || referenceSnapshot(message) !== reference || message.mes !== content)
+        throw Error('聊天或楼层已变化，请重新打开记录。');
+      return { index, name: message.name || (message.is_user ? '用户' : '角色'), available: true, external: true, state: copy(state), variant, reference, content };
+    }
+    const row = list().find(row => row.index === index);
+    if (!row?.available) throw Error('此楼层尚无记录。');
+    return row;
+  }
   function adoptExternal() {
     const c = context();
     if (!isChatReady(c) || !c.chatMetadata || c.getCurrentChatId() == null || (c.groupId && !allowGroups)) return false;
+    if (external(c)) { syncExternal(c); return true; }
     const native = nativeState();
     if (native?.managed && !native.ready) return false;
     // Read before changing the observer. A malformed external value must not
@@ -184,5 +227,5 @@ export function createHistory({ context, read, write, changed = () => {}, before
     emit();
     return true;
   }
-  return { sync, adoptExternal, list, subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }, dispose() { queuedSave = null; offSaveGate(); saveGate.dispose(); listeners.clear(); } };
+  return { sync, adoptExternal, list, readFloor, subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }, dispose() { queuedSave = null; offSaveGate(); saveGate.dispose(); listeners.clear(); } };
 }

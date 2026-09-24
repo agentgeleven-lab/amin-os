@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 
 export const KEY = 'amin_os_characters_v1';
 export const STATUS_PATH = Object.freeze(['variables', '状态栏']);
@@ -14,8 +15,8 @@ const text = (value, name, limit = LIMITS.text) => {
 };
 export const emptyState = () => ({ version: 1, characters: [] });
 export const emptyStore = () => ({ version: 1, events: [] });
-export const chatPath = chat => (chat ?? []).map(message => JSON.stringify([message.name ?? '', !!message.is_user, message.mes ?? '', message.swipe_id ?? 0]));
-export const belongs = (event, path) => Array.isArray(event?.path) && event.path.length <= path.length && event.path.every((part, index) => part === path[index]);
+export const chatPath = chat => chatRevisions(chat ?? []);
+export const belongs = (event, path) => pathBelongs(event?.path, path);
 
 export function bindingParts(binding) {
     if (typeof binding !== 'string') throw Error('数值绑定必须填写“项目名.字段名”。');

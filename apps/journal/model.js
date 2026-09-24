@@ -1,5 +1,6 @@
 import { uuid } from '../../uuid.js';
 import { readCharacters, validId } from '../characters/model.js';
+import { chatRevisions, messageRevision, pathBelongs, sameMessageRevision } from '../shared/message-revision.js';
 export const KEY = 'amin_os_journal_v1';
 export const FORMAT = 'amin-os-journal';
 export const STATUSES = { open: '待回收', resolved: '已回收', abandoned: '已放弃' };
@@ -7,9 +8,9 @@ export const KINDS = { hook: '伏笔', chronicle: '编年史', fact: '事实', k
 export const TRUTHS = { confirmed: '已确认', uncertain: '未证实', disputed: '有争议' };
 export const KNOWLEDGE_STATES = { known: '知情', rumor: '传闻', forgotten: '已遗忘' };
 export const empty = () => ({ version: 1, events: [], limit: 40000 });
-export const revision = message => JSON.stringify([message?.name ?? '', !!message?.is_user, message?.mes ?? '', message?.swipe_id ?? 0]);
-export const path = chat => (chat ?? []).map(revision);
-export const belongs = (event, current) => Array.isArray(event?.path) && event.path.length <= current.length && event.path.every((value, index) => current[index] === value);
+export const revision = messageRevision;
+export const path = chat => chatRevisions(chat ?? []);
+export const belongs = (event, current) => pathBelongs(event?.path, current);
 
 export function readStore(ctx) {
     const store = ctx?.chatMetadata?.[KEY];
@@ -36,7 +37,7 @@ export function sourceState(source, chat) {
     for (let offset = 0; offset < source.messages.length; offset++) {
         const item = source.messages[offset], index = source.start + offset;
         if (item.index !== index || !chat?.[index]) return { valid: false, reason: '来源楼层已删除或尚未加载' };
-        if (item.revision !== revision(chat[index]) || item.text !== chat[index].mes) return { valid: false, reason: '来源正文或回复候选已变化' };
+        if (!sameMessageRevision(item.revision, revision(chat[index])) || item.text !== chat[index].mes) return { valid: false, reason: '来源正文或回复候选已变化' };
     }
     return { valid: true, reason: '' };
 }

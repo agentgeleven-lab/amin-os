@@ -6,6 +6,7 @@ import {getAI} from '../../ai/service.js';
 import { checkpointState } from './state-checkpoint.js';
 import { mergeUpdates, RELATION_UPDATE_RULES } from './state-tools.js';
 import { acquireMetadataWrite } from '../shared/operations.js';
+import { captureStoryBackup, recordStoryBackup, usesStoryStorage } from './story-backups.js';
 export async function generateStatus(CONFIG, signal, sourceOptions = {}) {
 const sharedAI=getAI(),snapshot=requireStatusChat(sharedAI?.capture('status'));
 if(snapshot) CONFIG={...CONFIG,api:{...CONFIG.api,maxTokens:snapshot.config.maxTokens,timeoutMs:snapshot.config.timeoutSeconds*1000}};
@@ -213,20 +214,30 @@ try {
     return { ok: true, changed: false, books: source.世界书.map(x => x.名称) };
   }
   guard();
+  const externalStory = usesStoryStorage(ctx);
+  const storyBackup = externalStory && latest !== null
+    ? await captureStoryBackup(ctx, { label: '状态栏生成前', archive: sourceOptions.archiveStory }) : null;
+  guard();
+  if (storyBackup && !equal(readState(), latest)) throw Error('建立恢复点期间状态栏已变化，请重新生成。');
   // 从再次检查到变量写入没有 await，避免本页其他操作插入其中。
   releaseWrite=acquireMetadataWrite(currentContext);
-  const backupKey = '状态栏_生成前备份_' + Date.now();
-  if (latest !== null) vars.setLocalVariable(backupKey, JSON.stringify(latest));
+  const backupKey = latest !== null && !externalStory ? '状态栏_生成前备份_' + Date.now() : null;
+  if (backupKey) vars.setLocalVariable(backupKey, JSON.stringify(latest));
+  if (storyBackup) recordStoryBackup(ctx, storyBackup);
   vars.setLocalVariable('状态栏', JSON.stringify(finalState));
   checkpointState(ctx);
-  if (!equal(readState(), finalState)) throw Error('本地写入后校验失败，请检查变量面板及生成前备份。');
+  if (!equal(readState(), finalState)) throw Error(externalStory
+    ? '本地写入后校验失败，请检查变量面板及外置楼层状态。'
+    : '本地写入后校验失败，请检查变量面板及生成前备份。');
   // setLocalVariable 本身会安排酒馆保存；此处主动等待当前聊天元数据保存。
   try { await saveChatMetadata(ctx); }
-  catch { throw Error('变量已写入内存，但聊天保存失败。请保持当前聊天并重试保存；备份仍在变量面板。'); }
+  catch { throw Error(externalStory
+    ? '变量已写入内存，但聊天保存失败。请保持当前聊天并重试保存，确认外置楼层状态已保存。'
+    : '变量已写入内存，但聊天保存失败。请保持当前聊天并重试保存；备份仍在变量面板。'); }
   guard();
   window.toastr?.success((CONFIG.mode === 'update' ? '状态栏已更新：' : '状态栏已生成：新增/生成 ') + added + ' 个变量，前端刷新即可显示。');
   return { ok: true, changed: true, variables: added, books: source.世界书.map(x => x.名称),
-    backup: latest === null ? null : backupKey, sourceChars: sourceText.length };
+    backup: backupKey, externalBackup: storyBackup?.stateId ?? null, sourceChars: sourceText.length };
 } catch (error) {
   const message = error?.message || '状态栏生成失败。';
   window.toastr?.error(message, '状态栏生成器', { timeOut: 12000 });

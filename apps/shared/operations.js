@@ -1,6 +1,7 @@
 import { saveChatMetadata } from './chat-save.js';
 import { uuid } from '../../uuid.js';
 import { assertChatReady } from './chat-lifecycle.js';
+import { chatRevisions, pathBelongs as revisionPathBelongs } from './message-revision.js';
 
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
@@ -111,10 +112,10 @@ export function chatIdentity(ctx) {
 }
 export function chatPath(chat = []) {
     if (!Array.isArray(chat)) fail('INVALID_CHAT', '当前聊天记录格式无效。');
-    return chat.map(message => JSON.stringify([message?.name ?? '', !!message?.is_user, message?.mes ?? '', message?.swipe_id ?? 0]));
+    return chatRevisions(chat);
 }
 export function pathBelongs(anchor, path) {
-    return Array.isArray(anchor) && Array.isArray(path) && anchor.length <= path.length && anchor.every((value, index) => value === path[index]);
+    return revisionPathBelongs(anchor, path);
 }
 function currentContext(getContext) {
     if (typeof getContext !== 'function') fail('INVALID_CONTEXT', '缺少聊天上下文接口。');

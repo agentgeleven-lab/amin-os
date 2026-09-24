@@ -1,5 +1,6 @@
 import { uuid } from '../../uuid.js';
 import { readCharacters } from '../characters/model.js';
+import { chatRevisions, pathBelongs, sameMessageRevision, validMessageRevision } from '../shared/message-revision.js';
 
 export const KEY = 'amin_os_relationships_v1';
 export const LIMITS = Object.freeze({ relationships: 500, events: 1000, rules: 200, alerts: 1000, sources: 30, text: 4000, prompt: 12000, storeChars: 20000000 });
@@ -26,12 +27,12 @@ export const emptyStore = () => ({ version: 1, events: [] });
 // Exact content/candidate evidence: copied metadata cannot expose another branch's facts.
 export const chatPath = chat => {
     if (!Array.isArray(chat ?? [])) throw Error('聊天消息格式不兼容。');
-    return (chat ?? []).map(message => {
+    return chatRevisions((chat ?? []).map(message => {
         if (!object(message)) throw Error('聊天消息格式不兼容。');
-        return JSON.stringify([message.name ?? '', !!message.is_user, message.mes ?? '', message.swipe_id ?? 0]);
-    });
+        return message;
+    }));
 };
-export const belongs = (event, path) => Array.isArray(event?.path) && event.path.length <= path.length && event.path.every((part, index) => part === path[index]);
+export const belongs = (event, path) => pathBelongs(event?.path, path);
 
 export function sourceReferences(chat, indices) {
     array(indices, LIMITS.sources, '关系来源');
@@ -47,7 +48,9 @@ export function validateEvidence(input) {
     const sources = input.sources.map(source => {
         keys(source, ['index', 'revision'], '关系来源楼层');
         if (!Number.isInteger(source.index) || source.index < 0 || source.index > 99999) throw Error('关系来源楼层无效。');
-        return { index: source.index, revision: text(source.revision, '关系来源正文', 200000, true) };
+        const revision = text(source.revision, '关系来源修订', 200000, true);
+        if (!validMessageRevision(revision)) throw Error('关系来源修订格式无效。');
+        return { index: source.index, revision };
     });
     if (new Set(sources.map(source => source.index)).size !== sources.length) throw Error('关系来源楼层重复。');
     return { origin: input.origin, reason, sources };
@@ -55,7 +58,7 @@ export function validateEvidence(input) {
 export function evidenceMatches(evidence, chat) {
     if (!evidence) return true;
     const path = chatPath(chat);
-    return evidence.sources.every(source => path[source.index] === source.revision);
+    return evidence.sources.every(source => sameMessageRevision(path[source.index], source.revision));
 }
 const strengthValue = value => {
     if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 1000000000) throw Error('关系强度需为 -1000000000 至 1000000000 的有限数字；未填写时不记录强度。');
@@ -158,7 +161,7 @@ export function relationshipContext(ctx) {
     const state = readRelationships(ctx), path = chatPath(ctx?.chat);
     return { ...state, relationships: state.relationships.map(relationship => relationship.evidence ? { ...relationship, evidence: {
         origin: relationship.evidence.origin, reason: relationship.evidence.reason,
-        sources: relationship.evidence.sources.map(source => ({ index: source.index, current: source.revision === path[source.index] })),
+        sources: relationship.evidence.sources.map(source => ({ index: source.index, current: sameMessageRevision(source.revision, path[source.index]) })),
     } } : relationship) };
 }
 

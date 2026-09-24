@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 
 export const KEY = 'amin_os_inventory_v1';
 export const LIMITS = Object.freeze({ items: 1000, balances: 300, ledger: 2000, events: 2000, amount: 1000000000 });
@@ -31,8 +32,8 @@ const addAmount = (a, b) => amount((Math.round(a * 1000000) + Math.round(b * 100
 const timestamp = value => { if (typeof value !== 'string' || value.length > 60 || !Number.isFinite(Date.parse(value))) throw Error('账本保存时间无效。'); return value; };
 export const emptyState = () => ({ version: 1, items: [], balances: [], ledger: [] });
 export const emptyStore = () => ({ version: 1, events: [] });
-export const chatPath = chat => (chat ?? []).map(message => JSON.stringify([message?.name ?? '', !!message?.is_user, message?.mes ?? '', message?.swipe_id ?? 0]));
-const belongs = (event, path) => event.path.length <= path.length && event.path.every((part, index) => part === path[index]);
+export const chatPath = chat => chatRevisions(chat ?? []);
+const belongs = (event, path) => pathBelongs(event?.path, path);
 
 export function validateWear(value) {
     if (!object(value) || Object.keys(value).some(key => !['slot', 'layer', 'description'].includes(key))) throw Error('穿戴资料格式无效。');

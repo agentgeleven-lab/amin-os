@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import * as Characters from '../apps/characters/model.js';
 import * as Scene from '../apps/scene/model.js';
 import * as Relationships from '../apps/relationships/model.js';
+import * as Journal from '../apps/journal/model.js';
+import * as Information from '../apps/information/model.js';
 import { materialize } from '../apps/saves/adapters.js';
-import { MIGRATION_KEY, BACKUP_KEY, ROOTS, migrateState2, nativeState2Status, projectState2, manualState2Patches, prepareState2ManualWrite } from '../apps/state2/storage.js';
+import { MIGRATION_KEY, BACKUP_KEY, STORY_STORAGE_KEY, ROOTS, migrateState2, nativeState2Status, projectState2, manualState2Patches, prepareState2ManualWrite } from '../apps/state2/storage.js';
 
 const clone = value => structuredClone(value);
 const parse = value => JSON.parse(value);
+const storyMarker = () => ({ version: 2, owner: 'amin-os/story-v2', baseStateId: 'sha256:' + 'a'.repeat(64) });
 function apply(meta, patches) {
     for (const patch of patches) {
         let at = meta;
@@ -123,6 +126,72 @@ test('same-floor native A to B to A changes use distinct event IDs', () => {
     const events = ctx.chatMetadata[Characters.KEY].events;
     assert.equal(new Set(events.map(event => event.id)).size, events.length);
     assert.equal(Characters.readCharacters(ctx).characters[0].notes, 'A');
+});
+
+test('external story history keeps one current app event across native updates', () => {
+    const ctx = migrated(); ctx.chatMetadata[STORY_STORAGE_KEY] = storyMarker();
+    const original = parse(ctx.chatMetadata.variables[ROOTS.characters]);
+    const sizes = [];
+    for (const notes of ['first', 'second', 'third', 'fourth']) {
+        const next = clone(original); next.characters[0].notes = notes;
+        ctx.chatMetadata.variables[ROOTS.characters] = JSON.stringify(next);
+        const before = clone(ctx.chatMetadata), result = projectState2(ctx);
+        assert.deepEqual(ctx.chatMetadata, before);
+        assert.deepEqual(result.changed, ['characters']);
+        apply(ctx.chatMetadata, result.patches);
+        assert.equal(ctx.chatMetadata[Characters.KEY].events.length, 1);
+        assert.equal(Characters.readCharacters(ctx).characters[0].notes, notes);
+        sizes.push(JSON.stringify(ctx.chatMetadata[Characters.KEY]).length);
+        assert.deepEqual(projectState2(ctx), { patches: [], changed: [] });
+    }
+    assert.ok(Math.max(...sizes) - Math.min(...sizes) < 32, 'current view size stays bounded by current content');
+});
+
+test('external history activation compacts stale app events without changing story state', () => {
+    const ctx = migrated(); ctx.chatMetadata[STORY_STORAGE_KEY] = storyMarker();
+    const current = materialize(ctx), at = '2026-09-24T00:02:00.000Z';
+    ctx.chatMetadata[Characters.KEY] = Characters.buildRestore(ctx, current.characters, { id: 'duplicate', at });
+    ctx.chatMetadata[Scene.KEY] = Scene.appendEvent(Scene.readStore(ctx), ctx.chat,
+        { op: 'restore', reason: 'duplicate', state: current.scene, details: { beforeTime: null, afterTime: null } },
+        { eventId: 'scene-duplicate', at });
+    ctx.chatMetadata[Journal.KEY] = { ...Journal.empty(), events: [{ id: 'old-delete', op: 'delete', recordId: 'missing', path: Journal.path(ctx.chat), at }] };
+    ctx.chatMetadata[Information.KEY] = { ...Information.empty(), history: [{ id: 'old-reset', recordId: 'missing', path: Information.path(ctx.chat), at, action: 'reset', snapshot: null }] };
+    const beforeState = materialize(ctx);
+    const result = projectState2(ctx);
+    assert.deepEqual(result.changed, ['characters', 'scene', 'journal', 'information']);
+    apply(ctx.chatMetadata, result.patches);
+    const afterState = materialize(ctx);
+    for (const module of ['characters', 'scene', 'information']) assert.deepEqual(afterState[module], beforeState[module]);
+    assert.deepEqual(afterState.journal.entries, beforeState.journal.entries);
+    assert.equal(ctx.chatMetadata[Characters.KEY].events.length, 1);
+    assert.equal(ctx.chatMetadata[Scene.KEY].events.length, 1);
+    assert.equal(ctx.chatMetadata[Journal.KEY].events.length, 0);
+    assert.equal(ctx.chatMetadata[Information.KEY].history.length, 0);
+    assert.deepEqual(projectState2(ctx), { patches: [], changed: [] });
+});
+
+test('external history manual write replaces the original app patch in one transaction', () => {
+    const ctx = migrated(); ctx.chatMetadata[STORY_STORAGE_KEY] = storyMarker();
+    const before = clone(ctx.chatMetadata), current = Characters.readCharacters(ctx);
+    current.characters[0].notes = 'manual current view';
+    const input = { path: [Characters.KEY], value: Characters.buildRestore(ctx, current,
+        { id: 'manual-compact', at: '2026-09-24T00:03:00.000Z' }) };
+    assert.equal(input.value.events.length, 2);
+    const result = manualState2Patches(ctx, [input]);
+    assert.deepEqual(ctx.chatMetadata, before);
+    assert.deepEqual(result.patches.filter(patch => patch.path[0] === Characters.KEY).length, 1);
+    apply(ctx.chatMetadata, [input, ...result.patches]);
+    assert.equal(ctx.chatMetadata[Characters.KEY].events.length, 1);
+    assert.equal(Characters.readCharacters(ctx).characters[0].notes, 'manual current view');
+    assert.equal(parse(ctx.chatMetadata.variables[ROOTS.characters]).characters[0].notes, 'manual current view');
+    assert.deepEqual(projectState2(ctx), { patches: [], changed: [] });
+});
+
+test('invalid external history marker never compacts existing app records', () => {
+    const ctx = migrated(); ctx.chatMetadata[STORY_STORAGE_KEY] = { version: 2 };
+    const before = clone(ctx.chatMetadata);
+    assert.throws(() => projectState2(ctx), /存储标记不兼容/);
+    assert.deepEqual(ctx.chatMetadata, before);
 });
 
 test('first manual native status write adds ownership before checkpoint', () => {

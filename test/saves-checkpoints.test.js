@@ -45,7 +45,7 @@ test('checkpoints capture only the actual tail and keep candidate and content re
 
 test('old stores and snapshots remain usable without pretending to have historical source proof', async () => {
     const h = fixture(); h.api.stageSave({ name: '旧存档' }); await h.api.confirm();
-    const saved = clone(h.api.read().saves[0]); delete saved.source.path;
+    const saved = clone(h.api.read().saves[0]); delete saved.source.path; delete saved.source.candidateBinding;
     h.ctx.chatMetadata[KEY] = { version: 1, saves: [saved], backups: [] };
     assert.equal(h.api.read().checkpointSettings.enabled, true); assert.deepEqual(h.api.read().checkpoints, []);
     assert.match(h.api.branchAvailability(saved.id).reason, /旧版/); assert.throws(() => h.api.stageBranch(saved.id), /旧版/);
@@ -55,10 +55,11 @@ test('old stores and snapshots remain usable without pretending to have historic
 
 test('checkpoint source paths reject incomplete and mismatched candidate data', async () => {
     const h = fixture(), saved = await h.api.captureCheckpoint();
-    for (const alter of [s => s.source.path.pop(), s => s.source.candidate++, s => s.source.path[0] = '{}']) {
+    for (const alter of [s => s.source.path.pop(), s => s.source.candidate++, s => s.source.path[0] = '{}',
+        s => s.source.path[0] = 'sha256:' + 'a'.repeat(64), s => delete s.source.candidateBinding]) {
         const bad = clone(saved); alter(bad); assert.throws(() => validateSnapshot(bad), /来源|修订|候选/);
     }
-    const old = clone(saved); delete old.source.path;
+    const old = clone(saved); delete old.source.path; delete old.source.candidateBinding;
     assert.throws(() => validateStore({ version: 1, saves: [], backups: [], checkpoints: [old] }), /完整来源/); h.api.dispose();
 });
 

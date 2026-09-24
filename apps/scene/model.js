@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 import { validateGameClock, advanceGameClock, gameTimeMinutes, clockWeekday, calendarKey } from './calendar.js';
 import { readCharacters } from '../characters/model.js';
 import { managesModule } from '../linkage/policy.js';
@@ -24,8 +25,8 @@ const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(v
 
 // Exact message/candidate evidence survives reopening and metadata copied from a later branch.
 // Read-only: opening this application never edits messages or establishes story facts.
-export const chatPath = chat => (chat ?? []).map(m => JSON.stringify([m.name ?? '', !!m.is_user, m.mes ?? '', m.swipe_id ?? 0]));
-export const belongs = (event, path) => Array.isArray(event?.path) && event.path.length <= path.length && event.path.every((part, i) => part === path[i]);
+export const chatPath = chat => chatRevisions(chat ?? []);
+export const belongs = (event, path) => pathBelongs(event?.path, path);
 export function readStore(ctx) {
     const store = ctx?.chatMetadata?.[KEY];
     if (store === undefined) return emptyStore();

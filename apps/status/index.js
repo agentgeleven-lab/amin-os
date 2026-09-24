@@ -9,6 +9,7 @@ import { compileRules, createRulesPage } from './rules.js';
 import { installUpdateEntry, boundWorldbook } from './lorebook.js';
 import { createHistory } from './history.js';
 import { historyView, installFloorButtons } from './history-ui.js';
+import { captureStoryBackup, recordStoryBackup, storyBackups, usesStoryStorage } from './story-backups.js';
 import { createTemplatesPage, copyPrompt } from './templates.js';
 import { buildUpdatePrompt } from './state-tools.js';
 import { generateStatus } from './generator.js';
@@ -16,7 +17,7 @@ import { setLocalVariable } from '/scripts/variables.js';
 import { mount as mountLinkage } from '../linkage/view.js';
 import { getSharedService as getLinkageService } from '../linkage/service.js';
 import { managesModule } from '../linkage/policy.js';
-import { state2HistoryMode } from '../state2/runtime.js';
+import { getState2Runtime, state2HistoryMode } from '../state2/runtime.js';
 
 const KEY = 'world_status_hud_v1';
 const context = () => SillyTavern.getContext();
@@ -67,6 +68,11 @@ function parseState(raw) {
   return d;
 }
 const history = createHistory({ context, read: () => parseState(context().chatMetadata.variables?.状态栏),
+  externalRead: async index => {
+    const runtime = getState2Runtime();
+    if (typeof runtime?.readStoryFloor !== 'function') throw Error('外置楼层读取尚未就绪。');
+    return parseState((await runtime.readStoryFloor(index)).variables?.状态栏);
+  },
   write: value => { if (value === null) { delete context().chatMetadata.variables?.状态栏; } else setLocalVariable('状态栏', JSON.stringify(value)); },
   beforeRestore: () => { running?.abort(); closeHud(); }, warn: message => notify(message, true),
   nativeState: () => state2HistoryMode(context()) });
@@ -86,10 +92,15 @@ function createDisplaySettings() {
   const page = node('section', undefined, 'wsh-generation-page');
   const label = node('label', '在楼层工具栏显示世界状态入口'); const input = node('input'); input.type = 'checkbox'; input.checked = getSettings().floorButtons;
   input.onchange = () => { context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], floorButtons: input.checked }; context().saveSettingsDebounced(); floorButtons.refresh(); };
-  const historyNote = state2HistoryMode(context()).managed
+  const historyNote = usesStoryStorage(context())
+    ? '小白 X 变量 2.0 负责当前剧情变量；旧楼层状态按消息引用从外置状态图读取。查看历史不会改写当前变量。'
+    : state2HistoryMode(context()).managed
     ? '小白X变量 2.0 负责分支和楼层回放；楼层记录只显示已回放的变量值。'
     : '翻页仅浏览；删除后续消息、回退剧情时才恢复末尾楼层的变量。没有记录的旧楼层不会自动推测数值。';
-  label.append(input); page.append(node('h3', '显示与记录设置'), label, node('p', '最新楼层打开当前状态工作台，旧楼层打开只读记录。楼层记录随当前聊天自动保存。'), node('p', historyNote));
+  const storageNote = usesStoryStorage(context())
+    ? '楼层记录由消息引用外置剧情状态，打开历史楼层时按需读取。'
+    : '楼层记录随当前聊天自动保存。';
+  label.append(input); page.append(node('h3', '显示与记录设置'), label, node('p', '最新楼层打开当前状态工作台，旧楼层打开只读记录。' + storageNote), node('p', historyNote));
   const appearanceLink=node('button','打开设置 · 统一外观','menu_button');appearanceLink.type='button';appearanceLink.onclick=()=>globalThis.AminOS?.openApp('settings');page.append(appearanceLink,createLorebookControl());
   return page;
 }
@@ -162,9 +173,14 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   const templatePage = createTemplatesPage({ context, settingsKey: KEY, read: readCurrent,
     write: async value => {
       checkIdentity(id); validate(); if (running) throw Error('模型任务运行中，请稍后应用模板。');
+      const old = id.metadata.variables?.状态栏;
+      const external = usesStoryStorage(context());
+      const backup = external && old !== undefined ? await captureStoryBackup(context(), {label:'应用状态模板前'}) : null;
+      checkIdentity(id); validate();
+      if (id.metadata.variables?.状态栏 !== old) throw Error('建立恢复点期间状态栏已变化，请重新应用模板。');
       await persistStatusChange(()=>{
-        const old = id.metadata.variables?.状态栏;
-        if (old !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), old);
+        if (!external && old !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), old);
+        if (backup) recordStoryBackup(context(),backup);
         setLocalVariable('状态栏', JSON.stringify(value));checkpointState(context());
       });
     }, isRunning: () => !!running, node });
@@ -287,7 +303,13 @@ async function restoreBackup() {
   const id = identity();
   const backups = Object.keys(id.metadata.variables || {}).filter(k => k.startsWith('状态栏_生成前备份_')).sort().reverse();
   const candidates = new Map(backups.map(k => [k, id.metadata.variables[k]]));
-  for (const row of history.list()) { if (row.available && row.state) candidates.set(`楼层记录 · 第 ${row.index + 1} 楼 · ${row.name}`, JSON.stringify(row.state)); }
+  for (const [offset, backup] of [...storyBackups(context())].reverse().entries())
+    candidates.set(`外置恢复点 · ${backup.label} · ${new Date(backup.at).toLocaleString()} · ${offset + 1}`, { stateId: backup.stateId });
+  for (const row of history.list()) {
+    if (!row.available) continue;
+    if (row.external) candidates.set(`楼层记录 · 第 ${row.index + 1} 楼 · ${row.name}`, { floor: row.index });
+    else if (row.state) candidates.set(`楼层记录 · 第 ${row.index + 1} 楼 · ${row.name}`, JSON.stringify(row.state));
+  }
   if (!candidates.size) throw Error('当前聊天没有备份或楼层记录。');
   restorePanel?.remove();
   const d = node('section', undefined, 'wsh-restore amin-card'); restorePanel=d;
@@ -303,17 +325,33 @@ async function restoreBackup() {
     try {
       checkIdentity(id);
       if (running) throw Error('生成正在运行，请稍后恢复。');
-      const restored = parseState(candidates.get(select.value));
+      const choice = candidates.get(select.value);
+      let restored;
+      if (typeof choice === 'object' && choice?.floor !== undefined) restored = (await history.readFloor(choice.floor)).state;
+      else if (typeof choice === 'object' && choice?.stateId) {
+        const runtime = getState2Runtime();
+        if (typeof runtime?.readStoryState !== 'function') throw Error('外置备份读取尚未就绪。');
+        restored = parseState((await runtime.readStoryState(choice.stateId)).variables?.状态栏);
+      } else restored = parseState(choice);
+      checkIdentity(id);
       if (!restored) throw Error('备份为空。');
+      const current = id.metadata.variables?.状态栏;
+      if (JSON.stringify(parseState(current)) === JSON.stringify(restored)) { result.textContent = '所选状态与当前状态相同，无需恢复。'; return; }
+      const external = usesStoryStorage(context());
+      const backup = external && current !== undefined ? await captureStoryBackup(context(), {label:'恢复状态前'}) : null;
+      checkIdentity(id);
+      if (id.metadata.variables?.状态栏 !== current) throw Error('建立恢复点期间状态栏已变化，请重新选择恢复项。');
       await persistStatusChange(()=>{
-        const current = id.metadata.variables.状态栏;
-        if (current !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), current);
+        if (!external && current !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), current);
+        if (backup) recordStoryBackup(context(),backup);
         setLocalVariable('状态栏', JSON.stringify(restored));checkpointState(context());
-      });d.close(); notify('已恢复，恢复前的状态也已备份。');
+      });d.close(); notify(external ? '已恢复；恢复前状态已保存为外置恢复点。' : '已恢复，恢复前的状态也已备份。');
     } catch (e) { result.textContent = e.message; }
   };
   cancel.onclick = () => d.close();
-  d.append(title, node('p', '恢复会用所选完整状态覆盖当前值，并先备份当前状态。楼层记录只在点击恢复后才应用；不会回退聊天正文。'), select, restore, cancel, result); generationForm.append(d); d.scrollIntoView({block:'nearest'}); select.focus({preventScroll:true});
+  d.append(title, node('p', usesStoryStorage(context())
+    ? '恢复会用所选状态覆盖当前值，并把恢复前状态留作外置恢复点。既有手工变量备份仍可选择；不会回退聊天正文。'
+    : '恢复会用所选完整状态覆盖当前值，并先备份当前状态。楼层记录只在点击恢复后才应用；不会回退聊天正文。'), select, restore, cancel, result); generationForm.append(d); d.scrollIntoView({block:'nearest'}); select.focus({preventScroll:true});
 }
 function mount() {
   if (generationForm) return;
@@ -357,7 +395,9 @@ function mount() {
   async function generate(mode) {
     if(mode==='update'&&linkageEnabled()){if(selectHudPage)selectHudPage('linkage');else await openEmbedded('linkage');report.textContent='请在联动更新中查看和确认统一剧情更新。';return {ok:false,message:report.textContent};}
     if (running) throw Error('生成任务已经运行。');
-    if (mode === 'replace' && !confirm('重新生成将替换当前状态栏全部项目，操作前会备份。继续？')) return;
+    if (mode === 'replace' && !confirm(usesStoryStorage(context())
+      ? '重新生成将替换当前状态栏全部项目，操作前会保存一个外置恢复点。继续？'
+      : '重新生成将替换当前状态栏全部项目，操作前会备份。继续？')) return;
     const s = save(); identity();
     running = new AbortController(); report.textContent = '正在读取设定并请求模型…';
     generateButton.disabled = replaceButton.disabled = saveButton.disabled = true;
@@ -365,7 +405,9 @@ function mount() {
       const result = await generateStatus({ api: { baseUrl: s.baseUrl, apiKey: sessionKey, model: s.model, timeoutMs: 120000, maxTokens: s.maxTokens }, mode,
         includePersona:s.includePersona===true,includeCharacter:s.includeCharacter,readWorldbooks:s.readWorldbooks,selectedBooks:s.selectedBooks,legacyBindings:true,includeGlobalBooks:s.includeGlobalBooks,extraBooks:s.extraBooks,
         allowTypeChange:s.allowTypeChange===true, updateNote: s.updateNote || '', instructions: s.instructions || '根据世界观设计简洁实用的状态栏。', statusRules: compileRules(context(), KEY, mode === 'update' ? 'update' : 'generate') }, running.signal);
-      report.textContent = result.ok ? (result.changed ? '操作完成，可打开状态栏查看。' : '没有需要修改的内容。') + ' 读取世界书：' + (result.books?.join('、') || '无') : result.message || '已有任务运行中。';
+      report.textContent = result.ok ? (result.changed ? '操作完成，可打开状态栏查看。' +
+        (result.externalBackup ? '恢复前状态已保存为外置恢复点。' : '') : '没有需要修改的内容。') +
+        ' 读取世界书：' + (result.books?.join('、') || '无') : result.message || '已有任务运行中。';
       return result;
     } finally { syncHistory(); running = null; generateButton.disabled = replaceButton.disabled = saveButton.disabled = false; }
   }
@@ -375,6 +417,21 @@ function mount() {
   const replaceButton = action('重新生成整套', () => generate('replace'));
   action('取消生成', () => { running?.abort(); report.textContent = '已请求取消，等待底层调用返回；结果不会写入。'; });
   action('查看状态栏', () => selectHudPage ? selectHudPage('state') : openEmbedded('state'));
+  action('手动另存状态', async () => {
+    if (running) throw Error('模型任务运行中，请稍后另存。');
+    const id = identity(), current = id.metadata.variables?.状态栏;
+    if (!parseState(current)) throw Error('当前没有可另存的状态栏。');
+    if (usesStoryStorage(context())) {
+      const backup = await captureStoryBackup(context(), {label:'手动另存状态'});
+      checkIdentity(id);
+      if (id.metadata.variables?.状态栏 !== current) throw Error('另存期间状态栏已变化，请重试。');
+      await persistStatusChange(() => recordStoryBackup(context(),backup));
+      report.textContent = '已另存外置恢复点；可在“恢复备份”中选择。';
+    } else {
+      await persistStatusChange(() => setLocalVariable('状态栏_生成前备份_' + Date.now(),current));
+      report.textContent = '已另存变量备份；可在“恢复备份”中选择。';
+    }
+  });
   action('恢复备份', restoreBackup);
   const legacyWorldbook=action('写入世界书更新提示词', async () => { report.textContent = await writeUpdateWorldbook(); });legacyWorldbook.dataset.legacyUpdateEntry='true';
   const linkageOwnership=node('p','','wsh-note');linkageOwnership.dataset.linkageOwnership='true';generationForm.append(linkageOwnership);

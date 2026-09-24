@@ -12,6 +12,7 @@ import { createRelationshipsService } from '../apps/relationships/service.js';
 import { createTravelService } from '../apps/map/travel.js';
 import { createDemoDocument } from '../apps/map/src/core/demo.js';
 import { createSavesService } from '../apps/saves/service.js';
+import { chatPath } from '../apps/shared/operations.js';
 import {
     KEY as SCENE_KEY,
     emptyState as emptyScene,
@@ -281,7 +282,10 @@ test('exported state restores into a different branch tail without replacing cha
     const restoredRelationships = target.context.chatMetadata.amin_os_relationships_v1;
     for (const event of [restoredCharacters.events.at(-1), restoredInventory.events.at(-1), restoredRelationships.events.at(-1), target.context.chatMetadata[SCENE_KEY].events.at(-1)]) {
         assert.equal(event.path.length, targetChat.length);
-        assert.ok(event.path.some(value => value.includes('另一条时间线')));
+        assert.deepEqual(event.path, chatPath(targetChat));
+        assert.ok(event.path.every(value => /^sha256:[0-9a-f]{64}$/u.test(value)));
+        assert.notDeepEqual(event.path, chatPath(source.context.chat));
+        assert.ok(event.path.every(value => !value.includes('另一条时间线')));
         assert.ok(event.path.every(value => !value.includes('开始行动')));
     }
     assert.deepEqual(restoredCharacters.events.at(-1).snapshot.characters.map(value => value.id), ['hero', 'companion']);

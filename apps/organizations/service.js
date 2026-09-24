@@ -3,7 +3,7 @@ import {ROOT,read,empty,clone,equal,validate,diff,enforceLocks} from './model.js
 import {checkpointState} from '../status/state-checkpoint.js';
 import {createHistory} from '../status/history.js';
 import {subscribeStateChanges,chatIdentity as operationIdentity,acquireMetadataWrite} from '../shared/operations.js';
-import {state2HistoryMode} from '../state2/runtime.js';
+import {getState2Runtime,state2HistoryMode} from '../state2/runtime.js';
 export const META='amin_os_organizations_v1',SETTINGS='amin_os_organizations_settings_v1';
 export const defaults=()=>({includeCharacter:true,includeChat:true,readWorldbooks:true,selectedBooks:null,books:'',detail:'标准',scope:'',allowInference:false,allowNew:false,groups:['organizations','alliances','regions'],generationRules:'',updateRules:'',assessmentRules:'',generationEnabled:true,updateEnabled:true,assessmentEnabled:true,follow:false});
 export function roleIdentity(ctx){const group=ctx?.groupId;return group!=null&&group!==''?'group:'+String(group):'character:'+String(ctx?.characters?.[ctx?.characterId]?.avatar??'');}
@@ -30,6 +30,12 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
  }
  const history=createHistory({context,historyKey:'amin_os_organizations_history_v1',messageKey:'amin_org_message_id',allowGroups:true,
   nativeState,
+  externalRead:async index=>{
+   const runtime=getState2Runtime();
+   if(typeof runtime?.readStoryFloor!=='function')throw Error('外置楼层读取尚未就绪。');
+   const snapshot=await runtime.readStoryFloor(index);
+   return {doc:read(snapshot.variables?.[ROOT]),assessment:null};
+  },
   read:()=>({doc:readDoc(),assessment:clone(meta().assessment)}),
   write:value=>{writeDoc(value?.doc??empty(),{checkpoint:false});meta().assessment=clone(value?.assessment??null);},
   beforeRestore:()=>{invalidate();accepted=null;},warn:message=>{lastError=message;notify();},changed:()=>notify()});
@@ -53,7 +59,7 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
  function check(t){requireReady();checkScope(t);if(!equal(t.doc,readDoc())||!equal(t.locks,meta().locks??[]))throw Error('资料或锁定设置已变化，请重新生成/预览');}
  async function persist(c){try{await saveMetadata(c);}catch{throw Error('已写入内存，但聊天保存失败；请保持本聊天并重试保存，不要重复应用');}}
  const api={
-  context,read:readDoc,history:()=>history.list(),error:()=>lastError,clearError:()=>{lastError='';},
+  context,read:readDoc,history:()=>history.list(),readHistory:index=>history.readFloor(index),error:()=>lastError,clearError:()=>{lastError='';},
   subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},sync,capture,check,
   pending:()=>pending?{kind:pending.kind,changes:clone(pending.changes),doc:clone(pending.doc),assessment:clone(pending.assessment)}:null,
   stage(doc,t=capture(),{manual=false}={}){check(t);const checked=validate(doc);if(!manual)enforceLocks(t.doc,checked,t.locks);pending={kind:'data',doc:checked,t,manual,changes:diff(t.doc,checked)};notify();},

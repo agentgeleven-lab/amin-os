@@ -26,6 +26,7 @@ export function assertOpenedBranch(ctx, source, name) {
     if (typeof name !== 'string' || !name.trim() || id !== name || identity === source.identity) throw Error('酒馆未切换到预期的新分支，未恢复任何插件数据。');
     let owner, original;
     try { owner = JSON.parse(identity)[0]; original = JSON.parse(source.identity)[0]; } catch { throw Error('分支聊天身份无效。'); }
-    if (JSON.stringify(owner) !== JSON.stringify(original) || JSON.stringify(chatPath(ctx.chat)) !== JSON.stringify(source.path)) throw Error('新分支的人物、消息或候选与检查点不一致，未恢复任何插件数据。');
+    const currentPath = chatPath(ctx.chat);
+    if (JSON.stringify(owner) !== JSON.stringify(original) || currentPath.length !== source.path?.length || !pathBelongs(source.path, currentPath)) throw Error('新分支的人物、消息或候选与检查点不一致，未恢复任何插件数据。');
     return ctx;
 }

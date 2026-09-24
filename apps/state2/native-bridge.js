@@ -1,4 +1,5 @@
 import { chatIdentity, chatPath } from '../shared/operations.js';
+import { MIGRATION_OWNER, OWNED_VARIABLE_ROOTS, NATIVE_VARIABLE_ROOTS } from './storage.js';
 
 const getContext = () => globalThis.SillyTavern?.getContext?.();
 const importModule = url => import(url);
@@ -72,4 +73,164 @@ export async function restoreNativeState2ToFloor(floor, {
     const result = await run(floor);
     if (result?.ok === false) throw Error('小白 X 未能回放目标楼层的变量。');
     return { restored: true, stale: !stillCurrent(), source, result };
+}
+
+const own = (value, key) => Object.prototype.hasOwnProperty.call(value ?? {}, key);
+const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const clone = value => structuredClone(value);
+const rootOf = path => String(path ?? '').split(/[.\[]/, 1)[0];
+const contextToken = ctx => ({ metadata: ctx.chatMetadata, identity: chatIdentity(ctx), path: JSON.stringify(chatPath(ctx.chat)) });
+const matchesToken = (ctx, token) => ctx?.chatMetadata === token.metadata && chatIdentity(ctx) === token.identity
+    && JSON.stringify(chatPath(ctx.chat)) === token.path;
+const nativeRoots = Object.values(NATIVE_VARIABLE_ROOTS);
+function stableJSON(value) {
+    if (Array.isArray(value)) return value.map(stableJSON);
+    if (plain(value)) return Object.fromEntries(Object.keys(value).sort().map(key => [key, stableJSON(value[key])]));
+    return value;
+}
+function sameJSON(a, b) {
+    try { return JSON.stringify(stableJSON(a)) === JSON.stringify(stableJSON(b)); }
+    catch { return false; }
+}
+function sameVariable(a, b) {
+    if (a === b) return true;
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    try { return sameJSON(JSON.parse(a), JSON.parse(b)); }
+    catch { return false; }
+}
+function logRoots(log) {
+    const roots = new Set();
+    for (const record of Object.values(log.floors)) {
+        if (Array.isArray(record?.roots)) for (const root of record.roots) roots.add(String(root));
+        else for (const entry of [...(record?.rules ?? []), ...(record?.ops ?? [])]) {
+            const root = rootOf(entry?.path);
+            if (root) roots.add(root);
+        }
+    }
+    return roots;
+}
+
+/**
+ * Restore the selected branch through LittleWhiteBox, then establish an exact
+ * current-floor baseline for Amin-owned roots. Historical inspection must use
+ * the external snapshot directly; this function changes live variables.
+ *
+ * LittleWhiteBox owns its WAL and applied signatures. Keep both untouched and
+ * write a checkpoint at the branch tip so its next replay starts from the
+ * external state while retaining unrelated State 2.0 roots and rules.
+ */
+export async function restoreExternalState2SnapshotToFloor(floor, snapshot, {
+    context = getContext, host = globalThis, document = globalThis.document, importer = importModule,
+    expected, forGeneration = false, isCurrent = () => true,
+} = {}) {
+    const before = context();
+    if (!before?.chatMetadata || before.extensionSettings?.LittleWhiteBox?.variablesMode !== '2.0') {
+        throw Error('当前聊天未启用小白 X 变量管理 2.0，无法恢复外置状态。');
+    }
+    const tip = (before.chat?.length ?? 0) - 1;
+    if (!Number.isSafeInteger(floor) || floor < 0 || floor !== tip - (forGeneration === true ? 1 : 0)) {
+        throw Error(forGeneration ? '候选生成只能恢复当前助手消息的前一楼。' : '外置状态只能恢复到当前分支末尾楼层。');
+    }
+    if (forGeneration === true && (before.chat[tip]?.is_user || before.chat[tip]?.is_system)) {
+        throw Error('候选生成恢复要求末尾是待替换的助手消息。');
+    }
+    const extraCurrent = () => { try { return isCurrent() === true; } catch { return false; } };
+    if ((expected && !matchesToken(before, expected)) || !extraCurrent()) throw Error('聊天或候选已变化，外置状态未恢复。');
+    if (!plain(snapshot) || !plain(snapshot.variables) || !plain(snapshot.rules)) {
+        throw Error('外置状态缺少有效的变量或规则资料。');
+    }
+    const metadata = before.chatMetadata, lwb = metadata.extensions?.LittleWhiteBox;
+    const log = lwb?.stateLogV2, checkpoints = lwb?.stateCkptV2;
+    const owner = log?.floors?.['-1'];
+    if (log?.version !== 1 || !plain(log.floors) || checkpoints?.version !== 1 || !plain(checkpoints.points)
+        || owner?.signature !== MIGRATION_OWNER || !Array.isArray(owner.roots)
+        || !OWNED_VARIABLE_ROOTS.every(root => owner.roots.includes(root))) {
+        throw Error('小白 X 楼层日志、检查点或 Amin 变量归属不兼容，外置状态未恢复。');
+    }
+    // These two native variable roots are also OS story state. An old floor
+    // with no value must clear a future value even if a legacy chat never
+    // registered that root in LittleWhiteBox's ownership log.
+    const aminRoots = new Set([...OWNED_VARIABLE_ROOTS, ...nativeRoots]);
+    for (const root of aminRoots) {
+        if (own(snapshot.variables, root) && typeof snapshot.variables[root] !== 'string') {
+            throw Error(`外置状态的「${root}」不是小白变量字符串。`);
+        }
+    }
+    for (const [path, rule] of Object.entries(snapshot.rules)) {
+        if (aminRoots.has(rootOf(path)) && !plain(rule)) throw Error(`外置状态的规则「${path}」无效。`);
+    }
+    // Reject data that structuredClone cannot safely copy before native replay
+    // starts changing the active chat.
+    const token = contextToken(before);
+    const source = clone(snapshot);
+    // Resolve the rule-cache loader before native replay mutates variables.
+    // Any missing bridge then fails without leaving a half-restored branch.
+    let reloadRules = host?.LWB_StateV2?.loadRulesFromMeta;
+    if (typeof reloadRules !== 'function') {
+        const url = findNativeState2ModuleUrl({ document, location: host?.location });
+        const module = await importer(url);
+        reloadRules = module?.loadRulesFromMeta;
+    }
+    if (typeof reloadRules !== 'function') throw Error('小白 X 未提供规则表刷新接口，外置规则未恢复。');
+    if (!matchesToken(context(), token) || !extraCurrent()) return { restored: false, stale: true };
+    const result = await restoreNativeState2ToFloor(floor, { context, host, document, importer });
+    if (!result.restored || result.stale || !matchesToken(context(), token) || !extraCurrent()) return { ...result, restored: false, stale: true };
+
+    const current = context().chatMetadata;
+    const currentLog = current.extensions?.LittleWhiteBox?.stateLogV2;
+    const currentCkpt = current.extensions?.LittleWhiteBox?.stateCkptV2;
+    if (currentLog?.version !== 1 || !plain(currentLog.floors) || currentCkpt?.version !== 1 || !plain(currentCkpt.points)
+        || currentLog.floors['-1']?.signature !== MIGRATION_OWNER) {
+        throw Error('原生回放后小白 X 楼层资料发生变化，外置状态未覆盖。');
+    }
+    if (!plain(current.variables) || current.LWB_RULES_V2 !== undefined && !plain(current.LWB_RULES_V2)) {
+        throw Error('原生回放后变量或规则资料格式无效，外置状态未覆盖。');
+    }
+    // A native status/organization root may first appear in this external
+    // snapshot. Claim it in Amin's existing ownership sentinel so subsequent
+    // LittleWhiteBox replay includes and clears it at the right floor.
+    const ownerAfter = currentLog.floors['-1'];
+    const nextOwnerRoots = [...new Set([...ownerAfter.roots, ...nativeRoots])].sort();
+    const ownerChanged = JSON.stringify(nextOwnerRoots) !== JSON.stringify([...ownerAfter.roots].sort());
+    const variablesChanged = [...aminRoots].some(root => own(current.variables, root) !== own(source.variables, root)
+        || own(source.variables, root) && !sameVariable(current.variables[root], source.variables[root]));
+    const relevantRules = new Set([
+        ...Object.keys(current.LWB_RULES_V2 ?? {}).filter(path => aminRoots.has(rootOf(path))),
+        ...Object.keys(source.rules).filter(path => aminRoots.has(rootOf(path))),
+    ]);
+    const rulesChanged = [...relevantRules].some(path => own(current.LWB_RULES_V2, path) !== own(source.rules, path)
+        || own(source.rules, path) && !sameJSON(current.LWB_RULES_V2[path], source.rules[path]));
+    // In the common case the native WAL already reconstructs the external
+    // snapshot. Do not add a full checkpoint just because the chat was opened.
+    if (!ownerChanged && !variablesChanged && !rulesChanged) {
+        return { ...result, external: true, floor, baseline: 'native' };
+    }
+    const variables = { ...(plain(current.variables) ? current.variables : {}) };
+    for (const root of aminRoots) {
+        if (own(source.variables, root)) variables[root] = source.variables[root];
+        else delete variables[root];
+    }
+    const rules = { ...(plain(current.LWB_RULES_V2) ? current.LWB_RULES_V2 : {}) };
+    for (const path of Object.keys(rules)) if (aminRoots.has(rootOf(path))) delete rules[path];
+    for (const [path, rule] of Object.entries(source.rules)) if (aminRoots.has(rootOf(path))) rules[path] = rule;
+
+    // Native checkpoints are scoped to every State 2.0-owned root, including
+    // non-Amin roots. A full metadata snapshot here would copy unrelated data.
+    const allOwned = logRoots(currentLog);
+    for (const root of nextOwnerRoots) allOwned.add(root);
+    const checkpointVars = {}, checkpointRules = {};
+    for (const root of allOwned) if (own(variables, root)) checkpointVars[root] = clone(variables[root]);
+    for (const [path, rule] of Object.entries(rules)) if (allOwned.has(rootOf(path))) checkpointRules[path] = clone(rule);
+    // Commit all related fields together after the replay and context checks.
+    current.variables = variables;
+    current.LWB_RULES_V2 = rules;
+    ownerAfter.roots = nextOwnerRoots;
+    currentCkpt.points[String(floor)] = { vars: checkpointVars, rules: checkpointRules, ts: Date.now() };
+    // Rules are cached inside LittleWhiteBox separately from chat metadata.
+    // Its synchronous loader must see the final rules before the next <state>.
+    if (rulesChanged) reloadRules();
+    // Reset the native debounce after the final overlay. Otherwise a slow
+    // module import could let its earlier scheduled save persist only replay.
+    context().saveMetadataDebounced?.();
+    return { ...result, external: true, floor, baseline: 'checkpoint' };
 }

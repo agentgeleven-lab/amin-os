@@ -1,5 +1,6 @@
 import { ROOTS, nativeState2Status } from '../state2/storage.js';
 import { timingStatus } from '../effects/timing.js';
+import { sameMessageRevision, messageRevision } from '../shared/message-revision.js';
 
 export const LINKED_SOURCES = Object.freeze([
     { id: 'characters', label: '人物卡与外观' },
@@ -63,8 +64,7 @@ function relationshipEvidenceMatches(evidence, chat) {
     if (!Array.isArray(evidence.sources) || !Array.isArray(chat)) return false;
     return evidence.sources.every(source => {
         const message = chat[source?.index];
-        return message && source.revision === JSON.stringify([message.name ?? '', !!message.is_user,
-            message.mes ?? '', message.swipe_id ?? 0]);
+        return message && sameMessageRevision(source.revision, messageRevision(message));
     });
 }
 
@@ -203,7 +203,7 @@ function sourceMatches(source, chat) {
     return source.messages.every((saved, offset) => {
         const message = chat[source.start + offset];
         return message && saved?.index === source.start + offset && saved.text === message.mes
-            && saved.revision === JSON.stringify([message.name ?? '', !!message.is_user, message.mes ?? '', message.swipe_id ?? 0]);
+            && sameMessageRevision(saved.revision, messageRevision(message));
     });
 }
 

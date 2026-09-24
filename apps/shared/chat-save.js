@@ -3,6 +3,12 @@ import { assertChatReady } from './chat-lifecycle.js';
 // A history observer may assign stable message IDs before any user action.
 // Keep that fact outside chat metadata so observation alone never saves data.
 const pendingIds = new WeakMap();
+const preparations = new Set();
+/** External records must exist before a chat starts referring to them. */
+export function registerChatSavePreparation(prepare) {
+  preparations.add(prepare);
+  return () => preparations.delete(prepare);
+}
 const identity = ctx => JSON.stringify([
   ctx?.groupId ?? null,
   ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.characterId ?? null,
@@ -19,6 +25,8 @@ export function markChatIdsDirty(ctx) {
 export async function saveChatMetadata(ctx) {
   assertChatReady(ctx);
   const metadata = ctx?.chatMetadata;
+  for (const prepare of preparations) await prepare(ctx);
+  assertChatReady(ctx);
   const marker = metadata && pendingIds.get(metadata);
   if (marker?.identity === identity(ctx) && typeof ctx.saveChat === 'function') {
     await ctx.saveChat();

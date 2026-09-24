@@ -1,9 +1,10 @@
 import { uuid } from '../../uuid.js';
+import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 export const KEY='amin_os_information_v1';
 export const empty=()=>({version:1,history:[],enabled:true,limit:40000});
 export function read(ctx){const s=ctx?.chatMetadata?.[KEY];if(s&&s.version!==1)throw Error('信息面板数据版本不兼容');return structuredClone(s??empty());}
-export const path=chat=>(chat??[]).map(m=>JSON.stringify([m.name??'',!!m.is_user,m.mes??'',m.swipe_id??0]));
-export const matches=(event,prefix)=>event.path.length<=prefix.length&&event.path.every((v,i)=>prefix[i]===v);
+export const path=chat=>chatRevisions(chat??[]);
+export const matches=(event,prefix)=>pathBelongs(event?.path,prefix);
 export function current(store,chat){const records=new Map(),prefix=path(chat);for(const e of store.history){if(!matches(e,prefix))continue;if(e.snapshot)records.set(e.recordId,structuredClone(e.snapshot));else records.delete(e.recordId);}return [...records.values()];}
 export const fieldKey=f=>JSON.stringify([f.category,f.label]);
 export function validateRecord(record){
