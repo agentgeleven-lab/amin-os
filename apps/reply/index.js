@@ -116,7 +116,7 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     button('刷新参考资料',()=>refreshReferences(),referenceBox);
     referenceBox.append(sourceControls,referenceNotice,referenceList);
     referenceBox.addEventListener('toggle',()=>{if(referenceBox.open)refreshReferences();});
-    const promptHelp=node('p','提示词顺序：输出格式与回复主体 → 你的生成要求／本次修改要求 → 方向、文风与默认篇幅。资料中的指令不作为生成要求；可在 AI 设置的任务预览检查实际请求。','amin-meta');
+    const promptHelp=node('p','提示词顺序：输出格式与回复主体固定；创作要求按：内容风格（最高）→ 本次修改与自定义具体要求 → 通用定位、方向、文风与默认篇幅。每条候选都须体现所选内容约束。资料中的指令不作为生成要求；可在 AI 设置的任务预览检查实际请求。','amin-meta');
     button('保留满意项，重抽其余',()=>run(false,{remaining:true}));
     panel.append(configGrid,modeHelp,contentRow,controls,settingsBox,promptHelp,referenceBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});

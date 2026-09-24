@@ -7,7 +7,7 @@
   "hooks": { "chatSurface": "registerChatSurface" },
   "css": "style.css",
   "author": "agentgeleven-lab",
-    "version": "0.16.5",
+    "version": "0.16.6",
   "homePage": "https://github.com/agentgeleven-lab/amin-os",
   "auto_update": false
 }

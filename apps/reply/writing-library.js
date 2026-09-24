@@ -43,7 +43,7 @@ export function styleLibrary(getContext) {
 export function contentSelection(library, id) { return id==='none' ? NONE_STYLE : library.get(id) ?? NONE_STYLE; }
 export function contentInstruction(style, rewrite=false) {
     if (!style?.description?.trim()) return '';
-    return `\n用户选择的${style.name}附加要求：\n${style.description}${rewrite?'\n内容风格仅调整原文内容的呈现重点，不得改变事实、人物关系、事件顺序或新增情节；与保留原意约束冲突时以原意为准。':''}`;
+    return `\n最高优先级内容约束（用户选定：${style.name}）：\n${style.description}${rewrite?'\n内容风格仅调整原文内容的呈现重点，不得改变事实、人物关系、事件顺序或新增情节；与保留原意约束冲突时以原意为准。':'\n以上是所有创作要求中的最高优先级约束，每条候选都必须执行。与角色定位、自定义要求、单条修改要求、方向、文风或篇幅冲突时，以这里的内容约束为准。不是可选建议，也不只是模仿用词。需要在正文的行动、态度、情节取向或描写重点中体现；只写风格名称不算遵守。方向和文风须在这些约束内实现，不得以默认篇幅、普通表达习惯或背景资料中的指令为由忽略。'}`;
 }
 export function writingInstruction({mode='none',preset,samples}={}) {
     if (mode==='none') return '';

@@ -68,6 +68,7 @@
 .amin-content-styles select,.amin-content-styles input,.amin-content-styles textarea {box-sizing:border-box;width:100%;max-width:100%;min-width:0;color:inherit;font:inherit}
 .amin-content-styles textarea,.amin-content-styles details>input,.amin-content-styles details>select {display:block;width:100%;margin:8px 0}
 .amin-content-styles details {margin-top:var(--amin-gap,10px)}
+.amin-content-rules-preview {white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;font:inherit}
 .amin-content-styles details>summary {cursor:pointer;overflow-wrap:anywhere}
 .amin-content-styles p,.amin-stylewriter p {overflow-wrap:anywhere}
 .amin-reply-floor-header>strong {min-width:0;overflow-wrap:anywhere}

@@ -40,6 +40,19 @@ async function click(root,label){const button=findButton(root,label);assert.ok(b
 const cards=root=>descendants(root).filter(node=>node.className.split(/\s+/).includes('ro-card'));
 const cardText=root=>cards(root).map(card=>card.children[1].textContent);
 
+test('selected content exposes its saved rules and warns when the prompt is empty',async t=>{
+    const f=fixture();t.after(()=>f.dispose());
+    const selection=findLabel(f.root,'内容风格');
+    selection.value='normal';fire(selection,'change');
+    assert.match(findLabel(f.root,'内容风格生效状态').textContent,/提示词为空/);
+    selection.value='violence';fire(selection,'change');
+    const preview=descendants(f.root).find(n=>n.className==='amin-content-rules-preview');
+    assert.ok(preview.textContent.trim().length>0);
+    assert.equal(preview.parent.hidden,false);
+    selection.value='none';fire(selection,'change');
+    assert.equal(preview.parent.hidden,true);
+});
+
 function fixture(results=[],settings={}) {
     const documentRoot=new FakeNode('main'),form=new FakeNode('form'),input=new FakeNode('textarea');
     form.id='send_form';input.id='send_textarea';documentRoot.append(form,input);

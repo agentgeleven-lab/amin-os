@@ -12,7 +12,10 @@ export function mountContentStyles(target, {library, getSelection, setSelection,
     const note=make('p');note.setAttribute('role','status');
     const toolbar=make('div');toolbar.className='amin-toolbar';
     editor.append(list,make('p','名称（1–40 字）与提示词。仅当前所选风格参与请求；留空提示词不追加要求。'),name,prompt,toolbar,note);
-    root.append(row,editor);target.append(root);
+    const activeNote=make('p');activeNote.className='amin-meta';activeNote.setAttribute('aria-label','内容风格生效状态');
+    const activeRules=make('details'),activeText=make('pre');activeRules.append(make('summary','查看本次内容约束'),activeText);
+    activeText.className='amin-content-rules-preview';
+    root.append(row,activeNote,activeRules,editor);target.append(root);
     let editing='',armed=null,undo=null,disposed=false;
     const drafts=new Map(),owner={};
     const selectionStamp=()=>JSON.stringify([contentSelection(library,getSelection()),library.hasDraft(getSelection())]);
@@ -24,6 +27,10 @@ export function mountContentStyles(target, {library, getSelection, setSelection,
     function render(){
         if(disposed)return;
         const selected=contentSelection(library,getSelection()).id;
+        const current=contentSelection(library,getSelection());
+        const hasRules=!!current.description.trim();
+        activeNote.textContent=selected==='none'?'未附加内容约束。':hasRules?`当前内容约束：${current.name} · ${current.description.length} 字；每条候选均须遵守。`:`「${current.name}」的提示词为空，不会添加内容约束。请在管理内容风格中填写并保存；仅选择名称不会生效。`;
+        activeRules.hidden=!hasRules;activeText.textContent=current.description;
         if(selected!==getSelection())setSelection(selected);
         select.replaceChildren();
         for(const p of [NONE_STYLE,...library.list()]){const o=make('option',p.name);o.value=p.id;select.append(o);}select.value=selected;

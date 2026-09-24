@@ -27,7 +27,7 @@ test('single direction keeps chosen linked facts and repeats full user requireme
     assert.equal(options.length,1);
     assert.equal(options[0].label,'观察');
     assert.match(request.systemPrompt,/必须先观察现场/);
-    assert.ok(request.systemPrompt.indexOf('句子必须急促')<request.systemPrompt.indexOf('必须先观察现场'));
+    assert.ok(request.systemPrompt.indexOf('句子必须急促')>request.systemPrompt.indexOf('必须先观察现场'));
     assert.match(request.systemPrompt,/请放慢语速/);
     assert.match(request.prompt,/门外走廊/);
     assert.doesNotMatch(request.prompt,/不应发送的秘密/);
