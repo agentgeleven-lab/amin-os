@@ -1,3 +1,5 @@
+import { relocateStatus } from './relocate.js';
+import { findNativeState2ModuleUrl } from '../state2/native-bridge.js';
 import { saveChatMetadata } from '../shared/chat-save.js';
 import { uuid } from '../../uuid.js';
 import { subscribeStateChanges, chatIdentity, captureContext, assertContext, acquireMetadataWrite } from '../shared/operations.js';
@@ -255,6 +257,39 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
       validate();
       let value;
       if (command === '/getvar 状态栏') value = parseState(id.metadata.variables?.状态栏);
+      else if (typeof command === 'string' && command.startsWith('/amin-status-relocate ')) {
+        if (running) throw Error('状态栏生成中，请完成后再编辑。');
+        const operation = JSON.parse(command.slice('/amin-status-relocate '.length));
+        let result = relocateStatus(parseState(id.metadata.variables?.状态栏), id.metadata.LWB_RULES_V2, operation);
+        let reloadRules;
+        if (result.rulesChanged) {
+          reloadRules = window.LWB_StateV2?.loadRulesFromMeta;
+          if (typeof reloadRules !== 'function') {
+            const module = await import(findNativeState2ModuleUrl({ document, location: window.location }));
+            reloadRules = module.loadRulesFromMeta;
+          }
+          if (typeof reloadRules !== 'function') throw Error('无法刷新小白变量规则，修改未执行。');
+        }
+        checkIdentity(id); validate();
+        if (running) throw Error('状态栏生成中，请完成后再编辑。');
+        result = relocateStatus(parseState(id.metadata.variables?.状态栏), id.metadata.LWB_RULES_V2, operation);
+        if (result.rulesChanged && !reloadRules) throw Error('变量规则已改变，请重试。');
+        await persistStatusChange(() => {
+          const oldState = id.metadata.variables.状态栏, oldRules = id.metadata.LWB_RULES_V2;
+          try {
+            setLocalVariable('状态栏', JSON.stringify(result.state));
+            if (result.rulesChanged) { id.metadata.LWB_RULES_V2 = result.rules; reloadRules(); }
+          } catch (error) {
+            id.metadata.variables.状态栏 = oldState;
+            if (oldRules === undefined) delete id.metadata.LWB_RULES_V2;
+            else id.metadata.LWB_RULES_V2 = oldRules;
+            if (reloadRules) reloadRules();
+            throw error;
+          }
+          checkpointState(context());
+        });
+        value = result.state;
+      }
       else if (typeof command === 'string' && command.startsWith('/setvar key=状态栏 ')) {
         if (running) throw Error('状态栏生成中，请完成后再编辑。');
         value = parseState(command.slice('/setvar key=状态栏 '.length));

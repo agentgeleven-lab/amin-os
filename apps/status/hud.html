@@ -12,7 +12,7 @@
 <body><main class="hud">
 <header><div class="eyebrow">AMIN OS / WORLD STATE</div><h1>世界状态</h1><div class="sub">记录此刻，延续你的世界。</div><div class="toolbar"><button id="mode" disabled>进入编辑模式</button><select id="layout" aria-label="状态栏布局"><option value="cards">卡片面板</option><option value="compact">紧凑列表</option><option value="profile">角色档案</option></select><button id="refresh">刷新状态</button><button id="newProject" class="primary" hidden>＋ 添加项目</button><button id="demo" hidden>打开本地演示</button></div></header>
 <p id="status" role="status" aria-live="polite">正在读取当前聊天状态…</p>
-<section id="editor" hidden><h2 id="formTitle"></h2><form id="form"><label>名称（中文、字母、数字、下划线，最多32字）<input id="name" maxlength="32" required autocomplete="off"></label><div id="variableFields"><label>变量类型<select id="type"><option value="text">文本</option><option value="number">数字</option><option value="boolean">布尔</option><option value="list">列表</option><option value="progress">进度值</option></select></label><label id="valueLabel">值<textarea id="value"></textarea></label><label id="boolLabel" hidden>值<select id="bool"><option value="">请选择</option><option value="true">是 / true</option><option value="false">否 / false</option></select></label><div id="progressFields" hidden><label>当前值<input id="current" type="number" step="any" min="0"></label><label>最大值（大于0）<input id="max" type="number" step="any" min="0"></label></div></div><p id="hint" class="meta"></p><p id="formError" role="alert"></p><div class="actions"><button type="submit" class="primary">应用并自动保存</button><button type="button" id="cancel">取消</button></div></form></section>
+<section id="editor" hidden><h2 id="formTitle"></h2><form id="form"><label>名称（中文、字母、数字、下划线，最多32字）<input id="name" maxlength="32" required autocomplete="off"></label><label id="targetLabel" hidden>目标项目<select id="targetProject"></select></label><div id="variableFields"><label>变量类型<select id="type"><option value="text">文本</option><option value="number">数字</option><option value="boolean">布尔</option><option value="list">列表</option><option value="progress">进度值</option></select></label><label id="valueLabel">值<textarea id="value"></textarea></label><label id="boolLabel" hidden>值<select id="bool"><option value="">请选择</option><option value="true">是 / true</option><option value="false">否 / false</option></select></label><div id="progressFields" hidden><label>当前值<input id="current" type="number" step="any" min="0"></label><label>最大值（大于0）<input id="max" type="number" step="any" min="0"></label></div></div><p id="hint" class="meta"></p><p id="formError" role="alert"></p><div class="actions"><button type="submit" class="primary">应用并自动保存</button><button type="button" id="cancel">取消</button></div></form></section>
 <div id="scene" hidden></div><section id="cards"></section><footer>SHARED WORLD STATE · <span id="count">0 项目</span></footer>
 </main>
 <script>
@@ -57,7 +57,7 @@ function render(){
   const card=el('article','card'),head=el('div','heading'),body=el('div','card-body');
   const closed=!editing&&view.closed.includes(p),toggle=button((closed?'▸ ':'▾ ')+p,()=>{view.closed=view.closed.includes(p)?view.closed.filter(x=>x!==p):[...view.closed,p];saveView();render();},'project-toggle grow');toggle.setAttribute('aria-expanded',String(!closed));
   head.append(toggle,el('span','meta',Object.keys(vars).length+' 项'));body.hidden=closed;
-  if(editing){head.append(button('↑',()=>moveProject(p,-1)),button('↓',()=>moveProject(p,1)),button('删除项目',()=>remove(p),'danger'));}
+  if(editing){head.append(button('重命名',()=>openRelocate(p)),button('↑',()=>moveProject(p,-1)),button('↓',()=>moveProject(p,1)),button('删除项目',()=>remove(p),'danger'));}
   card.append(head,body);
   const paired=!editing&&typeof vars.好感度==='number'&&typeof vars.好感阶段==='string';
   for(const k of fieldKeys(p)){const v=vars[k];
@@ -72,7 +72,7 @@ function render(){
     row.append(el('div','value number',v.当前+' / '+v.最大));const track=el('div','track'),fill=el('div','fill');fill.style.width=(v.当前/v.最大*100)+'%';track.setAttribute('role','progressbar');track.setAttribute('aria-label',k);track.setAttribute('aria-valuenow',v.当前);track.setAttribute('aria-valuemin','0');track.setAttribute('aria-valuemax',v.最大);track.append(fill);row.append(track);
    }else row.append(el('div',t==='number'?'value number':t==='boolean'?'value chip':'value',t==='boolean'?(v?'● 是':'○ 否'):t==='unknown'?JSON.stringify(v):v===''?'—':v));
    for(const key of paired&&k==='好感度'?[k,'好感阶段']:[k]){const change=changes.get(JSON.stringify([p,key]));if(change&&change.until>now){row.classList.add('changed');row.append(el('span','change-note',key+' '+change.text));}}
-   if(editing){const actions=el('div','actions');const up=button('↑ 上移',()=>moveField(p,k,-1)),down=button('↓ 下移',()=>moveField(p,k,1));up.setAttribute('aria-label','上移 '+k);down.setAttribute('aria-label','下移 '+k);actions.append(up,down);if(t!=='unknown')actions.append(button('编辑 / 改类型',()=>openEditor(p,k)));else actions.append(el('span','meta','非 V1 类型 · 只读保留'));actions.append(button('删除',()=>remove(p,k),'danger'));row.append(actions);}body.append(row);
+   if(editing){const actions=el('div','actions');const up=button('↑ 上移',()=>moveField(p,k,-1)),down=button('↓ 下移',()=>moveField(p,k,1));up.setAttribute('aria-label','上移 '+k);down.setAttribute('aria-label','下移 '+k);actions.append(up,down);if(t!=='unknown')actions.append(button('编辑 / 改类型',()=>openEditor(p,k)));else actions.append(el('span','meta','非 V1 类型 · 只读保留'));actions.append(button('转移到…',()=>openRelocate(p,k)),button('删除',()=>remove(p,k),'danger'));row.append(actions);}body.append(row);
   }
   if(editing){body.append(button('＋ 添加变量',()=>openEditor(p),'add'));const slot=el('div','inline-editor-slot');editorSlots.set(p,slot);body.append(slot);}cards.append(card);
  }
@@ -80,7 +80,46 @@ function render(){
 }
 $('layout').onchange=()=>{view.layout=$('layout').value;saveView();render();};
 function closeEditor(){context=null;$('editor').hidden=true;placeEditor(null);}
-function openEditor(p=null,k=null){placeEditor(p);context={p,k,base:k!==null?copy(data.项目[p][k]):undefined};$('editor').hidden=false;$('formTitle').textContent=p===null?'添加项目':k===null?'添加变量 · '+p:'编辑变量 · '+p;$('variableFields').hidden=p===null;$('name').value=k||'';$('name').readOnly=false;$('type').value=k!==null?kind(context.base):'text';$('type').disabled=false;$('value').value=k!==null?(Array.isArray(context.base)?JSON.stringify(context.base,null,2):String(context.base)):'';$('bool').value=String(k!==null?context.base:true);$('current').value=k!==null&&kind(context.base)==='progress'?context.base.当前:0;$('max').value=k!==null&&kind(context.base)==='progress'?context.base.最大:100;$('formError').textContent='';context.drafts={};context.activeType=$('type').value;fields();$('name').focus();$('editor').scrollIntoView({block:'nearest'});}
+function openEditor(p=null,k=null){$('targetLabel').hidden=true;placeEditor(p);context={p,k,base:k!==null?copy(data.项目[p][k]):undefined};$('editor').hidden=false;$('formTitle').textContent=p===null?'添加项目':k===null?'添加变量 · '+p:'编辑变量 · '+p;$('variableFields').hidden=p===null;$('name').value=k||'';$('name').readOnly=false;$('type').value=k!==null?kind(context.base):'text';$('type').disabled=false;$('value').value=k!==null?(Array.isArray(context.base)?JSON.stringify(context.base,null,2):String(context.base)):'';$('bool').value=String(k!==null?context.base:true);$('current').value=k!==null&&kind(context.base)==='progress'?context.base.当前:0;$('max').value=k!==null&&kind(context.base)==='progress'?context.base.最大:100;$('formError').textContent='';context.drafts={};context.activeType=$('type').value;fields();$('name').focus();$('editor').scrollIntoView({block:'nearest'});}
+function openRelocate(p,k=null){
+ openEditor(p,k);context.relocate=k===null?'rename':'move';context.base=copy(k===null?data.项目[p]:data.项目[p][k]);
+ $('formTitle').textContent=k===null?'重命名项目 · '+p:'转移变量 · '+k;
+ $('variableFields').hidden=true;$('name').value=k===null?p:k;$('name').readOnly=k!==null;
+ $('targetLabel').hidden=k===null;$('targetProject').replaceChildren();
+ for(const name of Object.keys(data.项目).filter(name=>name!==p)){const option=el('option','',name);option.value=name;$('targetProject').append(option);}
+ $('hint').textContent=k===null?'保留所有变量，并同步修改变量规则路径。':'保留变量的值和类型；目标项目有同名变量时不会覆盖。';
+}
+async function submitRelocate(c,n){
+ const target=c.relocate==='rename'?n:$('targetProject').value;
+ if(!target)throw Error('请先添加另一个项目作为转移目标。');
+ const op={kind:c.relocate,project:c.p,target,field:c.k,base:c.base};
+ lock(true);
+ try{
+  if(demo){
+   const latest=await read();
+   const current=c.relocate==='rename'?latest.项目[c.p]:latest.项目[c.p]?.[c.k];
+   if(!same(current,c.base))throw Error('来源内容已更新，请刷新。');
+   if(target===c.p)throw Error('请选择不同的目标名称或项目。');
+   if(c.relocate==='rename'){
+    if(own(latest.项目,target))throw Error('项目名称已存在。');
+    latest.项目=Object.fromEntries(Object.entries(latest.项目).map(([k,v])=>[k===c.p?target:k,v]));
+   }else{
+    if(!own(latest.项目,target))throw Error('目标项目已删除。');
+    if(own(latest.项目[target],c.k))throw Error('目标项目已有同名变量，未覆盖。');
+    latest.项目[target][c.k]=current;delete latest.项目[c.p][c.k];
+   }
+   await write(latest);
+  }else data=decode(await STscript('/amin-status-relocate '+JSON.stringify(op)));
+  if(c.relocate==='rename'){
+   view.order=view.order.map(k=>k===c.p?target:k);view.closed=view.closed.map(k=>k===c.p?target:k);
+   if(view.fieldOrder&&own(view.fieldOrder,c.p)){view.fieldOrder[target]=view.fieldOrder[c.p];delete view.fieldOrder[c.p];}
+  }else if(view.fieldOrder){
+   if(Array.isArray(view.fieldOrder[c.p]))view.fieldOrder[c.p]=view.fieldOrder[c.p].filter(k=>k!==c.k);
+   if(Array.isArray(view.fieldOrder[target]))view.fieldOrder[target]=[...view.fieldOrder[target].filter(k=>k!==c.k),c.k];
+  }
+  saveView();closeEditor();render();status('已保存；变量规则与当前楼层状态已同步。');
+ }finally{lock(false);}
+}
 function captureDraft(){return {value:$('value').value,bool:$('bool').value,current:$('current').value,max:$('max').value};}
 function changeType(){
 const next=$('type').value,prev=context.activeType;
@@ -104,7 +143,7 @@ context.activeType=next;$('formError').textContent='';fields();
 function fields(){const t=$('type').value;$('valueLabel').hidden=t==='boolean'||t==='progress';$('boolLabel').hidden=t!=='boolean';$('progressFields').hidden=t!=='progress';$('hint').textContent=t==='list'?'列表填写 JSON 字符串数组，例如 ["地图", "药剂"]。':t==='number'?'请输入有限数字，可包含小数和负数。':'应用后自动写入；取消会丢弃当前表单草稿。';}
 async function commit(change,onSaved=()=>{}){lock(true);try{const latest=await read();if(!latest)throw Error('变量已被删除，请刷新。');change(latest);await write(latest);onSaved();closeEditor();render();status(demo?'已保存到本地演示':'已自动保存并回读确认');}catch(e){status(e.message,true);$('formError').textContent=e.message;}finally{lock(false);}}
 async function remove(p,k){if(!confirm(k===undefined?'删除项目“'+p+'”及其全部变量？':'删除变量“'+k+'”？'))return;const base=copy(k===undefined?data.项目[p]:data.项目[p][k]);await commit(d=>{const current=k===undefined?d.项目[p]:d.项目[p]?.[k];if(!same(current,base))throw Error('该内容已被 AI 或其他面板修改，请取消编辑并刷新后再操作。');if(k===undefined)delete d.项目[p];else delete d.项目[p][k];});}
-$('form').onsubmit=async e=>{e.preventDefault();if(busy)return;try{const c=context,n=$('name').value.trim();if(!/^[\p{L}\p{N}_]{1,32}$/u.test(n)||['__proto__','prototype','constructor'].includes(n))throw Error('名称仅限中文、字母、数字、下划线，且不能使用保留名称。');let v;const t=$('type').value;if(c.p!==null){if(t==='text')v=$('value').value;else if(t==='boolean'){if(!['true','false'].includes($('bool').value))throw Error('请选择是或否。');v=$('bool').value==='true';}else if(t==='number'){if(!$('value').value.trim())throw Error('数字不能为空。');v=Number($('value').value);if(!Number.isFinite(v))throw Error('请输入有效数字。');}else if(t==='list'){try{v=JSON.parse($('value').value);}catch{throw Error('列表需要 JSON 数组，例如 ["地图"]。');}if(!Array.isArray(v)||!v.every(x=>typeof x==='string'))throw Error('列表只能包含文本项。');}else{const a=$('current').value,b=$('max').value;v={当前:Number(a),最大:Number(b)};if(!a||!b||kind(v)!=='progress')throw Error('进度要求：最大值大于0，当前值在0与最大值之间。');}}
+$('form').onsubmit=async e=>{e.preventDefault();if(busy)return;try{const c=context,n=$('name').value.trim();if(!/^[\p{L}\p{N}_]{1,32}$/u.test(n)||['__proto__','prototype','constructor'].includes(n))throw Error('名称仅限中文、字母、数字、下划线，且不能使用保留名称。');if(c.relocate){await submitRelocate(c,n);return;}let v;const t=$('type').value;if(c.p!==null){if(t==='text')v=$('value').value;else if(t==='boolean'){if(!['true','false'].includes($('bool').value))throw Error('请选择是或否。');v=$('bool').value==='true';}else if(t==='number'){if(!$('value').value.trim())throw Error('数字不能为空。');v=Number($('value').value);if(!Number.isFinite(v))throw Error('请输入有效数字。');}else if(t==='list'){try{v=JSON.parse($('value').value);}catch{throw Error('列表需要 JSON 数组，例如 ["地图"]。');}if(!Array.isArray(v)||!v.every(x=>typeof x==='string'))throw Error('列表只能包含文本项。');}else{const a=$('current').value,b=$('max').value;v={当前:Number(a),最大:Number(b)};if(!a||!b||kind(v)!=='progress')throw Error('进度要求：最大值大于0，当前值在0与最大值之间。');}}
 await commit(d=>{if(c.p===null){if(own(d.项目,n))throw Error('项目名称已存在。');d.项目[n]={};}else{if(!own(d.项目,c.p))throw Error('项目已被删除，请取消并刷新。');if(n!==c.k&&own(d.项目[c.p],n))throw Error('变量名称已存在。');if(c.k!==null&&!same(d.项目[c.p][c.k],c.base))throw Error('该变量已被更新，请取消并刷新后重新编辑。');if(c.k!==null&&n!==c.k){d.项目[c.p]=Object.fromEntries(Object.entries(d.项目[c.p]).map(([key,value])=>key===c.k?[n,v]:[key,value]));}else d.项目[c.p][n]=v;}},()=>{if(c.p!==null&&c.k!==null&&n!==c.k){const order=view.fieldOrder?.[c.p];if(Array.isArray(order)){view.fieldOrder={...view.fieldOrder,[c.p]:order.map(key=>key===c.k?n:key)};saveView();}}});}catch(err){$('formError').textContent=err.message;}};
 $('mode').onclick=()=>{closeEditor();editing=!editing;render();};$('refresh').onclick=()=>{closeEditor();refresh(!data);};$('newProject').onclick=()=>openEditor();$('cancel').onclick=()=>{closeEditor();refresh();};$('type').onchange=changeType;$('demo').onclick=()=>{demo=true;$('demo').hidden=true;refresh(true);};
 refresh(true);setInterval(()=>{if(!document.hidden&&!context&&!busy&&(demo||typeof STscript==='function'))refresh(!data);},4000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(!data);});
