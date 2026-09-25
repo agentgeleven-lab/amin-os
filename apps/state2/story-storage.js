@@ -202,7 +202,7 @@ export function createStoryStorage(getContext, {
         });
     }
 
-    async function capture() {
+    async function capture({ expectedReference } = {}) {
         return locked(async () => {
             requireAvailable();
             const ctx = current(), marker = assertMarker(ctx);
@@ -212,13 +212,19 @@ export function createStoryStorage(getContext, {
             const parentStateId = refsTo(ctx, floor - 1, marker);
             // Existing mismatched refs mean this floor was edited or another
             // candidate selected. A new candidate may have no ref yet.
-            const old = getReference(ctx.chat[floor], { parentStateId });
+            let old;
+            try { old = getReference(ctx.chat[floor], { parentStateId }); }
+            catch(error){
+                if(error.code!=='STALE_REFERENCE'||!expectedReference)throw error;
+                old=getReference(ctx.chat[floor],{parentStateId,allowStale:true});
+                if(JSON.stringify(old)!==JSON.stringify(expectedReference))throw error;
+            }
             const token = contextToken(ctx), state = currentState(ctx);
             const stateId = await graph.save(encodeState(state), { parentId: parentStateId });
             const now = assertCurrent(getContext, token);
             if (JSON.stringify(currentState(now)) !== JSON.stringify(state))
                 throw failure('STORY_STATE_CHANGED', '保存期间剧情变量已变化，请重试。');
-            if (old?.stateId === stateId) return { changed: false, stateId };
+            if (old?.stateId === stateId && old.revision === chatRevisions([now.chat[floor]])[0]) return { changed: false, stateId };
             setReference(now.chat[floor], stateId, { parentStateId });
             return { changed: true, stateId };
         });
@@ -269,6 +275,58 @@ export function createStoryStorage(getContext, {
         assertCurrent(getContext, token);
         if (!result?.restored || result.stale) throw failure('STORY_RESTORE_FAILED', '外置剧情状态恢复未完成，请重试。');
         return { ...result, stateId: snapshot.stateId };
+    }
+
+    // Explicit repair only: inspect saved states without treating stale text as
+    // permission to replace them with the latest chat's variables.
+    async function inspectReferences() {
+        requireAvailable();
+        const ctx = current(), marker = assertMarker(ctx);
+        if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
+        const token = contextToken(ctx), repairs = [];
+        let parentStateId = marker.baseStateId;
+        for (let index = 0; index < ctx.chat.length; index++) {
+            const message = ctx.chat[index];
+            let reference;
+            try { reference = getReference(message, { parentStateId }); }
+            catch (error) {
+                if (error.code !== 'STALE_REFERENCE') throw error;
+                reference = getReference(message, { parentStateId, allowStale: true });
+                const snapshot = decodeState(await graph.load(reference.stateId));
+                repairs.push({ index, stateId: reference.stateId, revision: reference.revision,
+                    currentRevision: chatRevisions([message])[0], parentStateId,
+                    roots: Object.keys(snapshot.variables) });
+            }
+            if (!reference && !(message.is_user || message.is_system)) throw failure('STORY_REFERENCE_MISSING', `第 ${index + 1} 楼缺少剧情引用，不能仅修复校验。`);
+            if (reference) parentStateId = reference.stateId;
+        }
+        // Verify the resulting branch state exists even if only ancestors need repair.
+        await graph.load(parentStateId);
+        assertCurrent(getContext, token);
+        return { repairs, token };
+    }
+    async function repairReferences(plan) {
+        return locked(async () => {
+            if (!plan?.token || !Array.isArray(plan.repairs)) throw failure('STORY_REPAIR_PLAN', '请先检查剧情存档引用。');
+            assertCurrent(getContext, plan.token);
+            const checked = await inspectReferences();
+            if (JSON.stringify(checked.repairs) !== JSON.stringify(plan.repairs)) throw failure('STORY_REPAIR_CHANGED', '引用已变化，请重新检查。');
+            const ctx = assertCurrent(getContext, plan.token);
+            const previous = checked.repairs.map(row => {
+                const message=ctx.chat[row.index],slot=message.swipe_info?.[message.swipe_id??0]?.extra;
+                return {message, top:clone(message.extra?.[STORY_REFERENCE_KEY]??null),slot, candidate:clone(slot?.[STORY_REFERENCE_KEY]??null)};
+            });
+            for (const row of checked.repairs) setReference(ctx.chat[row.index], row.stateId, { parentStateId: row.parentStateId });
+            const after=contextToken(ctx);
+            const rollback=()=>{
+                assertCurrent(getContext,after);
+                for(const item of previous){
+                    if(item.top===null)delete item.message.extra[STORY_REFERENCE_KEY];else item.message.extra[STORY_REFERENCE_KEY]=item.top;
+                    if(item.slot){if(item.candidate===null)delete item.slot[STORY_REFERENCE_KEY];else item.slot[STORY_REFERENCE_KEY]=item.candidate;}
+                }
+            };
+            return { changed: checked.repairs.length > 0, repaired: checked.repairs.length, rollback };
+        });
     }
 
     async function restoreBeforeCandidate(kind) {
@@ -331,5 +389,5 @@ export function createStoryStorage(getContext, {
         }
     }
 
-    return { enable, capture, readFloor, readState, restoreFloor, restoreBeforeCandidate, exportStory, importStory, status };
+    return { enable, capture, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, status };
 }

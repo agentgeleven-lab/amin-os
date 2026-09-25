@@ -171,6 +171,8 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     const unsubscribeState = subscribeStateChanges((_event, metadata) => { if (metadata === getContext()?.chatMetadata) notify(); });
     return {
         nativeState2Status:()=>getState2Runtime()?.status()??nativeState2Status(context()),
+        inspectStoryReferences:()=>getState2Runtime().inspectStoryReferences(),
+        repairStoryReferences:plan=>getState2Runtime().repairStoryReferences(plan),
         retryState2Restore:async()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量运行时尚未初始化，请刷新插件。');await runtime.restoreChat();const status=runtime.status();if(!runtime.ready())throw Error(status.restoreError||status.message);return status;},
         migrateState2:()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量 2.0 运行时尚未初始化，请刷新插件。');return runtime.migrate();},
         settings:()=>readLinkageSettings(context()), saveSettings,

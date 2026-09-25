@@ -197,3 +197,25 @@ test('existing multi-floor chat must not invent a past baseline', async () => {
     await assert.rejects(f.service.enable(), /新聊天/);
     assert.equal(f.nodes.size, 0);
 });
+
+
+test('explicit reference repair previews existing states without overwriting them with future variables',async()=>{
+ const f=fixture();await f.service.enable();
+ f.ctx.chat.push({name:'NPC',mes:'旧正文'});await f.service.capture();const saved=getReference(f.ctx.chat[1]).stateId;
+ f.ctx.chat[1].mes='宿主完成后的正文';const before=JSON.stringify(f.ctx);
+ const plan=await f.service.inspectReferences();assert.equal(plan.repairs.length,1);assert.equal(plan.repairs[0].index,1);
+ assert.equal(JSON.stringify(f.ctx),before);assert.equal(plan.repairs[0].stateId,saved);
+ const result=await f.service.repairReferences(plan);assert.equal(result.repaired,1);assert.equal(getReference(f.ctx.chat[1]).stateId,saved);
+ assert.deepEqual((await f.service.readFloor(1)).variables,(await f.service.readFloor(0)).variables);
+});
+test('repair plans reject changes made after preview',async()=>{
+ const f=fixture();await f.service.enable();f.ctx.chat[0].mes='changed';const plan=await f.service.inspectReferences();
+ f.ctx.chat[0].mes='changed again';await assert.rejects(f.service.repairReferences(plan),/变化/);
+});
+
+
+test('failed persistence can roll back reference rebinding without touching saved state',async()=>{
+ const f=fixture();await f.service.enable();const original=structuredClone(f.ctx.chat[0].extra);f.ctx.chat[0].mes='changed';
+ const plan=await f.service.inspectReferences();const result=await f.service.repairReferences(plan);result.rollback();assert.deepEqual(f.ctx.chat[0].extra,original);
+ assert.equal((await f.service.inspectReferences()).repairs.length,1);
+});

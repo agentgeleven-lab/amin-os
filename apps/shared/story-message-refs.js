@@ -1,3 +1,4 @@
+import { sha256HexSync } from '../tts/source-hash.js';
 import { messageRevision } from './message-revision.js';
 
 // TauriTavern stores the selected swipe's extra in both places. When the user
@@ -8,6 +9,7 @@ const revisionPattern = /^sha256:[0-9a-f]{64}$/u;
 const stateIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const swipeIdOf = message => message?.swipe_id ?? 0;
+const contentHash = message => 'sha256:' + sha256HexSync(JSON.stringify([!!message.is_user, message.mes]));
 
 export class StoryReferenceError extends Error {
     constructor(code, message) {
@@ -77,12 +79,12 @@ export function getReference(message, options = {}) {
     const reference = extra?.[STORY_REFERENCE_KEY];
     if (reference === undefined) return null;
     if (!isObject(reference) || reference.version !== 2 || !validStateId(reference.stateId)
-        || !revisionPattern.test(reference.revision) || reference.swipeId !== swipeId
+        || !revisionPattern.test(reference.revision) || reference.contentHash !== undefined && !revisionPattern.test(reference.contentHash) || reference.swipeId !== swipeId
         || !(reference.parentStateId === null || validStateId(reference.parentStateId))) {
         throw new StoryReferenceError('INVALID_REFERENCE', '该楼层的剧情状态引用格式无效。');
     }
-    if (reference.revision !== messageRevision(message)) {
-        throw new StoryReferenceError('STALE_REFERENCE', '该楼层内容已变化，原剧情状态引用失效。');
+    if (reference.revision !== messageRevision(message) && reference.contentHash !== contentHash(message) && !options.allowStale) {
+        throw new StoryReferenceError('STALE_REFERENCE', '消息校验与已保存引用不一致，原剧情状态引用失效；可能由生成收尾、插件处理或编辑导致，请检查剧情存档引用。');
     }
     if (Object.hasOwn(options, 'parentStateId') && reference.parentStateId !== options.parentStateId) {
         throw new StoryReferenceError('PARENT_MISMATCH', '该楼层之前的剧情状态已变化，不能使用后续状态引用。');
@@ -91,6 +93,7 @@ export function getReference(message, options = {}) {
         version: 2,
         stateId: reference.stateId,
         revision: reference.revision,
+        ...(reference.contentHash ? { contentHash: reference.contentHash } : {}),
         swipeId: reference.swipeId,
         parentStateId: reference.parentStateId,
     };
@@ -108,6 +111,7 @@ export function setReference(message, stateId, { parentStateId = null } = {}) {
         version: 2,
         stateId,
         revision: messageRevision(message),
+        contentHash: contentHash(message),
         swipeId,
         parentStateId,
     };

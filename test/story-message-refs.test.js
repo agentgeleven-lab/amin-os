@@ -20,7 +20,7 @@ test('a message stores a short pointer and preserves unrelated data across a bra
     assert.equal(getReference(structuredClone(message)).stateId, state('a'));
     assert.equal(message.extra.unrelated, 3);
     assert.ok(!JSON.stringify(message.extra[STORY_REFERENCE_KEY]).includes(message.mes));
-    assert.ok(JSON.stringify(message.extra[STORY_REFERENCE_KEY]).length < 260);
+    assert.ok(JSON.stringify(message.extra[STORY_REFERENCE_KEY]).length < 400);
 });
 
 test('a selected swipe carries its own reference and switching does not reuse the former swipe', () => {
@@ -71,4 +71,14 @@ test('malformed and missing references are distinct', () => {
     message.extra[STORY_REFERENCE_KEY] = { stateId: '../../chat' };
     assert.throws(() => getReference(message), code('INVALID_REFERENCE'));
     assert.throws(() => setReference(message, '../chat'), code('INVALID_STATE_ID'));
+});
+
+
+test('new references tolerate display-name changes but still reject changed story text',()=>{
+ const m=candidate();setReference(m,state('a'));m.name='新的显示名';assert.equal(getReference(m).stateId,state('a'));
+ m.mes='另一件事情';m.swipes[0]=m.mes;assert.throws(()=>getReference(m),code('STALE_REFERENCE'));
+});
+test('legacy references stay readable and do not gain an automatic stale bypass',()=>{
+ const m=candidate();setReference(m,state('a'));delete m.swipe_info[0].extra[STORY_REFERENCE_KEY].contentHash;
+ assert.equal(getReference(m).stateId,state('a'));m.name='改名';assert.throws(()=>getReference(m),code('STALE_REFERENCE'));
 });

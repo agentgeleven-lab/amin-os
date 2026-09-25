@@ -32,7 +32,7 @@ export function mount(target, options = {}) {
     page.append(context, notice, nativePanel, retryPanel, reviewPanel, settingsPanel, suggestionsPanel, promptPanel, dataPanel, referencesPanel, manualPanel); target.append(page);
     const generationView = mountGeneration(page, { joint: true, getContext, document, service: options.generationService, ai: options.ai });
     let disposed = false, unavailable = false, localBusy = false, message = '', failed = false;
-    let lastServiceStatus = '';
+    let lastServiceStatus = '', referenceRepairPlan = null;
     let saved = null, draft = null, settingsDirty = false, moduleRows = [], inputNodes = [], draftNotice, saveButton;
     let dataValue, dataStatus, dataCache = '', dataError = '';
     let promptValue, promptStatus, worldbookStatus, installButton, inspectButton, pasted = '';
@@ -139,6 +139,13 @@ export function mount(target, options = {}) {
         if(migrated && status?.ready===false){
             nativePanel.append(make('p',status.restoreError?'恢复失败：'+status.restoreError:status.restoring?'正在恢复当前分支，请稍候。':'当前分支尚未恢复完成。','amin-notice'));
             if(typeof api.retryState2Restore==='function')nativePanel.append(button('重试恢复当前分支',async()=>{const result=await api.retryState2Restore();say(result.message||'当前分支状态已恢复。');},{lock:'busy'}));
+        }
+        if (migrated && status?.ready===false && typeof api.inspectStoryReferences==='function') {
+            nativePanel.append(button('检查剧情存档引用',async()=>{referenceRepairPlan=null;referenceRepairPlan=await api.inspectStoryReferences();say(referenceRepairPlan.repairs.length?'已检查，请核对下方楼层后确认。':'没有发现可重新关联的校验失配。');},{lock:'busy'}));
+            if(referenceRepairPlan?.repairs?.length){
+                nativePanel.append(make('p','校验不一致的楼层：'+referenceRepairPlan.repairs.map(r=>r.index+1).join('、')+'。这些楼层的外置存档仍可读取。确认后保留各楼原有存档，只重新关联当前消息；若正文实际改变了剧情，原存档可能不再符合新剧情。','amin-notice'));
+                nativePanel.append(button('确认采用这些楼层的原有存档',async()=>{const result=await api.repairStoryReferences(referenceRepairPlan);referenceRepairPlan=null;say(result.message);},{lock:'busy'}));
+            }
         }
         if (!available) nativePanel.append(make('p', '在小白盒子中启用变量 2.0 后，Amin 才能读取并更新当前聊天的剧情资料。', 'amin-meta'));
         if (available && typeof api.migrateState2 === 'function') {

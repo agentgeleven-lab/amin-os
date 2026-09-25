@@ -24,6 +24,24 @@ async function toggle(root, label, checked) { const node = find(root, label, 'in
 async function input(root, label, value, tag = 'textarea') { const node = find(root, label, tag); assert.ok(node, 'missing field: ' + label); node.value = value; await node.dispatch(tag === 'select' ? 'change' : 'input'); return node; }
 const notice = root => walk(root).find(node => node.className === 'amin-notice')?.textContent;
 
+test('stale story references require inspection and explicit confirmation before rebinding', async () => {
+    const f = fixture({ nativeMigrated: true });
+    const plan = { repairs: [{ index: 10, stateId: 'original-state' }], token: 'preview-token' };
+    let repairs = 0;
+    f.api.inspectStoryReferences = async () => plan;
+    f.api.repairStoryReferences = async value => { assert.equal(value, plan); repairs++; return { message: '引用已恢复' }; };
+    try {
+        f.nativeStatus({ ready: false, restoreError: '校验不一致' });
+        assert.equal(find(f.root, '确认采用这些楼层的原有存档'), undefined);
+        await click(f.root, '检查剧情存档引用');
+        assert.equal(repairs, 0);
+        assert.match(f.root.textContent, /校验不一致的楼层：11/);
+        await click(f.root, '确认采用这些楼层的原有存档');
+        assert.equal(repairs, 1);
+        assert.equal(find(f.root, '确认采用这些楼层的原有存档'), undefined);
+    } finally { f.view.dispose(); }
+});
+
 test('prompt and update shortcuts scroll only the owned panel and never pan the host document', () => {
     const f = fixture({ enabled:true });
     try {

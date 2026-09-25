@@ -16,7 +16,7 @@ function fixture() {
     const graph = createStoryStateGraph(store);
     let saves = 0, fullSaves = 0, nativeCalls = 0;
     const ctx = {
-        eventTypes: { MESSAGE_SWIPED: 'swiped' }, eventSource: { on(name,fn){handlers.set(name,fn);}, removeListener(name){handlers.delete(name);} },
+        eventTypes: { MESSAGE_SWIPED: 'swiped',GENERATION_AFTER_COMMANDS:'generating',GENERATION_ENDED:'ended' }, eventSource: { on(name,fn){handlers.set(name,fn);}, removeListener(name){handlers.delete(name);} },
         chatId: 'new-chat', getCurrentChatId() { return this.chatId; },
         characterId: 0, characters: [{ avatar: 'npc.png' }],
         chat: [{ name: 'NPC', mes: '开场', is_user: false }],
@@ -165,5 +165,41 @@ test('mismatched existing candidate still fails restoration instead of silently 
   const tail={name:'NPC',mes:'已保存',swipes:['已保存'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(tail);await saveChatMetadata(f.ctx);
   tail.mes='与已有候选不一致';await f.handlers.get('swiped')(2);
   assert.equal(f.runtime.ready(),false);assert.match(f.runtime.status().restoreError,/候选尚未保存完整/);
+ }finally{f.runtime.destroy();}
+});
+
+
+test('streaming never creates a partial reference and finished reply is archived once',async()=>{
+ const f=fixture();try{
+  await f.runtime.migrate();f.ctx.chat.push({name:'User',mes:'继续',is_user:true});await f.runtime.prepareGeneration();
+  const m={name:'NPC',mes:'临时正文',gen_finished:'streaming-also-sets-this'};f.ctx.chat.push(m);
+  f.ctx.streamingProcessor={isFinished:false};const count=f.nodes.size;
+  f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:7}}});
+  await f.runtime.reconcile();await saveChatMetadata(f.ctx);
+  assert.equal(getReference(m),null);assert.equal(f.nodes.size,count);
+  m.mes='完成正文';f.ctx.streamingProcessor.isFinished=true;await f.runtime.reconcile();
+  assert.ok(getReference(m));const saves=f.fullSaves;await f.runtime.reconcile();assert.equal(f.fullSaves,saves);
+ }finally{f.runtime.destroy();}
+});
+
+
+test('nonstreaming generation also defers external capture until its end event',async()=>{
+ const f=fixture();try{
+  await f.runtime.migrate();f.ctx.chat.push({name:'User',mes:'继续',is_user:true});await f.handlers.get('generating')('normal',{},false);
+  const m={name:'NPC',mes:'待处理正文'};f.ctx.chat.push(m);await saveChatMetadata(f.ctx);assert.equal(getReference(m),null);
+  await f.runtime.reconcile();assert.equal(getReference(m),null);
+  m.mes='最终正文';f.handlers.get('ended')();await f.runtime.reconcile();assert.ok(getReference(m));
+ }finally{f.runtime.destroy();}
+});
+
+
+test('observed continuation renews only its own completed reference and never blesses later manual edits',async()=>{
+ const f=fixture();try{
+  await f.runtime.migrate();const m=f.ctx.chat[0],before=getReference(m);
+  await f.handlers.get('generating')('continue',{},false);m.mes+=' 续写中的内容';await saveChatMetadata(f.ctx);
+  assert.equal(m.extra.amin_story_v2.revision,before.revision);
+  m.mes+=' 完成';f.handlers.get('ended')();await f.runtime.reconcile();
+  assert.notEqual(getReference(m).revision,before.revision);
+  m.mes+=' 未经生成的编辑';await assert.rejects(saveChatMetadata(f.ctx),/引用失效/);
  }finally{f.runtime.destroy();}
 });
