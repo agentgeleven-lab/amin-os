@@ -15,7 +15,7 @@ export function installReplyFloorButtons({rewriteOptions}={}){
   if(mounted.has(element))return mounted.get(element).dispose;
   const ctx=getContext(),index=Number(element.getAttribute('mesid')),message=ctx?.chat?.[index],chatKey=key(ctx);
   if(!message||message.is_system)return;
-  const host=node('div','amin-reply-floor'),button=node('button','','✧ 回复选项');button.type='button';button.setAttribute('aria-expanded','false');button.title='参考至这一楼生成候选或改写草稿，仅填入当前输入框';
+  const host=node('div','amin-reply-floor'),button=node('button','','✧ 回复选项');button.type='button';button.setAttribute('aria-expanded','false');button.title='参考至这一楼生成候选或扩写草稿，仅填入当前输入框';
   let view=null,windowElement=null;
   const dock=mountFloorControl(element,'reply',host,button);
   function close(){view?.dispose();view=null;windowElement?.remove();windowElement=null;button.setAttribute('aria-expanded','false');dock.setOpen(false);}
@@ -24,7 +24,7 @@ export function installReplyFloorButtons({rewriteOptions}={}){
    windowElement=node('section','amin-reply-floor-window');windowElement.setAttribute('aria-label','第 '+(index+1)+' 楼回复选项');
    const bar=node('header','amin-reply-floor-header'),title=node('strong','','回复选项 · 第 '+(index+1)+' 楼'),collapse=node('button','','收起');collapse.type='button';collapse.setAttribute('aria-label','收起第 '+(index+1)+' 楼回复选项');collapse.onclick=close;bar.append(title,collapse);
    const body=node('div','amin-reply-floor-body amin-ui');windowElement.append(bar,body);host.append(windowElement);
-   body.append(node('p','amin-reply-floor-note amin-meta','参考范围：截至这一楼。候选和改写结果填入当前输入框，由你发送。'));
+   body.append(node('p','amin-reply-floor-note amin-meta','参考范围：截至这一楼。候选填入当前输入框，由你发送；发送后清空。'));
    try{view=mount(body,{rewriteOptions,instanceId:'amin-floor-reply-'+(++serial),headingText:'下一句怎么说',contextProvider:current=>{if(key(current)!==chatKey)throw Error('聊天已切换，请重新打开窗口。');return floorContext(current,index,message);}});if(!view)body.append(node('p','','请等待聊天输入框加载后重新打开。'));}
    catch(error){view?.dispose();view=null;body.append(node('p','',error.message));}
    button.setAttribute('aria-expanded','true');dock.setOpen(true);

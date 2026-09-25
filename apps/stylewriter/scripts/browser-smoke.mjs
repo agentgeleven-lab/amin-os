@@ -164,163 +164,42 @@ try {
 
     assert.deepEqual(errors, []);
     console.log('PASS real Chromium DOM: stylewriter mount-once, preset CRUD + undo, custom/reference isolation, gated conversion, guarded fill-back, per-chat privacy, 390px layout.');
-    // The merged workspace uses real DOM with both production views and fake transports.
+    // Production reply UI has candidates/settings only; no rewrite workflow.
     await evaluate(`(async()=>{
-        __view.dispose();
-        window.SillyTavern={getContext:()=>__ctx};
+        __view.dispose();window.SillyTavern={getContext:()=>__ctx};
         __ctx.extensionSettings.reply_options_mvp={count:2,character:false,persona:false,world:false};
+        __ctx.eventTypes.MESSAGE_SENT='message_sent';
         window.__candidateRequests=[];
         __ctx.generateRaw=async request=>{__candidateRequests.push(request);return JSON.stringify({options:[{text:'候选甲'},{text:'候选乙'}]});};
         const {mount}=await import('/apps/reply/workspace.js');
-        window.__workspace=mount(document.getElementById('app'),{rewriteOptions:{getContext:()=>__ctx,ai:()=>__ai,generate:__generate}});
-        window.__workspaceMount=mount;
+        window.__workspace=mount(document.getElementById('app'),{getContext:()=>__ctx});
         window.__reply=()=>document.getElementById('reply-options-panel');
         window.__replyLabel=label=>__reply().querySelector('[aria-label="'+label+'"]');
         window.__workClick=async (root,text)=>{const b=[...root.querySelectorAll('button')].find(b=>b.textContent===text);if(!b)throw Error('missing '+text);b.click();await new Promise(r=>setTimeout(r,50));};
-        const {contentLibrary,styleLibrary}=await import('/apps/reply/writing-library.js');
-        window.__contents=contentLibrary(()=>__ctx);window.__styles=styleLibrary(()=>__ctx);
-        window.__mystyle=__contents.save({name:'浏览器悬疑',description:'BROWSER-THEME'});
-        __set(__replyLabel('内容风格'),__mystyle.id);
-        __set(__replyLabel('候选文风'),'custom');
-        __set(__replyLabel('候选文风预设'),__styles.list()[0].id);
-        return true;
     })()`);
-    assert.equal(await evaluate('__workspaceMount(document.getElementById("app"))===__workspace'),true);
+    assert.equal(await evaluate('__reply().querySelector(".ro-settings-page").hidden'),true);
+    assert.equal(await evaluate('[...__reply().querySelectorAll("button")].some(b=>b.textContent==="改写草稿")'),false);
+    await evaluate('__workClick(__reply(),"设置")');
+    assert.equal(await evaluate('__reply().querySelector(".ro-main-page").hidden'),true);
+    await evaluate(`__set(__replyLabel('文风预设名称'),'新设置文风');__set(__replyLabel('文风预设提示词'),'SMOKE-STYLE：短句。')`);
+    await evaluate('__workClick(__reply(),"生成候选")');
+    await evaluate('__workClick(__reply(),"设置")');
+    assert.equal(await evaluate('__replyLabel("文风预设提示词").value'),'SMOKE-STYLE：短句。');
+    await evaluate('__workClick(__reply().querySelector(".ro-style-manager"),"保存风格")');
+    assert.equal(await evaluate('__replyLabel("候选文风").value'),'custom');
+    await evaluate('__workClick(__reply(),"生成候选")');
     await evaluate('__workClick(__reply(),"生成选项")');
-    assert.equal(await evaluate('__candidateRequests.length'),1);
-    assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/BROWSER-THEME/);
-    assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/目标文风/);
-    // Candidates stay visible after selection; no per-card refinement.
-    assert.equal(await evaluate('__reply().querySelectorAll(".ro-refine").length'),0);
+    assert.match(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/SMOKE-STYLE/);
     await evaluate('__reply().querySelector(".ro-card").click()');
     assert.equal(await evaluate('__reply().querySelectorAll(".ro-card").length'),2);
-    await evaluate('__workClick(__reply(),"生成 / 换一批")');
-    const rewritesBefore=await evaluate('__requests.length');
-    await evaluate(`(()=>{__workspace.open('rewrite');__set(__label('原文'),'候选甲');})()`);
-    assert.equal(await evaluate('__label("原文").value'),'候选甲');
-    assert.equal(await evaluate('__requests.length'),rewritesBefore);
-    assert.equal(await evaluate('__label("内容风格").value'),'none');
-    assert.equal(await evaluate('__reply().parentElement.hidden'),true);
-    await evaluate(`__click('不额外指定文风'); __click('转换文风')`);
-    assert.equal(await evaluate('__requests.length'),rewritesBefore+1);
-    assert.equal(await evaluate('__requests.at(-1).request.systemPrompt.includes("BROWSER-THEME")'),false);
-    await evaluate('__gate.resolve("合并后的改写结果")');await delay(80);
-    assert.equal(await evaluate('__label("转换结果").value'),'合并后的改写结果');
-    // Other page edits invalidate an in-flight conversion using that style.
-    await evaluate(`__set(__label('内容风格'),__mystyle.id); __click('转换文风')`);
-    await evaluate(`__contents.save({name:'浏览器悬疑',description:'BROWSER-CHANGED'},__mystyle.id); __gate.resolve('不能覆盖的迟到结果')`);await delay(80);
-    assert.equal(await evaluate('__label("转换结果").value'),'合并后的改写结果');
-    // Tab switches keep the source draft and preset editor mounted, not reconstructed.
-    await evaluate(`(async()=>{__workspace.open('candidates');await __workClick(__reply(),'生成 / 换一批');__workspace.open('rewrite');__set(__label('原文'),'候选甲');})()`);
-    assert.equal(await evaluate('__label("原文").value'),'候选甲');
+    await evaluate('__ctx.eventSource.emit("message_sent")');
+    assert.equal(await evaluate('__reply().querySelectorAll(".ro-card").length'),0);
+    await evaluate('__workClick(__reply(),"设置")');
+    const settingsLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
+    assert.ok(settingsLayout.scroll<=Math.max(settingsLayout.client,390),'settings page overflows mobile viewport');
     assert.equal(await evaluate('__submits'),0);
-    const mergedLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
-    assert.ok(mergedLayout.scroll<=Math.max(mergedLayout.client,390),'merged narrow page overflows');
     assert.deepEqual(errors,[]);
-    console.log('PASS merged writing workspace: mount-once, single candidate call with theme/style, transfer without AI, independent choices, stale rewrite rejection, no auto-send, 390px layout.');
-    // Production floor controls with two real workspace instances alongside the main pane.
-    await evaluate(`(async()=>{
-        __ctx.chat=[{name:'甲',mes:'FLOOR-ONE-SAMPLE'},{name:'乙',mes:'FLOOR-TWO-SAMPLE'},{name:'丙',mes:'FUTURE-FLOOR-SECRET'}];
-        __ctx.extensionSettings.reply_options_mvp={count:2,character:false,persona:false,world:false,writingStyleMode:'chat',contentMode:'none'};
-        __styles.setMode('chat');__styles.setContentMode('none');
-        const chat=document.createElement('div');chat.id='chat';
-        for(let i=0;i<3;i++){const e=document.createElement('div');e.className='mes';e.setAttribute('mesid',i);e.innerHTML='<div class="mes_block"></div>';chat.append(e);}
-        document.getElementById('send_form').before(chat);
-        window.__floorCalls=[];
-        window.__floorGenerate=(ctx,request,opts)=>new Promise(resolve=>__floorCalls.push({ctx,request,signal:opts.signal,resolve}));
-        window.__floor=idx=>document.querySelector('[mesid="'+idx+'"] .amin-reply-floor-window');
-        window.__floorLabel=(idx,label)=>__floor(idx).querySelector('.amin-stylewriter [aria-label="'+label+'"]');
-        window.__openFloor=idx=>document.querySelector('[mesid="'+idx+'"] .amin-floor-toolbar>button[data-floor-app="reply"]').click();
-        window.__floorHandlerBaseline=__handlers.get('chat_changed').size;
-        const {installReplyFloorButtons}=await import('/apps/reply/floor-ui.js');
-        window.__floorInstaller=installReplyFloorButtons({rewriteOptions:{ai:()=>__ai,generate:__floorGenerate}});
-        __openFloor(0);__openFloor(1);
-        return true;
-    })()`);
-    assert.equal(await evaluate('document.querySelectorAll(".amin-writing-workspace").length'),3);
-    assert.equal(await evaluate('(()=>{const ids=[...document.querySelectorAll("[id]")].map(n=>n.id);return new Set(ids).size===ids.length;})()'),true);
-    // Another floor's saved defaults must not replace the choices visible in this window.
-    await evaluate(`__set(__floor(1).querySelector('.ro-panel [aria-label="内容风格"]'),'violence')`);
-    assert.equal(await evaluate(`__floor(0).querySelector('.ro-panel [aria-label="内容风格"]').value`),'none');
-    const floorCandidatesBefore=await evaluate('__candidateRequests.length');
-    await evaluate('__workClick(__floor(0),"生成选项")');
-    assert.equal(await evaluate('__candidateRequests.length'),floorCandidatesBefore+1);
-    assert.match(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/FLOOR-ONE-SAMPLE/);
-    assert.doesNotMatch(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/FLOOR-TWO-SAMPLE|FUTURE-FLOOR-SECRET|突出动作冲突/);
-    await evaluate(`(async()=>{await __workClick(__floor(0),'改写草稿');__set(__floorLabel(0,'原文'),'候选甲');})()`);
-    assert.equal(await evaluate('__floorLabel(0,"原文").value'),'候选甲');
-    assert.equal(await evaluate('__label("原文").value'),'候选甲');
-    assert.equal(await evaluate('__floorCalls.length'),0);
-    assert.equal(await evaluate('__floor(0).querySelector(".ro-panel").parentElement.hidden'),true);
-    await evaluate('__workClick(__floor(1),"管理文风预设")');
-    assert.equal(await evaluate('__floor(1).querySelector(".ro-panel").parentElement.hidden'),true);
-    await evaluate(`(async()=>{await __workClick(__floor(1),'参考当前聊天文风');__set(__floorLabel(1,'原文'),'第二楼原文');__set(document.getElementById('send_textarea'),'共享输入草稿');await __workClick(__floor(0),'转换文风');await __workClick(__floor(1),'转换文风');})()`);
-    assert.deepEqual(await evaluate('__floorCalls.map(x=>x.ctx.chat.length)'),[1,2]);
-    assert.doesNotMatch(await evaluate('JSON.stringify(__floorCalls[1].request)'),/FUTURE-FLOOR-SECRET/);
-    await evaluate('__workClick(__floor(0),"收起")');
-    assert.equal(await evaluate('__floorCalls[0].signal.aborted'),true);
-    assert.equal(await evaluate('__floorCalls[1].signal.aborted'),false);
-    await evaluate('__floorCalls[0].resolve("关闭后迟到");__floorCalls[1].resolve("第二楼有效结果")');await delay(80);
-    assert.equal(await evaluate('__floorLabel(1,"转换结果").value'),'第二楼有效结果');
-    const openFloorLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,bodies:[...document.querySelectorAll(".amin-reply-floor-body")].map(n=>({scroll:n.scrollWidth,client:n.clientWidth}))})');
-    assert.ok(openFloorLayout.scroll<=Math.max(openFloorLayout.client,390),'open floor overflows viewport');
-    assert.ok(openFloorLayout.bodies.every(n=>n.scroll<=n.client+1),'floor content overflows its window: '+JSON.stringify(openFloorLayout));
-    await evaluate(`__set(document.getElementById('send_textarea'),'用户新草稿');__workClick(__floor(1),'填回聊天输入框')`);
-    assert.equal(await evaluate('document.getElementById("send_textarea").value'),'用户新草稿');
-    await evaluate(`__set(document.getElementById('send_textarea'),'共享输入草稿');__workClick(__floor(1),'填回聊天输入框')`);
-    assert.equal(await evaluate('document.getElementById("send_textarea").value'),'第二楼有效结果');
-    assert.equal(await evaluate('__submits'),0);
-    await evaluate('__openFloor(0)');
-    assert.equal(await evaluate('__floorLabel(0,"原文").value'),'');
-    assert.equal(await evaluate('__floorLabel(0,"转换结果").value'),'');
-    // A replaced floor cannot accept its old pending result or retain the previous UI.
-    await evaluate('__workClick(__floor(1),"转换文风")');
-    await evaluate('__ctx.chat[1]={name:"新楼层",mes:"替换内容"};__floorInstaller.refresh()');
-    // refresh is frame-coalesced, so wait for that frame before asserting teardown.
-    for(let i=0;i<40 && !(await evaluate('__floorCalls.at(-1).signal.aborted'));i++)await delay(25);
-    assert.equal(await evaluate('__floorCalls.at(-1).signal.aborted'),true);
-    await evaluate('__floorCalls.at(-1).resolve("替换后迟到")');await delay(60);
-    assert.equal(await evaluate('__floor(1)'),null);
-    // Metadata replacement closes every old floor and releases its per-window listeners.
-    await evaluate('__ctx.chatMetadata={replaced:true};__ctx.eventSource.emit("chat_changed")');await delay(80);
-    assert.equal(await evaluate('document.querySelectorAll(".amin-reply-floor-window").length'),0);
-    assert.equal(await evaluate('__handlers.get("chat_changed").size'),await evaluate('__floorHandlerBaseline+1'));
-    await evaluate('(async()=>{for(let i=0;i<3;i++){__openFloor(0);await __workClick(__floor(0),"收起");}})()');
-    assert.equal(await evaluate('__handlers.get("chat_changed").size'),await evaluate('__floorHandlerBaseline+1'));
-    const floorLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
-    assert.ok(floorLayout.scroll<=Math.max(floorLayout.client,390),'floor narrow page overflows');
-    assert.deepEqual(errors,[]);
-    console.log('PASS floor writing workspaces: local handoff, bounded samples, unique IDs, independent tasks/results, guarded fill, deletion/metadata cleanup, listener cleanup and 390px layout.');
-    await evaluate('__workspace.dispose()');
-
-    // Fresh page: managed ownership must mount only the host-owned message node.
-    await send('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});
-    for(let i=0;i<100;i++){if(await evaluate('!!document.getElementById("app") && !window.__ctx'))break;await delay(50);}
-    await evaluate(`(async()=>{
-        window.__managedCalls=[];window.__managedHandlers=new Map();
-        const eventSource={on(t,f){if(!__managedHandlers.has(t))__managedHandlers.set(t,new Set());__managedHandlers.get(t).add(f);},off(t,f){__managedHandlers.get(t)?.delete(f);}};
-        window.__ctx={chatId:'managed-chat',characterId:0,chatMetadata:{},name1:'我',name2:'角色',chat:[{name:'甲',mes:'托管楼层'},{name:'乙',mes:'非托管楼层'}],extensionSettings:{reply_options_mvp:{count:2,character:false,persona:false,world:false}},saveSettingsDebounced(){},eventTypes:{CHAT_CHANGED:'chat_changed'},eventSource};
-        window.SillyTavern={getContext:()=>__ctx};
-        window.__TAURITAVERN__={api:{chatSurface:{protocolVersion:1,isManagedOwnershipRequired:()=>true,registerParticipant(p){window.__participant=p;}}}};
-        const chat=document.createElement('div');chat.id='chat';chat.innerHTML='<div class="mes" mesid="0"><div class="mes_block"></div></div><div class="mes" mesid="1"><div class="mes_block"></div></div>';document.body.append(chat);
-        const {installReplyFloorButtons}=await import('/apps/reply/floor-ui.js');
-        installReplyFloorButtons({rewriteOptions:{ai:()=>({capture:()=>({config:{timeoutSeconds:5}})}),generate:(ctx,request,opts)=>new Promise(resolve=>__managedCalls.push({signal:opts.signal,resolve}))}});
-        window.__managedClick=text=>{const b=[...document.querySelectorAll('.amin-reply-floor-window button')].find(b=>b.textContent===text);if(!b)throw Error('missing '+text);b.click();};
-        return true;
-    })()`);
-    assert.equal(await evaluate('document.querySelectorAll(".amin-floor-toolbar button").length'),0);
-    await evaluate('__release=__participant.didMount({element:document.querySelector("[mesid=\\"0\\"]")});document.querySelector(".amin-floor-toolbar button").click();__managedClick("改写草稿")');
-    assert.equal(await evaluate('document.querySelectorAll(".amin-writing-workspace").length'),1);
-    assert.equal(await evaluate('document.querySelector("[mesid=\\"1\\"] .amin-floor")'),null);
-    await evaluate(`(()=>{const source=document.querySelector('.amin-stylewriter [aria-label="原文"]');source.value='托管原文';source.dispatchEvent(new Event('input'));__managedClick('转换文风');})()`);await delay(50);
-    assert.equal(await evaluate('__managedCalls.length'),1);
-    await evaluate('__release();__managedCalls[0].resolve("卸载后迟到")');await delay(50);
-    assert.equal(await evaluate('__managedCalls[0].signal.aborted'),true);
-    assert.equal(await evaluate('document.querySelectorAll(".amin-writing-workspace").length'),0);
-    assert.equal(await evaluate('__managedHandlers.get("chat_changed").size'),1);
-    assert.deepEqual(errors,[]);
-    console.log('PASS managed floor ownership: no unowned mounts, inline rewrite, unmount aborts and releases listeners.');
-
+    console.log('PASS reply settings: no rewrite, preserved style drafts, saved style in generation, clear on send, 390px layout.');
 
     await send('Browser.close').catch(() => {});
 } finally {

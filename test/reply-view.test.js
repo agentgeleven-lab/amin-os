@@ -139,3 +139,22 @@ test('a chat switch discards an in-flight result and blocks edits to old cards',
     assert.equal(cards(f.root).length,0);assert.equal(f.input.value,'');
     assert.match(status(f.root),/重新生成|上下文已更新/);
 });
+
+
+test('settings tab owns configuration and preserves unsaved style edits across page switches',async t=>{
+ const f=fixture(['["甲","乙","丙"]']);t.after(()=>f.dispose());
+ const main=descendants(f.root).find(n=>n.className.includes('ro-main-page'));
+ const settings=descendants(f.root).find(n=>n.className.includes('ro-settings-page'));
+ assert.equal(main.hidden,false);assert.equal(settings.hidden,true);
+ assert.equal(findLabel(main,'候选文风'),undefined);assert.equal(findLabel(main,'内容风格'),undefined);
+ assert.equal(findButton(f.root,'改写草稿'),undefined);assert.equal(findLabel(f.root,'原文'),undefined);
+ await click(f.root,'设置');assert.equal(main.hidden,true);assert.equal(settings.hidden,false);
+ assert.ok(findLabel(settings,'角色扮演模式提示词（角色定位）'));
+ const manager=descendants(settings).find(n=>n.className.includes('ro-style-manager'));
+ const name=findLabel(manager,'文风预设名称'),rules=findLabel(manager,'文风预设提示词');
+ name.value='测试文风';fire(name,'input');rules.value='句子简短，描写具体。';fire(rules,'input');
+ await click(f.root,'生成候选');await click(f.root,'设置');assert.equal(name.value,'测试文风');assert.equal(rules.value,'句子简短，描写具体。');
+ await click(manager,'保存风格');assert.equal(findLabel(settings,'候选文风').value,'custom');
+ await click(f.root,'生成候选');await click(f.root,'生成选项');
+ assert.match(JSON.stringify(f.requests[0]),/句子简短，描写具体/);assert.equal(cards(f.root).length,3);
+});

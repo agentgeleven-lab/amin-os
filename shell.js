@@ -19,7 +19,7 @@ const APPS=[
     {id:'status',name:'世界状态',sub:'角色、关系与剧情的此刻',icon:'◈',color:'lavender'},
     {id:'organizations',name:'势力概览',sub:'组织、联盟、地区与局势评估',icon:'◎',color:'mint'},
     {id:'reply',name:'回复选项',sub:'拟写下一句，由你决定',icon:'≋',color:'peach'},
-    {id:'stylewriter',name:'回复选项 · 改写草稿',sub:'旧文风转换入口（兼容）',icon:'✎',color:'mint',alias:true},
+    {id:'stylewriter',name:'回复选项 · 设置',sub:'旧文风转换入口（兼容）',icon:'✎',color:'mint',alias:true},
     {id:'ai',name:'AI 设置',sub:'共享 API、异步预设与任务',icon:'✧',color:'mint'},
     {id:'settings',name:'设置',sub:'全局外观与应用个性化',icon:'⚙',color:'lavender'},
 ];

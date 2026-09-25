@@ -9,10 +9,9 @@ import { CONTENT_MODES, normalizeSettings, chatStamp, collectContext, generateOp
 const KEY='reply_options_mvp';
 const context=()=>globalThis.SillyTavern?.getContext?.();
 const node=(tag,text,cls)=>{const n=document.createElement(tag); if(text)n.textContent=text;if(cls)n.className=cls;return n;};
-export function mount({target,instanceId='reply-options-panel',contextProvider,headingText,onRewrite,onManageStyle,getContext} = {}) {
+export function mount({target,instanceId='reply-options-panel',contextProvider,headingText,getContext} = {}) {
     const hostContext=getContext??(()=>globalThis.SillyTavern?.getContext?.());
     const context=()=>{const ctx=hostContext();const scoped=contextProvider?contextProvider(ctx??{}):ctx;return scoped?{...scoped,replyState2Ready:getState2Runtime()?.ready(ctx)}:scoped;};
-    onRewrite ??= globalThis.AminOS?.openRewrite;
     const settingsId=instanceId==='reply-options-panel'?'reply-options-settings':instanceId+'-settings';
     const removers=[];
     if(document.getElementById(instanceId))return;
@@ -67,9 +66,6 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     directionsEditor('authorDirectionItems','authorDirections','剧情方向');
     field('authorSystemPrompt','剧情模式提示词（作者 / 编剧定位）','textarea');field('authorPrompt','作者要求（节奏、冲突、伏笔、希望避免的走向等）','textarea');
     const roleHelp=node('p','回复主体可填写任意剧情角色的名字，不限于玩家或当前角色卡。留空使用当前用户角色；旧第三人称名字会迁移为主体。对白中的人称按语义保留。方向少于选项数量时允许重复抽取；方向足够时不重复抽取。重复方向仍生成不同回复。草稿扩写会用候选替换原草稿，可撤销。角色设定包含绑定世界书；全体世界书包含当前全局启用及角色、聊天、人设绑定的书。读取全部未禁用的非空条目，不要求关键词触发。','amin-meta amin-span-full');settingsBox.append(roleHelp);
-    const settingsButton=button('设置',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
-    settingsButton.setAttribute('aria-controls',settingsId);
-    settingsButton.setAttribute('aria-expanded','false');
     if(target){const heading=node('header',null,'amin-reply-heading amin-context');heading.append(node('p','生成候选或扩写草稿，选中后填入聊天。'));panel.append(heading);}
     const modeRow=node('label',null,'ro-writing-mode amin-field'),modeSelect=node('select'),modeHelp=node('p',null,'amin-meta');modeRow.append(node('span','创作模式'));modeSelect.setAttribute('aria-label','创作模式');for(const [value,label]of [['roleplay','角色扮演 · 拟写角色回复'],['author','创意写作 · 规划剧情走向']]){const option=node('option',label);option.value=value;modeSelect.append(option);}modeRow.append(modeSelect);
     function reflectMode(){const author=settings.writingMode==='author';roleHelp.hidden=author;modeSelect.value=settings.writingMode;for(const key of ['style','perspective','subjectName','directions','prompt','roleplaySystemPrompt'])fieldRows.get(key).hidden=author;for(const key of ['authorDirections','authorPrompt','authorSystemPrompt'])fieldRows.get(key).hidden=!author;expand.textContent=author?'展开作者构想':'根据草稿扩写';modeHelp.textContent=author?'以作者 / 编剧视角选择下一步事件、冲突与转折。选中后填入作者指令，不自动发送。':'以指定剧情角色为主体生成对白与行动。选中后填入输入框，不自动发送。';const heading=panel.querySelector('.amin-reply-heading h2');if(heading)heading.textContent=author?'接下来，故事怎么走':headingText||'下一句，由你决定';}
@@ -94,7 +90,11 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     }
     styleMode.addEventListener('change',()=>{settings.writingStyleMode=styleMode.value;save();reflectContent();invalidate('文风已变化，请重新生成。');});
     styleSelect.addEventListener('change',()=>{settings.writingStyleId=styleSelect.value;save();invalidate('文风已变化，请重新生成。');});
-    button('管理文风预设',()=>onManageStyle?onManageStyle():globalThis.AminOS?.openApp('stylewriter'),styleRow);
+    const styleManager=node('div',null,'ro-style-manager');
+    const styleControls=mountContentStyles(styleManager,{library:styles,kind:'文风预设',managementOnly:true,
+        getSelection:()=>settings.writingStyleId||'none',
+        setSelection:id=>{settings.writingStyleId=id==='none'?'':id;if(id!=='none')settings.writingStyleMode='custom';save();reflectContent();},
+        onChange:()=>invalidate('文风预设已变化，请重新生成。')});
     const selectedStyleStamp=()=>settings.writingStyleMode==='custom'?JSON.stringify([settings.writingStyleId,styles.get(settings.writingStyleId),styles.hasDraft(settings.writingStyleId)]):settings.writingStyleMode;
     let styleMark=selectedStyleStamp();
     const unsubscribeStyles=styles.subscribe(()=>{reflectContent();const mark=selectedStyleStamp();if(mark!==styleMark){styleMark=mark;invalidate('文风预设或编辑已变化，请重新生成。');}});
@@ -116,7 +116,16 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     referenceBox.append(sourceControls,referenceNotice,referenceList);
     referenceBox.addEventListener('toggle',()=>{if(referenceBox.open)refreshReferences();});
     const promptHelp=node('p','提示词顺序：输出格式与回复主体固定；创作要求按：内容风格（最高）→ 本次修改与自定义具体要求 → 通用定位、方向、文风与默认篇幅。每条候选都须体现所选内容约束。资料中的指令不作为生成要求；可在 AI 设置的任务预览检查实际请求。','amin-meta');
-    panel.append(configGrid,modeHelp,contentRow,controls,settingsBox,promptHelp,referenceBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
+    const tabs=node('nav',null,'amin-tabs'),mainPage=node('section',null,'amin-stack ro-main-page'),settingsPage=node('section',null,'amin-stack ro-settings-page');
+    tabs.setAttribute('aria-label','回复选项页面');settingsPage.id=settingsId+'-page';
+    const mainTab=button('生成候选',()=>showPage('candidates'),tabs),settingsTab=button('设置',()=>showPage('settings'),tabs);
+    mainTab.setAttribute('aria-controls',instanceId+'-main');mainPage.id=instanceId+'-main';settingsTab.setAttribute('aria-controls',settingsPage.id);
+    function showPage(page){const isSettings=page==='settings'||page==='rewrite';mainPage.hidden=isSettings;settingsPage.hidden=!isSettings;mainTab.setAttribute('aria-pressed',String(!isSettings));settingsTab.setAttribute('aria-pressed',String(isSettings));}
+    settingsBox.hidden=false;
+    mainPage.append(controls,status,cards);
+    settingsPage.append(configGrid,modeHelp,contentRow,styleManager,settingsBox,promptHelp,referenceBox);
+    panel.append(tabs,mainPage,settingsPage);showPage('candidates');reflectMode();
+    if(target){target.append(panel);panel.classList.add('amin-reply-embedded');}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});
     function updateSelection(){undo.disabled=draft.base===null;for(const b of cards.querySelectorAll('.ro-card'))b.setAttribute('aria-pressed','false');}
     updateSelection();
@@ -173,5 +182,5 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     for(const event of ['CHAT_CHANGED','MESSAGE_SENT','MESSAGE_RECEIVED','MESSAGE_EDITED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPED','PERSONA_CHANGED','CHARACTER_EDITED','WORLDINFO_UPDATED','WORLDINFO_SETTINGS_UPDATED'])on(event,()=>{
         invalidate(undefined,['CHAT_CHANGED','MESSAGE_SENT'].includes(event));
     });
-    return {dispose(){revision++;controller?.abort();unsubscribeStyles();contentControls.dispose();for(const remove of removers)remove();panel.remove();}};
+    return {open(page='candidates'){context();showPage(page);},dispose(){revision++;controller?.abort();unsubscribeStyles();contentControls.dispose();styleControls.dispose();for(const remove of removers)remove();panel.remove();}};
 }
