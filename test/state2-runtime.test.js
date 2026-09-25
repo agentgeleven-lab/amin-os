@@ -99,6 +99,11 @@ test('failed native replay blocks hydration and reports a recoverable error', as
         assert.equal(f.runtime.sync(), false);
         assert.deepEqual(f.ctx.chatMetadata, before);
         assert.match(f.runtime.status().message, /missing native module/);
+        f.runtime.collectReply(0); // Another diagnostic must not erase the restore failure.
+        assert.equal(f.runtime.status().restoreError, 'missing native module');
+        assert.equal(f.runtime.status().ready, false);
+        f.ctx.chatMetadata = structuredClone(f.ctx.chatMetadata); f.ctx.chatId = 'different';
+        assert.equal(f.runtime.status().restoreError, '');
     } finally { f.runtime.destroy(); }
 });
 
@@ -123,4 +128,15 @@ test('projecting native variables updates derived views without scheduling a hos
         assert.equal(readCharacters(f.ctx).characters[0].name,'Native display');
         assert.equal(delayed,0);assert.equal(f.saves,before);
     }finally{f.runtime.destroy();}
+});
+
+
+test('successful restore retry clears the saved failure reason',async()=>{
+ let fail=true;
+ const f=fixture({restoreNative:async()=>{if(fail)throw Error('missing file');return {restored:true,stale:false};}});
+ try{
+  await f.runtime.migrate();f.ctx.chatMetadata=structuredClone(f.ctx.chatMetadata);f.ctx.chatId='retry';
+  await f.runtime.restoreChat();assert.equal(f.runtime.status().restoreError,'missing file');
+  fail=false;await f.runtime.restoreChat();assert.equal(f.runtime.status().restoreError,'');assert.equal(f.runtime.status().ready,true);
+ }finally{f.runtime.destroy();}
 });

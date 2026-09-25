@@ -64,3 +64,33 @@ test('effect deletion follows branch and floor history like other effect operati
  const removed=change(state,later,'delete',{id});assert.equal(activeEffects(removed,later).length,0);
  assert.equal(activeEffects(removed,c).length,1);assert.equal(activeEffects(removed,[...c,{mes:'其他分支'}]).length,1);
 });
+
+import { buildDataPrompt } from '../apps/linkage/prompt.js';
+import { emptyLinkageState, KEY as LINKAGE_KEY } from '../apps/linkage/policy.js';
+test('copied branch keeps confirmed effect snapshot and unified narrative constraints',()=>{
+ const c=chat(),store=change(seed(),c,'create',data);
+ const ctx={chat:structuredClone(c),chatMetadata:{[KEY]:structuredClone(store),[LINKAGE_KEY]:{...emptyLinkageState(),enabled:true}},getCurrentChatId:()=> 'branch'};
+ ctx.chatMetadata[KEY].skills[0].reminder='later library revision';
+ const prompt=buildDataPrompt(ctx);
+ assert.match(prompt,/当前分支能力的剧情约束/);
+ assert.match(prompt,/已切换聊天或建立分支不构成解除理由/);
+ assert.match(prompt,/人物行动、反应和事件结果/);
+ assert.match(prompt,/持有到主动解除/);
+ assert.match(prompt,/黑暗/);
+ assert.match(prompt,/modules.effects.skills 仅为能力库/);
+ ctx.chatMetadata[LINKAGE_KEY].modules.effects={enabled:true,read:false,write:false};
+ assert.doesNotMatch(buildDataPrompt(ctx),/黑暗|当前分支能力的剧情约束/);
+});
+test('ability preview explains unified injection, read denial and external data source',()=>{
+ const f=fixture(),ctx=f.get();ctx.chatMetadata[LINKAGE_KEY]={...emptyLinkageState(),enabled:true};
+ const api=createEffects(f.get);
+ try{
+  assert.match(api.promptPreview().text,/黑暗/);
+  assert.match(api.promptPreview().note,/统一联动发送/);
+  assert.equal(api.prompt(),''); // no duplicate standalone injection
+  ctx.chatMetadata[LINKAGE_KEY].dataSource='external';
+  assert.equal(api.promptPreview().text,'');assert.match(api.promptPreview().note,/外部/);
+  ctx.chatMetadata[LINKAGE_KEY].modules.effects={enabled:true,read:false,write:false};
+  assert.equal(api.promptPreview().text,'');assert.match(api.promptPreview().note,/读取权限关闭/);
+ }finally{api.dispose();}
+});

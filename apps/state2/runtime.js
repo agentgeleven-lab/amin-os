@@ -40,7 +40,7 @@ function combine(original, extra) {
 }
 /** The native engine is the sole executor of chat <state> blocks. */
 export function createState2Runtime(getContext = context, { report = () => {}, interval = 700, host = globalThis, document = globalThis.document, restoreNative = restoreNativeState2ToFloor, storyStorage } = {}) {
-    let disposed = false, projecting = false, migrating = false, lastMessage = '', timer = null, lastErrors = null;
+    let disposed = false, projecting = false, migrating = false, lastMessage = '', timer = null, lastErrors = null, restoreError = '';
     let activeMetadata = null, activeIdentity = null, restoring = false, restoreTask = null, restoreFailed = false, settled = false, epoch = 0, cached = null, eventTimer = null;
     const subscriptions = [], operation = createOperationService(getContext);
     const files = createStoryFileStore({ getHostWindow: () => host.window ?? host });
@@ -49,7 +49,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     const external = () => getContext()?.chatMetadata?.amin_os_story_storage_v2?.version === 2;
     const removeSavePreparation = registerChatSavePreparation(async ctx => {
         if (!external() || ctx.chatMetadata !== getContext()?.chatMetadata || restoring) return;
-        if (!ready(ctx)) throw Error('外置剧情状态尚未恢复，不能保存新的状态引用。');
+        if (!ready(ctx)) throw Error('外置剧情状态尚未恢复，不能保存新的状态引用。' + (sameChat(ctx) && restoreError ? '原因：' + restoreError : '请在世界状态 → 联动更新查看变量恢复状态。'));
         const result = await story.capture();
         if (result.changed) markChatIdsDirty(ctx);
     });
@@ -82,7 +82,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         if (!isChatReady(ctx) || !ctx?.chatMetadata || !storageStatus(ctx).migrated || disposed) return;
         if (sameChat(ctx) && restoring) return restoreTask;
         activeMetadata = ctx.chatMetadata; activeIdentity = chatIdentity(ctx);
-        settled = false; restoreFailed = false; cached = null;
+        settled = false; restoreFailed = false; restoreError = ''; cached = null;
         const lock = metadataWriteStatus(getContext);
         if (lock.busy || lock.dirty) return;
         restoring = true;
@@ -107,7 +107,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 try { publishExternalMetadataChange(getContext, [['variables','状态栏'], ['variables','势力资料']]); }
                 finally { projecting = false; }
             } catch (error) {
-                if (ticket === epoch && sameChat(getContext())) { restoreFailed = true; say('楼层变量恢复未完成：' + error.message); }
+                if (ticket === epoch && sameChat(getContext())) { restoreFailed = true; restoreError = error.message; say('楼层变量恢复未完成：' + error.message); }
             } finally {
                 release();
                 if (ticket === epoch) restoring = false;
@@ -264,7 +264,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         if (external() && ready() && !sameSignature(observedNative, signature(getContext()))) return archive();
     }
     if(interval>0){timer=setInterval(reconcile,interval);timer.unref?.();}
-    return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),message:lastMessage||nativeState2Status(getContext()).message}),
+    return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),ready:ready(),restoring:sameChat(getContext())&&restoring,restoreError:sameChat(getContext())?restoreError:'',message:lastMessage||nativeState2Status(getContext()).message}),
         readStoryFloor: index => story.readFloor(index), storyStatus: () => story.status(),
         async archiveStory() { const ctx = getContext(), result = await story.capture(); if (result.changed) markChatIdsDirty(ctx); return result; },
         readStoryState: id => story.readState(id),

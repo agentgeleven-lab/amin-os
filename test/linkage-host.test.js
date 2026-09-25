@@ -380,7 +380,7 @@ test('disabled branch and missing worldbook stages replace stale switch status',
     const f=hostFixture();await f.switchChat();f.settings.enabled=false;
     await f.start();assert.match(f.host.status().message,/当前聊天未启用/);
     f.settings.enabled=true;await f.start();await f.source.emit('GENERATION_ENDED');
-    assert.match(f.host.status().message,/未收到世界书加载事件/);
+    assert.match(f.host.status().message,/未确认世界书加载和统一更新规则激活/);
     await f.start();await f.load();await f.source.emit('GENERATION_ENDED');
     assert.match(f.host.status().message,/未确认统一条目实际激活/);assert.equal(f.replies.length,0);f.host.destroy();
 });

@@ -136,6 +136,10 @@ export function mount(target, options = {}) {
         const available = status?.available === true, migrated = status?.migrated === true;
         nativePanel.replaceChildren(make('h3', '剧情变量 · 小白变量 2.0'), make('p', '回复中的 <state> 由小白变量 2.0 自动执行；Amin 读取结果并刷新人物、背包、场景等应用。', 'amin-meta'));
         nativePanel.append(make('p', status?.message || (available ? migrated ? '当前剧情资料已迁移到变量 2.0。' : '可初始化或迁移当前聊天的剧情变量。' : '请先启用小白盒子的变量 2.0，再刷新本页。'), available ? 'amin-meta' : 'amin-notice'));
+        if(migrated && status?.ready===false){
+            nativePanel.append(make('p',status.restoreError?'恢复失败：'+status.restoreError:status.restoring?'正在恢复当前分支，请稍候。':'当前分支尚未恢复完成。','amin-notice'));
+            if(typeof api.retryState2Restore==='function')nativePanel.append(button('重试恢复当前分支',async()=>{const result=await api.retryState2Restore();say(result.message||'当前分支状态已恢复。');},{lock:'busy'}));
+        }
         if (!available) nativePanel.append(make('p', '在小白盒子中启用变量 2.0 后，Amin 才能读取并更新当前聊天的剧情资料。', 'amin-meta'));
         if (available && typeof api.migrateState2 === 'function') {
             nativePanel.append(button('初始化／迁移剧情变量', async () => {

@@ -152,7 +152,7 @@ export function mount(target,options={}){
     const token=api.capture(),settings=card('剧情提醒设置');const toggle=node('label',null,'amin-check'),check=node('input');check.type='checkbox';check.checked=store.enabled;toggle.append(check,node('span','生成时附加持续提醒'));settings.append(toggle);
     const limit=field(settings,'提醒字符上限（1000–200000）',String(store.limit));limit.type='number';limit.min=1000;limit.max=200000;
     button(toolbar(settings),'保存提醒设置',async()=>{const n=Number(limit.value);if(!Number.isInteger(n)||n<1000||n>200000)throw Error('字符上限需为 1000–200000 的整数');await api.save(token,s=>({...s,enabled:check.checked,limit:n}));finish('提醒设置已保存');},true);
-    let prompt;try{prompt=api.prompt?api.prompt():compile(store,chat);}catch(e){prompt=e.message;}const preview=card('当前分支 · 提示预览');preview.append(node('p','下次生成将使用以下提醒；超过上限会明确提示，不会截掉部分效果。','amin-meta'),node('pre',prompt||'无提醒','amin-result'));
+    let prompt,note='下次生成将使用以下提醒；超过上限会明确提示，不会截掉部分效果。';try{if(api.promptPreview){const result=api.promptPreview();prompt=result.text;note=result.note;}else prompt=api.prompt?api.prompt():compile(store,chat);}catch(e){prompt=e.message;}const preview=card('当前分支 · 提示预览');preview.append(node('p',note,'amin-meta'),node('pre',prompt||'无提醒','amin-result'));
    }
   }catch(e){say(e.message);}
  }

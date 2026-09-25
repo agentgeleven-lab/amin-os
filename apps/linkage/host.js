@@ -199,7 +199,7 @@ export function createLinkageHost(getContext, {
         if (!run.write) { cancel(); return; }
         if (!run.captured) {
             if (run.selected && !run.failed) say('本轮规则已展开，但未确认统一条目实际激活，未接收更新；请检查世界书预算与预设');
-            else if (!run.selected && message === '已收到当前聊天的生成事件，等待加载统一更新规则') say('本轮未收到世界书加载事件，未建立更新接收记录；请检查宿主和预设');
+            else if (!run.selected && message === '已收到当前聊天的生成事件，等待加载统一更新规则') say('本轮未确认世界书加载和统一更新规则激活；此提示不代表变量恢复结果或小白执行结果，请另看“剧情变量 · 小白变量 2.0”的恢复状态');
             cancel(); return;
         }
         run.ended = true; schedule();

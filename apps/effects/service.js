@@ -3,7 +3,8 @@ import {LIBRARY_KEY,mergeLibrary,libraryStamp} from './library.js';
 import {KEY as SCENE_KEY,readCurrentScene} from '../scene/model.js';
 import {createOperationService,subscribeStateChanges,chatIdentity,acquireMetadataWrite} from '../shared/operations.js';
 import {uuid} from '../../uuid.js';
-import {managesModule} from '../linkage/policy.js';
+import {managesModule,mayRead,readLinkageSettings} from '../linkage/policy.js';
+import {buildDataPrompt} from '../linkage/prompt.js';
 import {buildSettlement,periodicPreview,SETTLEMENT_PATHS,MANUAL_SETTLEMENT_PATHS,validatePeriodicReferences} from './settlement.js';
 import {prepareState2ManualWrite} from '../state2/runtime.js';
 export const PROMPT_KEY='amin-os-persistent-effects';
@@ -64,13 +65,20 @@ export function createEffects(getContext){
    const prompt=compile(readStore(ctx),chat,readCurrentScene({...ctx,chat}).clock);ctx.setExtensionPrompt(PROMPT_KEY,prompt,1,0,false);message=prompt?`已附加 ${prompt.length} 字符持续效果提醒`:'当前没有启用且未到期的生效记录';}
   catch(e){message=e.message;}notify();
  }
+ function promptPreview(){
+  const ctx=getContext();
+  if(!managesModule(ctx,'effects'))return {text:currentPrompt(ctx),note:'独立能力提醒：下次生成按当前分支重新编译。'};
+  if(!mayRead(ctx,'effects'))return {text:'',note:'统一联动已接管，但能力模块的模型读取权限关闭，本轮不发送能力资料。'};
+  if(readLinkageSettings(ctx).dataSource==='external')return {text:'',note:'资料来源设为外部：Amin 不发送能力资料，请在酒馆提示词查看器检查外部注入。'};
+  return {text:buildDataPrompt(ctx),note:'统一联动发送：下方是当前完整剧情资料，能力记录位于 modules.effects。此处为预览，实际发送请核对酒馆提示词查看器。'};
+ }
  const ctx=getContext(),events=ctx.eventTypes??ctx.event_types??{},source=ctx.eventSource;
  const supported=!!(ctx.setExtensionPrompt&&source?.on&&events.GENERATION_AFTER_COMMANDS&&events.CHAT_CHANGED);
  const handlers={GENERATION_AFTER_COMMANDS:start,CHAT_CHANGED:()=>{clear();message='已切换聊天';notify();},GENERATION_ENDED:clear,GENERATION_STOPPED:clear,MESSAGE_DELETED:()=>{clear();notify();},MESSAGE_SWIPED:()=>{clear();notify();},MESSAGE_UPDATED:()=>{clear();notify();}};
  if(supported)for(const [event,fn]of Object.entries(handlers))if(events[event])source.on(events[event],fn);
  const unsubscribeOperations=operations.subscribe(()=>{if(operations.status())message=operations.status();notify({error:operations.dirty()&&!operations.busy()});});
  const unsubscribeState=subscribeStateChanges((event,metadata)=>{if(metadata===getContext()?.chatMetadata&&event.identity===chatIdentity(getContext())&&event.paths.some(path=>[KEY,SCENE_KEY].includes(path[0]))){clear();notify();}});
- return {capture,check,save,saveLibrary,read,mutate,split,stageSettlement,confirmSettlement,discardSettlement:()=>operations.discard(),periodicPreview:()=>periodicPreview(getContext()),retrySave,dirty:operations.dirty,busy:()=>busy||operations.busy(),gameClock:()=>readCurrentScene(getContext()).clock,timedEffects:()=>{const c=getContext();return timedEffects(readStore(c),c?.chat,readCurrentScene(c).clock);},expiryPreview:afterClock=>contextExpiryPreview(getContext(),afterClock),prompt:()=>currentPrompt(getContext()),context:getContext,status:()=>operations.dirty()?message:supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();unsubscribeOperations();unsubscribeState();operations.dispose();listeners.clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
+ return {promptPreview,capture,check,save,saveLibrary,read,mutate,split,stageSettlement,confirmSettlement,discardSettlement:()=>operations.discard(),periodicPreview:()=>periodicPreview(getContext()),retrySave,dirty:operations.dirty,busy:()=>busy||operations.busy(),gameClock:()=>readCurrentScene(getContext()).clock,timedEffects:()=>{const c=getContext();return timedEffects(readStore(c),c?.chat,readCurrentScene(c).clock);},expiryPreview:afterClock=>contextExpiryPreview(getContext(),afterClock),prompt:()=>currentPrompt(getContext()),context:getContext,status:()=>operations.dirty()?message:supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();unsubscribeOperations();unsubscribeState();operations.dispose();listeners.clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
 }
 
 let sharedService;
