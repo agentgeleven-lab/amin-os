@@ -67,7 +67,7 @@ function fixture(results=[],settings={}) {
     const ctx={chatId:'chat-a',getCurrentChatId(){return this.chatId;},chatMetadata:{},characterId:0,name1:'玩家',name2:'守卫',
         characters:[{avatar:'guard.png',name:'守卫'}],chat:[{name:'守卫',is_user:false,mes:'守卫拦住了门。'}],
         worldInfoSettings:{},extensionSettings:{reply_options_mvp:{count:3,...settings}},saveSettingsDebounced(){},
-        eventTypes:{CHAT_CHANGED:'chat_changed'},eventSource,
+        eventTypes:{CHAT_CHANGED:'chat_changed',MESSAGE_SENT:'message_sent'},eventSource,
         generateRaw(request){requests.push(request);const next=results.shift();return typeof next==='function'?next():Promise.resolve(next);},
     };
     const previousDocument=globalThis.document,previousTavern=globalThis.SillyTavern;
@@ -79,37 +79,25 @@ function fixture(results=[],settings={}) {
     return {root,input,ctx,requests,eventSource,dispose(){view.dispose();globalThis.document=previousDocument;globalThis.SillyTavern=previousTavern;}};
 }
 
-test('pin a candidate and redraw only the remaining cards without editing or sending the draft',async t=>{
-    const f=fixture(['["门外等待。","敲门询问。","离开门口。"]','["先查看门锁。","离开门口并联系同伴。"]']);t.after(()=>f.dispose());
-    f.input.value='我还在考虑。';
-    await click(f.root,'生成选项');
-    assert.deepEqual(cardText(f.root),['门外等待。','敲门询问。','离开门口。']);
-    const keep=findLabel(f.root,'保留候选 1');keep.checked=true;fire(keep,'change');
-    const preserve=findLabel(f.root,'候选 3 保留原句');preserve.value='离开门口';fire(preserve,'input');
-    await click(f.root,'保留满意项，重抽其余');
-    assert.deepEqual(cardText(f.root),['门外等待。','先查看门锁。','离开门口并联系同伴。']);
-    assert.match(f.requests[1].prompt,/preserveText.*离开门口/);
-    assert.equal(findLabel(f.root,'保留候选 1').checked,true);
-    assert.equal(f.input.value,'我还在考虑。');assert.deepEqual(f.input.dispatched,[]);
-    assert.equal(f.ctx.chat.length,1);assert.equal(f.requests.length,2);
+test('candidates remain switchable until message sent without writing story data',async t=>{
+ const f=fixture(['["门外等待。","敲门询问。","离开门口。"]']);t.after(()=>f.dispose());
+ f.input.value='我还在考虑。';const before=JSON.stringify([f.ctx.chatMetadata,f.ctx.extensionSettings,f.ctx.chat]);
+ await click(f.root,'生成选项');const old=cards(f.root)[1];
+ assert.equal(findButton(f.root,'保留满意项，重抽其余'),undefined);
+ assert.equal(findButton(f.root,'换一个同方向方案'),undefined);
+ fire(old,'click');assert.equal(cards(f.root).length,3);assert.match(f.input.value,/敲门询问/);
+ const chosen=f.input.value;fire(old,'click');assert.equal(f.input.value,chosen);
+ assert.equal(JSON.stringify([f.ctx.chatMetadata,f.ctx.extensionSettings,f.ctx.chat]),before);
+ fire(cards(f.root)[0],'click');assert.equal(f.input.value,'我还在考虑。\n门外等待。');
+ await click(f.root,'撤销填入');assert.equal(f.input.value,'我还在考虑。');
+ fire(old,'click');f.eventSource.emit('message_sent');assert.equal(cards(f.root).length,0);
+ assert.equal(f.input.value,'我还在考虑。\n敲门询问。');
 });
-
-test('single-card modification enforces preserved text and keeps the existing cards on model failure',async t=>{
-    const f=fixture(['["靠近门口，低声问候。","转身查看走廊。","等待守卫开口。"]',
-        '["我立刻冲向门口。"]','["靠近门口，轻声询问来意。"]'],{prompt:'必须尊重守卫，不可威胁。'});t.after(()=>f.dispose());
-    await click(f.root,'生成选项');
-    const requirement=findLabel(f.root,'候选 1 修改要求'),preserve=findLabel(f.root,'候选 1 保留原句');
-    requirement.value='把问候改成询问，保留动作。';fire(requirement,'input');
-    preserve.value='靠近门口';fire(preserve,'input');
-    const editor=descendants(f.root).find(node=>node.className.split(/\s+/).includes('ro-refine'));
-    await click(editor,'按要求调整');
-    assert.deepEqual(cardText(f.root),['靠近门口，低声问候。','转身查看走廊。','等待守卫开口。']);
-    assert.match(status(f.root),/未原样保留/);
-    assert.match(f.requests[1].prompt,/必须尊重守卫，不可威胁/);
-    assert.match(f.requests[1].prompt,/把问候改成询问，保留动作/);
-    await click(editor,'按要求调整');
-    assert.deepEqual(cardText(f.root),['靠近门口，轻声询问来意。','转身查看走廊。','等待守卫开口。']);
-    assert.equal(f.input.value,'');assert.deepEqual(f.input.dispatched,[]);
+test('whole-batch redraw replaces all candidates and keeps the draft intact on failure',async t=>{
+ const f=fixture(['["一","二","三"]','invalid','["甲","乙","丙"]']);t.after(()=>f.dispose());
+ f.input.value='原草稿';await click(f.root,'生成选项');await click(f.root,'生成 / 换一批');
+ assert.deepEqual(cardText(f.root),['一','二','三']);assert.equal(f.input.value,'原草稿');
+ await click(f.root,'生成 / 换一批');assert.deepEqual(cardText(f.root),['甲','乙','丙']);assert.equal(f.input.value,'原草稿');
 });
 
 test('previewed native story records can be excluded from a later request',async t=>{
@@ -145,7 +133,7 @@ test('a chat switch discards an in-flight result and blocks edits to old cards',
     let complete;const pending=new Promise(resolve=>{complete=resolve;});
     const f=fixture(['["旧选项一","旧选项二","旧选项三"]',()=>pending]);t.after(()=>f.dispose());
     await click(f.root,'生成选项');assert.equal(cards(f.root).length,3);
-    fire(findButton(f.root,'换一个同方向方案'),'click');await wait();assert.equal(f.requests.length,2);
+    fire(findButton(f.root,'生成 / 换一批'),'click');await wait();assert.equal(f.requests.length,2);
     f.ctx.chatId='chat-b';f.ctx.chatMetadata={};f.eventSource.emit('chat_changed');
     complete('["不应显示的旧结果"]');await wait();
     assert.equal(cards(f.root).length,0);assert.equal(f.input.value,'');

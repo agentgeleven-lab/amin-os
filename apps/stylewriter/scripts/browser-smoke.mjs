@@ -190,30 +190,13 @@ try {
     assert.equal(await evaluate('__candidateRequests.length'),1);
     assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/BROWSER-THEME/);
     assert.match(await evaluate('__candidateRequests[0].systemPrompt'),/目标文风/);
-    // Candidate refinement uses production controls, preserves the other card and input.
-    await evaluate(`(async()=>{
-        window.__savedCandidateGenerator=__ctx.generateRaw;
-        __ctx.generateRaw=async request=>{__candidateRequests.push(request);return JSON.stringify({options:[{text:'候选甲，更委婉地询问。'}]});};
-        __set(__replyLabel('候选 1 修改要求'),'更委婉');
-        __set(__replyLabel('候选 1 保留原句'),'候选甲');
-        window.__inputBeforeRefine=document.getElementById('send_textarea').value;
-        await __workClick(__reply(),'按要求调整');
-    })()`);
-    assert.deepEqual(await evaluate('[...__reply().querySelectorAll(".ro-card span")].map(n=>n.textContent)'),['候选甲，更委婉地询问。','候选乙']);
-    assert.equal(await evaluate('document.getElementById("send_textarea").value===__inputBeforeRefine'),true);
-    await evaluate(`(async()=>{
-        __ctx.generateRaw=async request=>JSON.stringify({options:[{text:'未保留指定文字'}]});
-        await __workClick(__reply(),'按要求调整');
-        __reply().querySelector('.ro-refine').open=true;
-        __reply().querySelector('.ro-references').open=true;
-    })()`);
-    assert.match(await evaluate('__reply().querySelector(".ro-status").textContent'),/未原样保留/);
-    assert.equal(await evaluate('__reply().querySelector(".ro-card span").textContent'),'候选甲，更委婉地询问。');
-    const refineLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
-    assert.ok(refineLayout.scroll<=Math.max(refineLayout.client,390),'expanded candidate controls overflow mobile width');
-    await evaluate(`(async()=>{__ctx.generateRaw=__savedCandidateGenerator;await __workClick(__reply(),'生成 / 换一批');})()`);
+    // Candidates stay visible after selection; no per-card refinement.
+    assert.equal(await evaluate('__reply().querySelectorAll(".ro-refine").length'),0);
+    await evaluate('__reply().querySelector(".ro-card").click()');
+    assert.equal(await evaluate('__reply().querySelectorAll(".ro-card").length'),2);
+    await evaluate('__workClick(__reply(),"生成 / 换一批")');
     const rewritesBefore=await evaluate('__requests.length');
-    await evaluate('__workClick(__reply(),"继续改写")');
+    await evaluate(`(()=>{__workspace.open('rewrite');__set(__label('原文'),'候选甲');})()`);
     assert.equal(await evaluate('__label("原文").value'),'候选甲');
     assert.equal(await evaluate('__requests.length'),rewritesBefore);
     assert.equal(await evaluate('__label("内容风格").value'),'none');
@@ -228,7 +211,7 @@ try {
     await evaluate(`__contents.save({name:'浏览器悬疑',description:'BROWSER-CHANGED'},__mystyle.id); __gate.resolve('不能覆盖的迟到结果')`);await delay(80);
     assert.equal(await evaluate('__label("转换结果").value'),'合并后的改写结果');
     // Tab switches keep the source draft and preset editor mounted, not reconstructed.
-    await evaluate(`(async()=>{__workspace.open('candidates');await __workClick(__reply(),'生成 / 换一批');await __workClick(__reply(),'继续改写');})()`);
+    await evaluate(`(async()=>{__workspace.open('candidates');await __workClick(__reply(),'生成 / 换一批');__workspace.open('rewrite');__set(__label('原文'),'候选甲');})()`);
     assert.equal(await evaluate('__label("原文").value'),'候选甲');
     assert.equal(await evaluate('__submits'),0);
     const mergedLayout=await evaluate('({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth})');
@@ -264,7 +247,7 @@ try {
     assert.equal(await evaluate('__candidateRequests.length'),floorCandidatesBefore+1);
     assert.match(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/FLOOR-ONE-SAMPLE/);
     assert.doesNotMatch(await evaluate('JSON.stringify(__candidateRequests.at(-1))'),/FLOOR-TWO-SAMPLE|FUTURE-FLOOR-SECRET|突出动作冲突/);
-    await evaluate('__workClick(__floor(0),"继续改写")');
+    await evaluate(`(async()=>{await __workClick(__floor(0),'改写草稿');__set(__floorLabel(0,'原文'),'候选甲');})()`);
     assert.equal(await evaluate('__floorLabel(0,"原文").value'),'候选甲');
     assert.equal(await evaluate('__label("原文").value'),'候选甲');
     assert.equal(await evaluate('__floorCalls.length'),0);

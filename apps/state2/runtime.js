@@ -233,9 +233,24 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     }
     const source=getContext()?.eventSource, events=getContext()?.eventTypes??getContext()?.event_types??{};
     for(const name of ['CHAT_CHANGED','MESSAGE_SENT','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_DELETED','GENERATION_ENDED'])if(source?.on&&events[name]){
-        const fn=()=>{
+        const fn=(index)=>{
             cached = null;
             if (name === 'CHAT_CHANGED') return restoreChat();
+            // TT emits MESSAGE_SWIPED before Generate('swipe') when selecting
+            // the empty slot after the saved candidates. It has no state yet.
+            // Only this exact tail-slot transition can use the previous floor;
+            // existing/edited candidates still require their own valid refs.
+            const ctx = getContext(), tail = ctx.chat?.at(-1);
+            if (external() && name === 'MESSAGE_SWIPED' && index === ctx.chat.length - 1
+                && !tail?.is_user && !tail?.is_system && Array.isArray(tail?.swipes)
+                && tail.swipes.length > 0 && tail.swipe_id === tail.swipes.length) {
+                const metadata = ctx.chatMetadata, identity = chatIdentity(ctx);
+                return prepareGeneration('swipe').catch(error => {
+                    if (getContext()?.chatMetadata !== metadata || chatIdentity(getContext()) !== identity) return;
+                    restoreFailed = true; restoreError = error.message;
+                    say('上一楼剧情状态恢复未完成：' + error.message);
+                });
+            }
             if (external() && ['MESSAGE_SWIPED','MESSAGE_DELETED','MESSAGE_UPDATED'].includes(name)) {
                 settled = false; restoreFailed = false;
                 return restoreChat();

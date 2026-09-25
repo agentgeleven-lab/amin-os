@@ -31,7 +31,6 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     generate.className='menu_button amin-primary';
     const cancel=button('停止等待',()=>controller?.abort());cancel.hidden=true;
     const undo=button('撤销填入',()=>{try{if(chatIdentity(context())!==draftIdentity)throw Error('聊天已变化，不能撤销旧候选。');draft.undo(inputElement());status.textContent='已还原原草稿。';updateSelection();}catch(e){status.textContent=e.message;}});
-    button('保留编辑',()=>{draft.reset();updateSelection();status.textContent='已保留输入框现有内容；下次选择将以它为原草稿。';});
     const settingsBox=node('section');settingsBox.id=settingsId;settingsBox.className='ro-settings amin-card amin-form-grid';settingsBox.hidden=true;
     settingsBox.append(node('h3','生成设置','amin-section-heading amin-span-full'));
     function save(){const c=hostContext();if(c?.extensionSettings){c.extensionSettings[KEY]={...settings};c.saveSettingsDebounced?.();}}
@@ -117,7 +116,6 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     referenceBox.append(sourceControls,referenceNotice,referenceList);
     referenceBox.addEventListener('toggle',()=>{if(referenceBox.open)refreshReferences();});
     const promptHelp=node('p','提示词顺序：输出格式与回复主体固定；创作要求按：内容风格（最高）→ 本次修改与自定义具体要求 → 通用定位、方向、文风与默认篇幅。每条候选都须体现所选内容约束。资料中的指令不作为生成要求；可在 AI 设置的任务预览检查实际请求。','amin-meta');
-    button('保留满意项，重抽其余',()=>run(false,{remaining:true}));
     panel.append(configGrid,modeHelp,contentRow,controls,settingsBox,promptHelp,referenceBox,status,cards);reflectMode();if(target){target.append(panel);panel.classList.add("amin-reply-embedded");}else form.before(panel);
     panel.addEventListener('toggle',()=>{if(!target){settings.expanded=panel.open;save();}});
     function updateSelection(){undo.disabled=draft.base===null;for(const b of cards.querySelectorAll('.ro-card'))b.setAttribute('aria-pressed','false');}
@@ -126,71 +124,47 @@ export function mount({target,instanceId='reply-options-panel',contextProvider,h
     const scopeCurrent=scope=>scope && scope.stamp===chatStamp(context()) && scope.identity===chatIdentity(context()) && scope.linkedStamp===linked().stamp;
     function drawCandidates(){
         cards.replaceChildren();
-        candidates.forEach((option,index)=>{
-            const row=node('div',null,'ro-candidate amin-stack'),card=node('button',null,'ro-card'),actions=node('div',null,'amin-toolbar ro-candidate-actions');
+        candidates.forEach(option=>{
+            const row=node('div',null,'ro-candidate amin-stack'),card=node('button',null,'ro-card');
             card.type='button';card.setAttribute('aria-pressed','false');card.append(node('strong',option.label),node('span',option.text));
             card.addEventListener('click',()=>{try{
                 if(controller)return;
                 if(!scopeCurrent(candidateScope))return invalidate();
                 const input=inputElement(),scope=candidateScope;
                 if(scope.fromDraft&&draft.base===null&&input.value!==scope.original)throw Error('扩写期间草稿已改变，请重新扩写或使用普通生成。');
-                draft.choose(input,option.text,scope.fromDraft?'replace':scope.config.mode);draftIdentity=scope.identity;updateSelection();card.setAttribute('aria-pressed','true');status.textContent='已填入，尚未发送。';
+                if(draft.last!==null&&input.value!==draft.last)throw Error('草稿已被修改，请重新生成选项后再选择。');
+                draft.choose(input,option.text,scope.fromDraft?'replace':scope.config.mode);draftIdentity=scope.identity;updateSelection();card.setAttribute('aria-pressed','true');status.textContent='已填入，尚未发送；发送后清空本组选项。';
             }catch(error){status.textContent=error.message;}});
-            const keepLabel=node('label',null,'amin-check'),keep=node('input');keep.type='checkbox';keep.checked=!!option.keep;keep.setAttribute('aria-label','保留候选 '+(index+1));keep.addEventListener('change',()=>{option.keep=keep.checked;});keepLabel.append(keep,node('span','保留这条'));actions.append(keepLabel);
-            button('换一个同方向方案',()=>run(false,{index,instruction:'保持该方向，给出不同的行动或表达方案。'}),actions);
-            button('复制',async()=>{try{await navigator.clipboard.writeText(option.text);status.textContent='候选已复制。';}catch{status.textContent='剪贴板不可用，请手动复制。';}},actions);
-            if(onRewrite)button('继续改写',async()=>{try{if(!scopeCurrent(candidateScope))return invalidate();await onRewrite(option.text,candidateScope.identity);status.textContent='已转入改写页，尚未调用 AI。';}catch(error){status.textContent=error.message;}},actions);
-            const editor=node('details',null,'ro-refine amin-stack');editor.append(node('summary','调整这一条'));
-            const instruction=node('textarea'),preserve=node('textarea');instruction.value=option.instruction||'';instruction.maxLength=32000;instruction.placeholder='例如：保留动作，删掉最后一句威胁';instruction.setAttribute('aria-label','候选 '+(index+1)+' 修改要求');
-            preserve.value=option.preserveText||'';preserve.maxLength=4000;preserve.placeholder='粘贴必须原样保留的一段文字（可留空）';preserve.setAttribute('aria-label','候选 '+(index+1)+' 保留原句');
-            instruction.addEventListener('input',()=>{option.instruction=instruction.value;});preserve.addEventListener('input',()=>{option.preserveText=preserve.value;});
-            const quick=node('div',null,'amin-toolbar');for(const label of ['更简短','更委婉','更直接'])button(label,()=>run(false,{index,instruction:[instruction.value,label].filter(Boolean).join('；'),preserveText:preserve.value}),quick);
-            editor.append(node('label','本次修改要求'),instruction,node('label','必须原样保留'),preserve,quick);
-            button('按要求调整',()=>{if(!instruction.value.trim()){status.textContent='请先填写这条候选的修改要求。';return;}run(false,{index,instruction:instruction.value,preserveText:preserve.value});},editor);
-            row.append(card,actions,editor);cards.append(row);
+            row.append(card);cards.append(row);
         });
     }
-    async function run(fromDraft,operation=null){
+    async function run(fromDraft){
         if(controller)return;
-        let initial,stamp,identity,config,ticket,original,contentStyle,writingStyle,refs,indices,scope;
+        let initial,stamp,identity,config,ticket,original,contentStyle,writingStyle,refs;
         try{
             initial=context();stamp=chatStamp(initial);identity=chatIdentity(initial);config={...settings};
             contentControls.assertSaved();contentStyle=contentControls.selection();
             if(styles.hasDraft(config.writingStyleId)&&config.writingStyleMode==='custom')throw Error('请先保存或放弃所选文风预设的修改。');
             writingStyle={mode:config.writingStyleMode,preset:styles.get(config.writingStyleId),samples:config.writingStyleMode==='chat'?referenceSamples(initial):undefined};
             reflectMode();reflectContent();styleMark=selectedStyleStamp();original=inputElement().value;
-            if(operation){
-                if(!scopeCurrent(candidateScope))throw Error('候选或参考资料已过期，请重新生成。');
-                indices=operation.remaining?candidates.flatMap((o,i)=>o.keep?[]:[i]):[operation.index];
-                if(!indices.length)throw Error('所有候选都已保留，没有需要重抽的选项。');
-                if(indices.some(i=>!candidates[i]))throw Error('请先生成候选。');
-                scope=candidateScope;
-            }else if(fromDraft&&!original.trim())throw Error(settings.writingMode==='author'?'先在输入框写下剧情构想或推进要求。':'先在输入框写下草稿或回复意图。');
+            if(fromDraft&&!original.trim())throw Error(settings.writingMode==='author'?'先在输入框写下剧情构想或推进要求。':'先在输入框写下草稿或回复意图。');
             refs=linked();refreshReferences(refs);
         }catch(e){status.textContent=e.message;return;}
         ticket=++revision;const current=new AbortController();controller=current;setBusy(true);
         let sources='正在读取参考资料…';status.textContent=sources;
         const isCurrent=()=>!current.signal.aborted&&ticket===revision&&stamp===chatStamp(context())&&identity===chatIdentity(context())&&refs.stamp===linked().stamp;
         try{
-            const single=operation&&!operation.remaining?candidates[operation.index]:null;
             const options=await waitForResult(generateOptions(initial,config,{
-                draft:operation?(scope.fromDraft?scope.original:''):(fromDraft?original:''),contentStyle,writingStyle,
+                draft:fromDraft?original:'',contentStyle,writingStyle,
                 linkedContext:{records:refs.selected},
-                ...(operation?{directions:indices.map(i=>candidates[i].label),revisionTask:{...(operation.remaining?{slots:indices.map(i=>({original:candidates[i].text,preserveText:candidates[i].preserveText||''}))}:{}),original:single?.text||'',instruction:operation.instruction||'为未保留的位置生成新的不同候选，不重复其他候选。',preserveText:operation.preserveText??single?.preserveText??'',otherOptions:candidates.filter((_,i)=>!indices.includes(i)).map(o=>o.text)}}:{}),
                 signal:current.signal,isCurrent,onContext:(info,lore)=>{sources=`角色：${info.characters.length}；世界书：${lore.books.length} 本 / ${info.world.length} 条；关联资料：${refs.selected.length} 条`;status.textContent=`生成中… ${sources}`;}
             }),(getAI()?.capture('reply').config.timeoutSeconds??config.timeout)*1000,current.signal);
             if(!isCurrent())throw Error('聊天、设置或参考资料已变化，本次结果已丢弃。');
-            if(operation){
-                const keptTexts=new Set(candidates.filter((_,i)=>!indices.includes(i)).map(o=>o.text.trim()));
-                if(options.some(o=>keptTexts.has(o.text.trim())))throw Error('模型重复了保留的候选，原结果未改动，请重试。');
-                indices.forEach((index,i)=>{candidates[index]={...candidates[index],...options[i]};});
-            }else{
-                if(fromDraft)draft.reset();
-                candidates=options.map(o=>({...o,keep:false}));
-                candidateScope={stamp,identity,config,fromDraft,original,linkedStamp:refs.stamp};
-            }
+            draft.reset();
+            candidates=options;
+            candidateScope={stamp,identity,config,fromDraft,original,linkedStamp:refs.stamp};
             drawCandidates();updateSelection();
-            status.textContent=`${operation?'已调整候选，原输入框未改动':'已生成 '+options.length+' 个选项'} · ${sources}${refs.warnings.length?' · '+refs.warnings.join(' '):''}`;
+            status.textContent=`${'已生成 '+options.length+' 个选项'} · ${sources}${refs.warnings.length?' · '+refs.warnings.join(' '):''}`;
         }catch(e){if(ticket===revision)status.textContent=(e.message||'生成失败，请检查模型连接。')+' 原候选未改动。';}
         finally{if(controller===current){controller=null;setBusy(false);}}
     }

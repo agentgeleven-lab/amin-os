@@ -8,6 +8,7 @@ import { saveChatMetadata } from '../apps/shared/chat-save.js';
 
 const clone = value => structuredClone(value);
 function fixture() {
+    const handlers = new Map();
     const nodes = new Map(), store = {
         async get(id) { return clone(nodes.get(id) ?? null); },
         async put(id, node) { nodes.set(id, clone(node)); },
@@ -15,6 +16,7 @@ function fixture() {
     const graph = createStoryStateGraph(store);
     let saves = 0, fullSaves = 0, nativeCalls = 0;
     const ctx = {
+        eventTypes: { MESSAGE_SWIPED: 'swiped' }, eventSource: { on(name,fn){handlers.set(name,fn);}, removeListener(name){handlers.delete(name);} },
         chatId: 'new-chat', getCurrentChatId() { return this.chatId; },
         characterId: 0, characters: [{ avatar: 'npc.png' }],
         chat: [{ name: 'NPC', mes: '开场', is_user: false }],
@@ -33,7 +35,7 @@ function fixture() {
     const reports = [];
     const runtime = createState2Runtime(() => ctx, { host, storyStorage: story, interval: 0,
         restoreNative: async () => ({ restored: true, stale: false }), report: message => reports.push(message) });
-    return { ctx, runtime, story, graph, nodes, reports,
+    return { ctx, runtime, story, graph, nodes, reports, handlers,
         get saves() { return saves; }, get fullSaves() { return fullSaves; }, get nativeCalls() { return nativeCalls; } };
 }
 
@@ -129,4 +131,39 @@ test('late native update is archived once and unchanged reconciliations do not s
         assert.equal(getReference(f.ctx.chat[0]).stateId, updatedRef);
         assert.equal(f.fullSaves, savesBefore + 1);
     } finally { f.runtime.destroy(); }
+});
+
+
+test('TT empty swipe event restores previous floor before generation and archives only completed candidate', async()=>{
+ const f=fixture();
+ try{
+  await f.runtime.migrate();
+  f.ctx.chat.push({name:'User',mes:'选择回复选项后发送',is_user:true});await f.runtime.prepareGeneration();
+  const tail={name:'NPC',mes:'原回复',swipes:['原回复'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(tail);
+  f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:9}}});await saveChatMetadata(f.ctx);
+  const old=clone(tail.swipe_info[0]),count=f.nodes.size;
+  tail.swipe_id=1; // TT clears message data and emits BEFORE starting Generate.
+  tail.mes='';
+  await f.handlers.get('swiped')(2);
+  assert.equal(f.runtime.ready(),true);
+  assert.equal(f.runtime.status().restoreError,'');
+  assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).项目.世界.时间,1);
+  assert.equal(f.nodes.size,count);assert.deepEqual(tail.swipe_info[0],old);
+  await f.runtime.prepareGeneration('swipe');
+  tail.mes='新回复';tail.swipes.push('新回复');tail.swipe_info.push({extra:{}});
+  f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:4}}});await saveChatMetadata(f.ctx);
+  assert.notEqual(getReference(tail).stateId,old.extra.amin_story_v2.stateId);
+  assert.deepEqual(tail.swipe_info[0],old);
+  tail.swipe_id=0;tail.mes=tail.swipes[0];tail.extra=clone(old.extra);
+  await f.handlers.get('swiped')(2);
+  assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).项目.世界.时间,9);
+ }finally{f.runtime.destroy();}
+});
+test('mismatched existing candidate still fails restoration instead of silently using previous floor',async()=>{
+ const f=fixture();try{
+  await f.runtime.migrate();f.ctx.chat.push({name:'User',mes:'继续',is_user:true});await f.runtime.prepareGeneration();
+  const tail={name:'NPC',mes:'已保存',swipes:['已保存'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(tail);await saveChatMetadata(f.ctx);
+  tail.mes='与已有候选不一致';await f.handlers.get('swiped')(2);
+  assert.equal(f.runtime.ready(),false);assert.match(f.runtime.status().restoreError,/候选尚未保存完整/);
+ }finally{f.runtime.destroy();}
 });
