@@ -10,7 +10,7 @@ const referenceSnapshot = m => JSON.stringify([m?.extra?.amin_story_v2 ?? null,
 export function createHistory({ context, read, write, changed = () => {}, beforeRestore = () => {}, warn = () => {}, historyKey = HISTORY_KEY, messageKey = 'wsh_message_id', allowGroups = false,
   nativeState = () => ({ managed: false, ready: true }), externalRead = null }) {
   let metadata, chatId, previous = [], lastValue, blocked = false;
-  let externalObserved = [];
+  let externalObserved = [], externalIndexId;
   let queuedSave = null, pendingIds = null, saving = false, syncing = 0, suppressSaves = 0;
   const listeners = new Set();
   const saveGate = createOperationService(context);
@@ -21,11 +21,12 @@ export function createHistory({ context, read, write, changed = () => {}, before
     const switched = metadata !== c.chatMetadata || chatId !== c.getCurrentChatId();
     const observed = (c.chat || []).map(m => ({ message: m, variant: String(m.swipe_id ?? 0), name: m.name, content: m.mes,
       reference: referenceSnapshot(m) }));
-    const dirty = switched || observed.length !== externalObserved.length || observed.some((m, i) =>
+    const indexId = c.chatMetadata?.amin_os_story_storage_v2?.indexId;
+    const dirty = switched || indexId !== externalIndexId || observed.length !== externalObserved.length || observed.some((m, i) =>
       m.message !== externalObserved[i]?.message || m.variant !== externalObserved[i]?.variant || m.content !== externalObserved[i]?.content ||
       m.name !== externalObserved[i]?.name || m.reference !== externalObserved[i]?.reference);
     metadata = c.chatMetadata; chatId = c.getCurrentChatId(); previous = [];
-    lastValue = undefined; blocked = false; externalObserved = observed;
+    lastValue = undefined; blocked = false; externalObserved = observed; externalIndexId = indexId;
     queuedSave = null; pendingIds = null;
     // External state is authoritative. Merely opening or observing a floor never
     // allocates IDs, snapshots, or a metadata save in the chat file.
@@ -182,14 +183,15 @@ export function createHistory({ context, read, write, changed = () => {}, before
     const c = context();
     if (!Number.isInteger(index) || index < 0 || index >= (c?.chat?.length ?? 0)) throw Error('楼层不存在。');
     const identity = chatIdentity(c), metadataAtStart = c.chatMetadata, message = c.chat[index], variant = String(message.swipe_id ?? 0), reference = referenceSnapshot(message), content = message.mes;
+    const indexId = c.chatMetadata?.amin_os_story_storage_v2?.indexId;
     if (external(c)) {
       if (typeof externalRead !== 'function') throw Error('外置楼层读取尚未就绪。');
       const state = await externalRead(index, c);
       const current = context();
       if (current?.chatMetadata !== metadataAtStart || chatIdentity(current) !== identity ||
-          current.chat?.[index] !== message || String(message.swipe_id ?? 0) !== variant || referenceSnapshot(message) !== reference || message.mes !== content)
+          current.chat?.[index] !== message || String(message.swipe_id ?? 0) !== variant || referenceSnapshot(message) !== reference || message.mes !== content || current.chatMetadata?.amin_os_story_storage_v2?.indexId !== indexId)
         throw Error('聊天或楼层已变化，请重新打开记录。');
-      return { index, name: message.name || (message.is_user ? '用户' : '角色'), available: true, external: true, state: copy(state), variant, reference, content };
+      return { index, name: message.name || (message.is_user ? '用户' : '角色'), available: true, external: true, state: copy(state), variant, reference, content, indexId };
     }
     const row = list().find(row => row.index === index);
     if (!row?.available) throw Error('此楼层尚无记录。');

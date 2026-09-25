@@ -104,6 +104,10 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 projecting = true;
                 try { release = acquireMetadataWrite(getContext, captureContext(getContext)); }
                 finally { projecting = false; }
+                if (external() && story.ensureIndex) {
+                    const indexed = await story.ensureIndex();
+                    if (indexed.changed) { markChatIdsDirty(ctx); await saveChatMetadata(ctx); }
+                }
                 const result = external()
                     ? await story.restoreFloor((ctx.chat?.length ?? 0) - 1)
                     : await restoreNative((ctx.chat?.length ?? 0) - 1, { context: getContext, host, document });
@@ -208,6 +212,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         activeMetadata = ctx.chatMetadata; activeIdentity = chatIdentity(ctx); settled = true; cached = null;
         if (ctx.chat.length <= 1 && story.status().available && !external()) {
             await story.enable();
+            await story.ensureIndex?.();
             markChatIdsDirty(ctx);
             await saveChatMetadata(ctx);
         }
@@ -266,7 +271,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 });
             }
             if (external() && ['MESSAGE_SWIPED','MESSAGE_DELETED','MESSAGE_UPDATED'].includes(name)
-                && !(name==='MESSAGE_UPDATED' && index===ctx.chat.length-1 && captureOptions(ctx).expectedReference)) {
+                && !(name==='MESSAGE_UPDATED' && index===ctx.chat.length-1 && Object.hasOwn(captureOptions(ctx),'expectedReference'))) {
                 settled = false; restoreFailed = false;
                 return restoreChat();
             }
@@ -282,7 +287,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                     const ctx=getContext();activeGeneration={metadata:ctx.chatMetadata,identity:chatIdentity(ctx)};
                     generationBaseline=null;
                     if(['continue','regenerate'].includes(type)&&!ctx.chat.at(-1)?.is_user){
-                        const index=ctx.chat.length-1,reference=getReference(ctx.chat[index]);
+                        const index=ctx.chat.length-1,reference=story.status().indexed ? null : getReference(ctx.chat[index]);
                         generationBaseline={...activeGeneration,index,reference,prefix:JSON.stringify(chatPath(ctx.chat.slice(0,index)))};
                     }
                 }
@@ -337,14 +342,17 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 checkpointCount: nodes.filter(node => node.kind === 'snapshot').length,
                 deltaCount: nodes.filter(node => node.kind === 'delta').length,
                 referenceBytes: (ctx.chat ?? []).reduce((sum, message) => sum + (message.extra?.amin_story_v2 ? bytes(message.extra.amin_story_v2) : 0)
-                    + (message.swipe_info ?? []).reduce((n, swipe) => n + (swipe?.extra?.amin_story_v2 ? bytes(swipe.extra.amin_story_v2) : 0), 0), 0) };
+                    + (message.amin_story_message_id ? bytes({amin_story_message_id:message.amin_story_message_id}) : 0)
+                    + (message.extra?.amin_story_candidate_id ? bytes({amin_story_candidate_id:message.extra.amin_story_candidate_id}) : 0)
+                    + (message.swipe_info ?? []).reduce((n, swipe) => n + (swipe?.extra?.amin_story_v2 ? bytes(swipe.extra.amin_story_v2) : 0)
+                        + (swipe?.extra?.amin_story_candidate_id ? bytes({amin_story_candidate_id:swipe.extra.amin_story_candidate_id}) : 0), 0), 0) };
         },
         async enableStoryStorage() {
             if (!storageStatus(getContext()).migrated) await migrate();
             if (!ready()) await restoreChat();
             if (!ready()) throw Error('当前变量尚未恢复，不能启用外置存储。');
             const ctx = getContext(), release = acquireMetadataWrite(getContext, captureContext(getContext));
-            try { const result = await story.enable(); markChatIdsDirty(ctx); await saveChatMetadata(ctx); cached = null; return result; }
+            try { const result = await story.enable(); await story.ensureIndex?.(); markChatIdsDirty(ctx); await saveChatMetadata(ctx); cached = null; return result; }
             finally { release(); sync(); }
         },
         async retrySave(){return operation.retrySave();},

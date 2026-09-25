@@ -29,7 +29,7 @@ test('external history observes floors without adding IDs, snapshots or chat sav
 });
 
 test('external history rejects an old asynchronous floor result after the chat or candidate changes', async () => {
-  for (const change of [f=>f.switchChat(),f=>{f.ctx.chat[0].swipe_id=1;},f=>{f.ctx.chat[0].extra.amin_story_v2={stateId:'new'};},f=>{f.ctx.chat[0].mes='edited';}]) {
+  for (const change of [f=>f.switchChat(),f=>{f.ctx.chat[0].swipe_id=1;},f=>{f.ctx.chat[0].extra.amin_story_v2={stateId:'new'};},f=>{f.ctx.chat[0].mes='edited';},f=>{f.ctx.chatMetadata.amin_os_story_storage_v2.indexId='new-index';}]) {
     let resolve;
     const f = fixture(()=>new Promise(done=>{resolve=done;}));
     f.history.sync();

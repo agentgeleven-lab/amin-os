@@ -4,6 +4,7 @@ import { chatRevisions } from '../shared/message-revision.js';
 import { getReference, setReference, STORY_REFERENCE_KEY } from '../shared/story-message-refs.js';
 import { OWNED_VARIABLE_ROOTS, NATIVE_VARIABLE_ROOTS } from './storage.js';
 import { restoreExternalState2SnapshotToFloor } from './native-bridge.js';
+import { buildIndex, commitIdentities, validateIndex, indexedState, indexStateIds, candidateId, selectedCandidate, STORY_MESSAGE_ID, STORY_CANDIDATE_ID } from '../shared/story-chat-index.js';
 
 export const STORY_STORAGE_KEY = 'amin_os_story_storage_v2';
 const OWNER = 'amin-os/story-v2';
@@ -24,6 +25,8 @@ function assertMarker(ctx) {
     if (marker === undefined) return null;
     if (!plain(marker) || marker.version !== 2 || marker.owner !== OWNER || !STATE_ID.test(marker.baseStateId ?? ''))
         throw failure('STORY_MARKER_INVALID', '当前聊天的外置剧情存储标记无效，已停止读取。');
+    if (marker.indexId !== undefined && !STATE_ID.test(marker.indexId))
+        throw failure('STORY_MARKER_INVALID', '当前聊天的外置剧情索引编号无效。');
     if (marker.backups !== undefined && (!Array.isArray(marker.backups) || marker.backups.length > 5
         || marker.backups.some(item => !plain(item) || !STATE_ID.test(item.stateId ?? '')
             || typeof item.label !== 'string' || item.label.length > 160
@@ -46,8 +49,8 @@ function contextToken(ctx) {
 function referenceFingerprint(ctx) {
     return JSON.stringify([
         ctx.chatMetadata[STORY_STORAGE_KEY] ?? null,
-        ctx.chat.map(message => [message?.extra?.[STORY_REFERENCE_KEY] ?? null,
-            (message?.swipe_info ?? []).map(info => info?.extra?.[STORY_REFERENCE_KEY] ?? null)]),
+        ctx.chat.map(message => [message?.[STORY_MESSAGE_ID] ?? null, message?.extra?.[STORY_CANDIDATE_ID] ?? null, message?.extra?.[STORY_REFERENCE_KEY] ?? null,
+            (message?.swipe_info ?? []).map(info => [info?.extra?.[STORY_REFERENCE_KEY] ?? null, info?.extra?.[STORY_CANDIDATE_ID] ?? null])]),
     ]);
 }
 
@@ -152,6 +155,67 @@ export function createStoryStorage(getContext, {
         if (!available()) throw failure('STORY_STORE_UNAVAILABLE', '外置剧情文件存储不可用，无法安全关联消息楼层。');
     }
 
+    async function loadIndex(marker) { return marker.indexId ? validateIndex(await graph.load(marker.indexId)) : null; }
+    function stateFromIndex(ctx, target, marker, index) {
+        if (!Number.isSafeInteger(target) || target < -1 || target >= ctx.chat.length)
+            throw failure('STORY_FLOOR_INVALID', '剧情状态的目标楼层无效。');
+        let stateId = marker.baseStateId;
+        const seen = new Set();
+        for (let floor = 0; floor <= target; floor++) {
+            const message = ctx.chat[floor], id = message[STORY_MESSAGE_ID];
+            if (id && seen.has(id)) throw failure('STORY_DUPLICATE_MESSAGE', '消息标识重复，不能确定剧情存档。');
+            if (id) seen.add(id);
+            const saved = indexedState(index, message);
+            if (saved) stateId = saved;
+            else if (!message.is_user && !message.is_system) throw failure('STORY_REFERENCE_MISSING', `第 ${floor + 1} 楼的当前 Swipe 尚无剧情存档。`);
+        }
+        return stateId;
+    }
+    async function allLinkedIds(ctx, marker) {
+        if (!marker.indexId) return linkedIds(ctx, marker);
+        const index = await loadIndex(marker);
+        // Only records still reachable from this branch are exported/readable.
+        const projected = buildIndex(ctx.chat, chatIdentity(ctx), index, marker.indexId).index;
+        return new Set([marker.baseStateId, marker.indexId, ...(marker.backups ?? []).map(b => b.stateId), ...indexStateIds(projected)]);
+    }
+    async function ensureIndex() {
+        return locked(async () => {
+            requireAvailable();
+            const ctx = current(), marker = assertMarker(ctx);
+            if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
+            const token = contextToken(ctx), old = await loadIndex(marker);
+            const { index, copies } = buildIndex(ctx.chat, chatIdentity(ctx), old, marker.indexId);
+            if (!old) {
+                // Verify every migrated state before removing old pointers.
+                for (const id of new Set([marker.baseStateId, ...indexStateIds(index)])) decodeState(await graph.load(id));
+            }
+            const indexId = await graph.save(index, { parentId: marker.indexId ?? null });
+            const now = assertCurrent(getContext, token);
+            if (indexId === marker.indexId) return { changed: false };
+            commitIdentities(now.chat, copies);
+            now.chatMetadata[STORY_STORAGE_KEY] = { ...marker, indexId };
+            return { changed: true, indexId };
+        });
+    }
+
+    async function captureIndexed(ctx, marker) {
+        const token = contextToken(ctx), old = await loadIndex(marker);
+        const { index, copies } = buildIndex(ctx.chat, chatIdentity(ctx), old, marker.indexId);
+        const floor = ctx.chat.length - 1;
+        if (floor < 0) return { changed: false, stateId: marker.baseStateId };
+        const tail = copies[floor]; selectedCandidate(tail);
+        const parentId = stateFromIndex({ ...ctx, chat: copies }, floor - 1, marker, index);
+        const state = currentState(ctx), stateId = await graph.save(encodeState(state), { parentId });
+        index.messages[tail[STORY_MESSAGE_ID]].candidates[candidateId(tail)].stateId = stateId;
+        const indexId = await graph.save(index, { parentId: marker.indexId });
+        const now = assertCurrent(getContext, token);
+        if (JSON.stringify(currentState(now)) !== JSON.stringify(state)) throw failure('STORY_STATE_CHANGED', '保存期间剧情变量已变化，请重试。');
+        if (indexId === marker.indexId) return { changed: false, stateId };
+        commitIdentities(now.chat, copies);
+        now.chatMetadata[STORY_STORAGE_KEY] = { ...marker, indexId };
+        return { changed: true, stateId };
+    }
+
     function refsTo(ctx, target, marker) {
         if (!Number.isSafeInteger(target) || target < -1 || target >= ctx.chat.length)
             throw failure('STORY_FLOOR_INVALID', '剧情状态的目标楼层无效。');
@@ -207,6 +271,7 @@ export function createStoryStorage(getContext, {
             requireAvailable();
             const ctx = current(), marker = assertMarker(ctx);
             if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
+            if (marker.indexId) return captureIndexed(ctx, marker);
             const floor = ctx.chat.length - 1;
             if (floor < 0) return { changed: false, stateId: marker.baseStateId };
             const parentStateId = refsTo(ctx, floor - 1, marker);
@@ -235,7 +300,7 @@ export function createStoryStorage(getContext, {
         const ctx = current(), marker = assertMarker(ctx);
         if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
         const token = contextToken(ctx);
-        const stateId = refsTo(ctx, index, marker);
+        const stateId = marker.indexId ? stateFromIndex(ctx, index, marker, await loadIndex(marker)) : refsTo(ctx, index, marker);
         const snapshot = decodeState(await graph.load(stateId));
         assertCurrent(getContext, token);
         return { ...snapshot, stateId, floor: index };
@@ -248,7 +313,8 @@ export function createStoryStorage(getContext, {
         if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
         const token = contextToken(ctx);
         let linked = stateId === marker.baseStateId || (marker.backups ?? []).some(item => item.stateId === stateId);
-        if (!linked) {
+        if (!linked && marker.indexId) linked = (await allLinkedIds(ctx, marker)).has(stateId) && stateId !== marker.indexId;
+        if (!linked && !marker.indexId) {
             for (const message of ctx.chat) {
                 const candidates = Array.isArray(message.swipes) ? message.swipes.length : 1;
                 for (let swipeId = 0; swipeId < candidates; swipeId++) {
@@ -284,6 +350,13 @@ export function createStoryStorage(getContext, {
         const ctx = current(), marker = assertMarker(ctx);
         if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
         const token = contextToken(ctx), repairs = [];
+        if (marker.indexId) {
+            const index = await loadIndex(marker);
+            for (const id of indexStateIds(buildIndex(ctx.chat, chatIdentity(ctx), index, marker.indexId).index)) decodeState(await graph.load(id));
+            stateFromIndex(ctx, ctx.chat.length - 1, marker, index);
+            assertCurrent(getContext, token);
+            return { repairs, token };
+        }
         let parentStateId = marker.baseStateId;
         for (let index = 0; index < ctx.chat.length; index++) {
             const message = ctx.chat[index];
@@ -352,7 +425,7 @@ export function createStoryStorage(getContext, {
         requireAvailable();
         const ctx = current(), marker = assertMarker(ctx);
         if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
-        const token = contextToken(ctx), ids = linkedIds(ctx, marker);
+        const token = contextToken(ctx), ids = await allLinkedIds(ctx, marker);
         const graphBundle = await graph.exportClosure([...ids]);
         assertCurrent(getContext, token);
         return { version: 2, marker: clone(marker), graph: graphBundle };
@@ -367,7 +440,8 @@ export function createStoryStorage(getContext, {
         const ctx = current(), token = contextToken(ctx), marker = assertMarker(ctx);
         if (marker && marker.baseStateId !== bundle.marker.baseStateId)
             throw failure('STORY_IMPORT_CHAT_MISMATCH', '该剧情数据包属于另一条聊天，无法接到当前分支。');
-        if (marker && [...linkedIds(ctx, marker)].some(id => !bundle.graph.roots.includes(id)))
+        const required = marker ? marker.indexId ? [marker.baseStateId, marker.indexId, ...(marker.backups ?? []).map(b => b.stateId)] : [...linkedIds(ctx, marker)] : [];
+        if (required.some(id => !bundle.graph.roots.includes(id)))
             throw failure('STORY_IMPORT_INCOMPLETE', '剧情数据包缺少当前聊天引用的楼层或备份状态。');
         await graph.importClosure(bundle.graph);
         assertCurrent(getContext, token);
@@ -382,12 +456,13 @@ export function createStoryStorage(getContext, {
                 enabled: !!marker,
                 available: !!available(),
                 baseStateId: marker?.baseStateId ?? null,
-                message: marker ? '当前聊天已使用外置剧情状态。' : '当前聊天尚未启用外置剧情状态。',
+                indexed: !!marker?.indexId,
+                message: marker?.indexId ? '当前聊天按楼层与 Swipe 索引读取外置剧情状态。' : marker ? '当前聊天已使用外置剧情状态。' : '当前聊天尚未启用外置剧情状态。',
             };
         } catch (error) {
             return { enabled: false, available: !!available(), message: error.message, error: error.code ?? 'STORY_STORAGE_ERROR' };
         }
     }
 
-    return { enable, capture, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, status };
+    return { enable, ensureIndex, capture, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, status };
 }

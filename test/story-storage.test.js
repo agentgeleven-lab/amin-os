@@ -4,6 +4,7 @@ import { createStoryStateGraph } from '../apps/shared/story-state-graph.js';
 import { getReference, setReference } from '../apps/shared/story-message-refs.js';
 import { createStoryStorage, STORY_STORAGE_KEY } from '../apps/state2/story-storage.js';
 import { ROOTS } from '../apps/state2/storage.js';
+import { STORY_MESSAGE_ID, STORY_CANDIDATE_ID } from '../apps/shared/story-chat-index.js';
 
 const clone = value => structuredClone(value);
 const managed = new Set([...Object.values(ROOTS), '状态栏', '势力资料']);
@@ -218,4 +219,130 @@ test('failed persistence can roll back reference rebinding without touching save
  const f=fixture();await f.service.enable();const original=structuredClone(f.ctx.chat[0].extra);f.ctx.chat[0].mes='changed';
  const plan=await f.service.inspectReferences();const result=await f.service.repairReferences(plan);result.rollback();assert.deepEqual(f.ctx.chat[0].extra,original);
  assert.equal((await f.service.inspectReferences()).repairs.length,1);
+});
+
+test('index migration preserves stale-body states and removes per-message state pointers', async () => {
+    const f = fixture(); await f.service.enable();
+    const original = getReference(f.ctx.chat[0]).stateId;
+    f.ctx.chat[0].mes += ' 宿主收尾';
+    f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 日程: 999 });
+    await f.service.ensureIndex();
+    assert.equal(f.service.status().indexed, true);
+    assert.equal(getReference(f.ctx.chat[0]), null);
+    assert.ok(f.ctx.chat[0][STORY_MESSAGE_ID]);
+    assert.ok(f.ctx.chat[0].extra[STORY_CANDIDATE_ID]);
+    assert.equal((await f.service.readFloor(0)).stateId, original);
+    await f.service.restoreFloor(0);
+    assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).日程, 1);
+    const before = f.nodes.size;
+    assert.equal((await f.service.ensureIndex()).changed, false);
+    assert.equal((await f.service.capture()).changed, false);
+    assert.equal(f.nodes.size, before);
+});
+
+test('branch index inherits selected history, drops future rows and cannot change its parent', async () => {
+    const f = fixture(); await f.service.enable(); await f.service.ensureIndex();
+    f.ctx.chat.push({ mes: '第二楼', swipes: ['A', 'B'], swipe_id: 1, swipe_info: [{extra:{}},{extra:{}}] });
+    f.ctx.chat[1].mes = 'B'; f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 日程: 2 }); await f.service.capture();
+    const chosen = (await f.service.readFloor(1)).stateId;
+    f.ctx.chat.push({ mes: '未来' }); f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 日程: 9 }); await f.service.capture();
+    const parent = f.ctx, parentIndex = parent.chatMetadata[STORY_STORAGE_KEY].indexId;
+    f.ctx = { ...parent, chatId: 'branch', chat: clone(parent.chat.slice(0, 2)), chatMetadata: clone(parent.chatMetadata) };
+    await f.service.ensureIndex();
+    const branchIndex = await f.graph.load(f.ctx.chatMetadata[STORY_STORAGE_KEY].indexId);
+    assert.equal(Object.keys(branchIndex.order).length, 2);
+    assert.equal(branchIndex.inheritedFrom.indexId, parentIndex);
+    await f.service.restoreFloor(1); assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).日程, 2);
+    assert.equal((await f.service.readFloor(1)).stateId, chosen);
+    f.ctx.chat.push({mes:'分支后续'});f.ctx.chatMetadata.variables.状态栏=JSON.stringify({日程:3});await f.service.capture();
+    const branch = f.ctx; f.ctx = parent;
+    assert.equal(f.ctx.chatMetadata[STORY_STORAGE_KEY].indexId,parentIndex);
+    await f.service.restoreFloor(2); assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).日程,9);
+    f.ctx=branch;await f.service.restoreFloor(2);assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).日程,3);
+});
+
+test('deleted and inserted floors resolve by message identity and body edits preserve original state', async () => {
+    const f=fixture();await f.service.enable();await f.service.ensureIndex();
+    for(const n of [2,3]){f.ctx.chat.push({mes:'楼层'+n});f.ctx.chatMetadata.variables.状态栏=JSON.stringify({日程:n});await f.service.capture();}
+    const lastId=f.ctx.chat[2][STORY_MESSAGE_ID],saved=(await f.service.readFloor(2)).stateId;
+    f.ctx.chat.splice(1,1);f.ctx.chat[1].mes='修改过的正文';await f.service.ensureIndex();
+    assert.equal((await f.service.readFloor(1)).stateId,saved);
+    f.ctx.chat.splice(1,0,{is_user:true,mes:'插入用户消息'});await f.service.ensureIndex();
+    assert.equal(f.ctx.chat[2][STORY_MESSAGE_ID],lastId);
+    assert.equal((await f.service.readFloor(2)).stateId,saved);
+    assert.equal(JSON.parse((await f.service.readFloor(1)).variables.状态栏).日程,1);
+    f.ctx.chat.splice(1,0,{mes:'未知 AI 消息'});await f.service.ensureIndex();
+    await assert.rejects(f.service.readFloor(3),/尚无剧情存档/);
+});
+
+test('Swipe identities survive reordering and cloned new slots never steal a saved state', async () => {
+    const f=fixture();await f.service.enable();await f.service.ensureIndex();
+    const m={mes:'A',swipes:['A'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(m);
+    f.ctx.chatMetadata.variables.状态栏=JSON.stringify({日程:2});await f.service.capture();
+    const a=(await f.service.readFloor(1)).stateId;
+    m.swipes.push('B');m.swipe_info.push(clone(m.swipe_info[0]));m.swipe_id=1;m.mes='B';
+    await assert.rejects(f.service.readFloor(1),/Swipe 标识尚未独立/);
+    await f.service.ensureIndex();await assert.rejects(f.service.readFloor(1),/尚无剧情存档/);
+    f.ctx.chatMetadata.variables.状态栏=JSON.stringify({日程:3});await f.service.capture();const b=(await f.service.readFloor(1)).stateId;
+    assert.notEqual(a,b);m.swipes.reverse();m.swipe_info.reverse();m.swipe_id=0;await f.service.ensureIndex();
+    assert.equal((await f.service.readFloor(1)).stateId,b);
+    m.swipe_id=1;m.mes='A';assert.equal((await f.service.readFloor(1)).stateId,a);
+    m.swipes.splice(0,1);m.swipe_info.splice(0,1);m.swipe_id=0;await f.service.ensureIndex();
+    assert.equal((await f.service.readFloor(1)).stateId,a);
+});
+
+test('index migration rejects missing files and duplicate message identities without mutating chat', async () => {
+    const f=fixture();await f.service.enable();const id=getReference(f.ctx.chat[0]).stateId,node=f.nodes.get(id);f.nodes.delete(id);
+    const before=JSON.stringify(f.ctx);await assert.rejects(f.service.ensureIndex(),/找不到/);assert.equal(JSON.stringify(f.ctx),before);
+    f.nodes.set(id,node);await f.service.ensureIndex();f.ctx.chat.push(clone(f.ctx.chat[0]));
+    const index=f.ctx.chatMetadata[STORY_STORAGE_KEY].indexId;await assert.rejects(f.service.ensureIndex(),/重复消息标识/);
+    assert.equal(f.ctx.chatMetadata[STORY_STORAGE_KEY].indexId,index);
+});
+
+test('indexed export and import recover both index and states on another device', async () => {
+    const f=fixture();await f.service.enable();await f.service.ensureIndex();
+    f.ctx.chat.push({mes:'后续'});f.ctx.chatMetadata.variables.状态栏=JSON.stringify({日程:8});await f.service.capture();
+    const bundle=await f.service.exportStory();f.nodes.clear();await assert.rejects(f.service.readFloor(1),/找不到/);
+    await f.service.importStory(bundle);await f.service.restoreFloor(1);
+    assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).日程,8);
+});
+
+test('chat switches while saving an index do not attach the index to either changed chat', async () => {
+    const f=fixture();await f.service.enable();const save=f.graph.save;
+    let release;const wait=new Promise(r=>release=r);
+    f.graph.save=async(...args)=>{await wait;return save(...args);};
+    const original=f.ctx,pending=f.service.ensureIndex();
+    f.ctx={...original,chatId:'other',chat:clone(original.chat),chatMetadata:clone(original.chatMetadata)};release();
+    await assert.rejects(pending,/变化/);assert.equal(original.chatMetadata[STORY_STORAGE_KEY].indexId,undefined);
+    assert.equal(f.ctx.chatMetadata[STORY_STORAGE_KEY].indexId,undefined);
+    assert.equal(original.chat[0][STORY_MESSAGE_ID],undefined);
+});
+
+test('indexed storage keeps small identifiers in messages and branches reuse large state records', async () => {
+    const f=fixture();await f.service.enable();await f.service.ensureIndex();
+    const words='synthetic-large-archive-'.repeat(10_000);
+    const person={names:[{id:'a',name:'甲'}],notes:words};
+    f.ctx.chatMetadata.variables[ROOTS.characters]=JSON.stringify(person);
+    for(let n=0;n<40;n++){
+        f.ctx.chat.push({mes:'正文'+n});f.ctx.chatMetadata.variables.状态栏=JSON.stringify({日程:n});await f.service.capture();
+    }
+    const stateBytes=JSON.stringify([...f.nodes.values()]).length;
+    assert.ok(stateBytes < words.length*8,'checkpoints and indexes must remain smaller than one full state per floor');
+    for(const m of f.ctx.chat){assert.ok(JSON.stringify(m).length<250);assert.equal(m.extra.amin_story_v2,undefined);}
+    const parent=f.ctx;
+    for(let n=0;n<8;n++){
+        f.ctx={...parent,chatId:'branch-'+n,chat:clone(parent.chat.slice(0,20)),chatMetadata:clone(parent.chatMetadata)};
+        await f.service.ensureIndex();await f.service.restoreFloor(19);
+    }
+    const growth=JSON.stringify([...f.nodes.values()]).length-stateBytes;
+    assert.ok(growth < words.length,'branches add small indexes, not copies of the large variable archive');
+});
+
+test('failed index file write retains legacy refs and never commits partial migration', async () => {
+    const f=fixture();await f.service.enable();const before=JSON.stringify(f.ctx);
+    const save=f.graph.save;
+    f.graph.save=async(value,options)=>{if(value.kind==='amin-story-index')throw Error('file write failed');return save(value,options);};
+    await assert.rejects(f.service.ensureIndex(),/file write failed/);
+    assert.equal(JSON.stringify(f.ctx),before);
+    assert.ok(getReference(f.ctx.chat[0]));
 });

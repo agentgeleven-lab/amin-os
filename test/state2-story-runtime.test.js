@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { createState2Runtime } from '../apps/state2/runtime.js';
 import { createStoryStorage } from '../apps/state2/story-storage.js';
 import { createStoryStateGraph } from '../apps/shared/story-state-graph.js';
-import { getReference } from '../apps/shared/story-message-refs.js';
+import { indexedState, STORY_MESSAGE_ID } from '../apps/shared/story-chat-index.js';
+async function reference(f, message) {
+    if (!message[STORY_MESSAGE_ID]) return null;
+    const index = await f.graph.load(f.ctx.chatMetadata.amin_os_story_storage_v2.indexId);
+    const stateId = indexedState(index, message);
+    return stateId ? { stateId } : null;
+}
 import { saveChatMetadata } from '../apps/shared/chat-save.js';
 
 const clone = value => structuredClone(value);
@@ -44,8 +50,8 @@ test('runtime migration enables external story and saves the first short message
     try {
         await f.runtime.migrate();
         assert.equal(f.runtime.storyStatus().enabled, true);
-        assert.ok(getReference(f.ctx.chat[0]));
-        assert.equal(f.nodes.size, 1);
+        assert.ok((await reference(f, f.ctx.chat[0])));
+        assert.equal(f.nodes.size, 2);
         assert.ok(f.fullSaves >= 1);
         assert.equal(f.nativeCalls, 0);
     } finally { f.runtime.destroy(); }
@@ -59,14 +65,14 @@ test('runtime generation captures user floor once and branch hydration restores 
         assert.equal(old.项目.世界.时间, 1);
         f.ctx.chat.push({ name: 'User', mes: '下一步', is_user: true });
         await f.runtime.prepareGeneration();
-        assert.ok(getReference(f.ctx.chat[1]));
+        assert.ok((await reference(f, f.ctx.chat[1])));
         assert.equal((await f.runtime.readStoryFloor(1)).variables.状态栏, f.ctx.chatMetadata.variables.状态栏);
 
         f.ctx.chat.push({ name: 'NPC', mes: '未来' });
         f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 9 } } });
         await f.runtime.prepareGeneration();
         // A new assistant floor is archived by the message save path.
-        assert.ok(getReference(f.ctx.chat[2]));
+        assert.ok((await reference(f, f.ctx.chat[2])));
         const branchMetadata = clone(f.ctx.chatMetadata);
         f.ctx.chat.pop();
         f.ctx.chatMetadata = branchMetadata;
@@ -82,7 +88,7 @@ test('missing external node makes branch runtime unready and generation fails cl
     const f = fixture();
     try {
         await f.runtime.migrate();
-        const id = getReference(f.ctx.chat[0]).stateId;
+        const id = (await reference(f, f.ctx.chat[0])).stateId;
         f.nodes.delete(id);
         f.ctx.chatMetadata = clone(f.ctx.chatMetadata);
         f.ctx.chatId = 'branch';
@@ -102,14 +108,14 @@ test('new candidate starts from the preceding floor without rewriting the old ca
         f.ctx.chat.push({ name: 'NPC', mes: '旧候选', swipes: ['旧候选'], swipe_id: 0, swipe_info: [{ extra: {} }] });
         f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 9 } } });
         await saveChatMetadata(f.ctx);
-        const previous = getReference(f.ctx.chat[2]);
+        const previous = (await reference(f, f.ctx.chat[2]));
         await f.runtime.prepareGeneration('swipe');
         assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).项目.世界.时间, 1);
-        assert.deepEqual(getReference(f.ctx.chat[2]), previous);
+        assert.deepEqual((await reference(f, f.ctx.chat[2])), previous);
         assert.equal(f.runtime.ready(), true);
         const before = f.fullSaves;
         await f.runtime.reconcile();
-        assert.deepEqual(getReference(f.ctx.chat[2]), previous);
+        assert.deepEqual((await reference(f, f.ctx.chat[2])), previous);
         assert.equal(f.fullSaves, before);
     } finally { f.runtime.destroy(); }
 });
@@ -119,16 +125,16 @@ test('late native update is archived once and unchanged reconciliations do not s
     try {
         await f.runtime.migrate();
         await f.runtime.reconcile();
-        const initialRef = getReference(f.ctx.chat[0]).stateId;
+        const initialRef = (await reference(f, f.ctx.chat[0])).stateId;
         const savesBefore = f.fullSaves;
         f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 4 } } });
         await f.runtime.reconcile();
-        const updatedRef = getReference(f.ctx.chat[0]).stateId;
+        const updatedRef = (await reference(f, f.ctx.chat[0])).stateId;
         assert.notEqual(updatedRef, initialRef);
         assert.equal(f.fullSaves, savesBefore + 1);
         await f.runtime.reconcile();
         await f.runtime.reconcile();
-        assert.equal(getReference(f.ctx.chat[0]).stateId, updatedRef);
+        assert.equal((await reference(f, f.ctx.chat[0])).stateId, updatedRef);
         assert.equal(f.fullSaves, savesBefore + 1);
     } finally { f.runtime.destroy(); }
 });
@@ -141,7 +147,7 @@ test('TT empty swipe event restores previous floor before generation and archive
   f.ctx.chat.push({name:'User',mes:'选择回复选项后发送',is_user:true});await f.runtime.prepareGeneration();
   const tail={name:'NPC',mes:'原回复',swipes:['原回复'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(tail);
   f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:9}}});await saveChatMetadata(f.ctx);
-  const old=clone(tail.swipe_info[0]),count=f.nodes.size;
+  const old=clone(tail.swipe_info[0]),count=f.nodes.size,oldRef=await reference(f,tail);
   tail.swipe_id=1; // TT clears message data and emits BEFORE starting Generate.
   tail.mes='';
   await f.handlers.get('swiped')(2);
@@ -152,7 +158,7 @@ test('TT empty swipe event restores previous floor before generation and archive
   await f.runtime.prepareGeneration('swipe');
   tail.mes='新回复';tail.swipes.push('新回复');tail.swipe_info.push({extra:{}});
   f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:4}}});await saveChatMetadata(f.ctx);
-  assert.notEqual(getReference(tail).stateId,old.extra.amin_story_v2.stateId);
+  assert.notEqual((await reference(f, tail)).stateId,oldRef.stateId);
   assert.deepEqual(tail.swipe_info[0],old);
   tail.swipe_id=0;tail.mes=tail.swipes[0];tail.extra=clone(old.extra);
   await f.handlers.get('swiped')(2);
@@ -176,9 +182,9 @@ test('streaming never creates a partial reference and finished reply is archived
   f.ctx.streamingProcessor={isFinished:false};const count=f.nodes.size;
   f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:7}}});
   await f.runtime.reconcile();await saveChatMetadata(f.ctx);
-  assert.equal(getReference(m),null);assert.equal(f.nodes.size,count);
+  assert.equal((await reference(f, m)),null);assert.equal(f.nodes.size,count);
   m.mes='完成正文';f.ctx.streamingProcessor.isFinished=true;await f.runtime.reconcile();
-  assert.ok(getReference(m));const saves=f.fullSaves;await f.runtime.reconcile();assert.equal(f.fullSaves,saves);
+  assert.ok((await reference(f, m)));const saves=f.fullSaves;await f.runtime.reconcile();assert.equal(f.fullSaves,saves);
  }finally{f.runtime.destroy();}
 });
 
@@ -186,20 +192,33 @@ test('streaming never creates a partial reference and finished reply is archived
 test('nonstreaming generation also defers external capture until its end event',async()=>{
  const f=fixture();try{
   await f.runtime.migrate();f.ctx.chat.push({name:'User',mes:'继续',is_user:true});await f.handlers.get('generating')('normal',{},false);
-  const m={name:'NPC',mes:'待处理正文'};f.ctx.chat.push(m);await saveChatMetadata(f.ctx);assert.equal(getReference(m),null);
-  await f.runtime.reconcile();assert.equal(getReference(m),null);
-  m.mes='最终正文';f.handlers.get('ended')();await f.runtime.reconcile();assert.ok(getReference(m));
+  const m={name:'NPC',mes:'待处理正文'};f.ctx.chat.push(m);await saveChatMetadata(f.ctx);assert.equal((await reference(f, m)),null);
+  await f.runtime.reconcile();assert.equal((await reference(f, m)),null);
+  m.mes='最终正文';f.handlers.get('ended')();await f.runtime.reconcile();assert.ok((await reference(f, m)));
+ }finally{f.runtime.destroy();}
+});
+
+test('late Swipe synchronization retries indexing even when the final body and variables are unchanged', async () => {
+ const f=fixture();try{
+  await f.runtime.migrate();f.ctx.chat.push({name:'User',mes:'继续',is_user:true});await f.runtime.prepareGeneration();
+  const m={mes:'最终正文',swipes:['尚未同步'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(m);
+  await f.runtime.reconcile();assert.equal(await reference(f,m),null);
+  m.swipes[0]=m.mes;await f.runtime.reconcile();assert.ok(await reference(f,m));
  }finally{f.runtime.destroy();}
 });
 
 
-test('observed continuation renews only its own completed reference and never blesses later manual edits',async()=>{
+test('continuation and body edits retain stable identity while state changes update only the index',async()=>{
  const f=fixture();try{
-  await f.runtime.migrate();const m=f.ctx.chat[0],before=getReference(m);
+  await f.runtime.migrate();const m=f.ctx.chat[0],before=await reference(f,m),id=m[STORY_MESSAGE_ID];
   await f.handlers.get('generating')('continue',{},false);m.mes+=' 续写中的内容';await saveChatMetadata(f.ctx);
-  assert.equal(m.extra.amin_story_v2.revision,before.revision);
+  assert.deepEqual(await reference(f,m),before);
+  f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:7}}});
   m.mes+=' 完成';f.handlers.get('ended')();await f.runtime.reconcile();
-  assert.notEqual(getReference(m).revision,before.revision);
-  m.mes+=' 未经生成的编辑';await assert.rejects(saveChatMetadata(f.ctx),/引用失效/);
+  assert.notEqual((await reference(f,m)).stateId,before.stateId);
+  m.mes+=' 用户编辑正文';await saveChatMetadata(f.ctx);
+  assert.equal(m[STORY_MESSAGE_ID],id);
+  await f.runtime.restoreChat();assert.equal(f.runtime.ready(),true);
+  assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).项目.世界.时间,7);
  }finally{f.runtime.destroy();}
 });

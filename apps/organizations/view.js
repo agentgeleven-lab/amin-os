@@ -199,7 +199,7 @@ export async function mount(target,{api:provided,ai=getAI,sourceOptions={}}={}){
    if(historyIndex!==null){
     const message=api.context().chat?.[historyIndex];
     if(!historyRecord?.available||!message||api.context().chatMetadata!==historyMetadata||historyRecord.external&&
-      (String(message.swipe_id??0)!==historyRecord.variant||storyReference(message)!==historyRecord.reference||message.mes!==historyRecord.content))
+      (String(message.swipe_id??0)!==historyRecord.variant||storyReference(message)!==historyRecord.reference||message.mes!==historyRecord.content||api.context().chatMetadata?.amin_os_story_storage_v2?.indexId!==historyRecord.indexId))
       throw Error('该楼层记录已变化，请返回当前资料重新打开。');
     doc=historyRecord.state.doc;
    }
