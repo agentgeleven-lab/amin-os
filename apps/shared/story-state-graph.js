@@ -6,6 +6,42 @@ const BLOCKED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const ENCODER = new TextEncoder();
 const DEFAULTS = Object.freeze({ maxDeltaDepth: 8, maxBytes: 32 * 1024 * 1024, maxEntries: 200_000, maxChanges: 50_000 });
+const BATCH_CACHE_ENTRIES = 64;
+
+// Batch operations retain only a bounded set of validated parents. The byte
+// budget measures serialized content, not JavaScript heap size; larger states
+// still load normally and simply bypass the cache.
+function createBatchCache(maxBytes) {
+    const entries = new Map();
+    let bytes = 0;
+    return {
+        has: id => entries.has(id),
+        get(id) {
+            const entry = entries.get(id);
+            if (!entry) return undefined;
+            entries.delete(id);
+            entries.set(id, entry);
+            return entry.value;
+        },
+        set(id, value) {
+            const size = ENCODER.encode(JSON.stringify(value.state)).byteLength
+                + ENCODER.encode(JSON.stringify(value.node)).byteLength;
+            if (size > maxBytes) return;
+            if (entries.has(id)) {
+                bytes -= entries.get(id).size;
+                entries.delete(id);
+            }
+            while (entries.size >= BATCH_CACHE_ENTRIES || bytes + size > maxBytes) {
+                const oldest = entries.keys().next().value;
+                bytes -= entries.get(oldest).size;
+                entries.delete(oldest);
+            }
+            entries.set(id, { value, size });
+            bytes += size;
+        },
+        clear() { entries.clear(); bytes = 0; },
+    };
+}
 
 function failure(code, message) {
     const error = new Error(message);
@@ -201,6 +237,30 @@ export function createStoryStateGraph(store, options = {}) {
             return id;
         },
         async load(id) { return normalize((await read(id, fromStore)).state, limits, true); },
+        async visitMany(stateIds, visitor, { settled = false } = {}) {
+            if (!Array.isArray(stateIds)) throw new TypeError('stateIds 必须是数组。');
+            if (typeof visitor !== 'function') throw new TypeError('visitor 必须是函数。');
+            if (stateIds.length > limits.maxEntries)
+                throw failure('STORY_STATE_INVALID', '剧情状态批量读取条目过多。');
+            const cache = createBatchCache(Math.min(limits.maxBytes, DEFAULTS.maxBytes));
+            try {
+                for (const id of new Set(stateIds)) {
+                    let state;
+                    let readError = null;
+                    try { state = normalize((await read(id, fromStore, cache)).state, limits, true); }
+                    catch (error) {
+                        // Even validated ancestors are discarded after failure;
+                        // the next item is checked against the store again.
+                        cache.clear();
+                        if (!settled) throw error;
+                        readError = error;
+                    }
+                    // Keep callback errors outside the read catch. Consumers
+                    // receive their own mutable copy and may cancel by throwing.
+                    await visitor(state, id, readError);
+                }
+            } finally { cache.clear(); }
+        },
         async exportClosure(stateIds) {
             if (!Array.isArray(stateIds)) throw new TypeError('stateIds 必须是数组。');
             const roots = [...new Set(stateIds)];

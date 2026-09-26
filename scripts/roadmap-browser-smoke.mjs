@@ -257,9 +257,11 @@ try {
       const entries=['chat','backup'].map(kind=>({id:kind,label:kind+' 测试长名称'.repeat(8),kind,documentBytes:1000,chatMetadata:{amin_os_story_storage_v2:{version:2,owner:'amin-os/story-v2',baseStateId:base}},chat:[]}));
       window.libraryFixture=createStoryLibraryService({store,hostAdapter:{capabilities,census:async()=>({complete:true,entries,issues:[],fingerprint:'unchanged',capabilities:capabilities()})}});
       const target=document.createElement('section');target.className='amin-page amin-app-page';pane('settings').replaceChildren(target);
-      mountStoryLibrary(target,{getRuntime:()=>({scanStoryLibrary:o=>libraryFixture.scan(o),exportStoryLibraryCandidates:(r,o)=>libraryFixture.exportCandidates(r,o)})});
+      window.libraryScanCalls=0;
+      mountStoryLibrary(target,{getRuntime:()=>({scanStoryLibrary:o=>{window.libraryScanCalls++;return libraryFixture.scan(o);},exportStoryLibraryCandidates:(r,o)=>libraryFixture.exportCandidates(r,o)})});
     })()`);
     await click('settings','扫描全库剧情文件');
+    assert.equal(await evaluate('libraryScanCalls'),1,'the scan button must dispatch exactly once');
     await waitFor("pane('settings').innerText.includes('扫描不完整')",'read only incomplete census');
     await click('settings','预览候选文件');
     await evaluate("pane('settings').querySelectorAll('details').forEach(d=>d.open=true)");

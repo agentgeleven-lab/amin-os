@@ -70,6 +70,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     const files = createStoryFileStore({ getHostWindow: () => host.window ?? host });
     const story = storyStorage ?? createStoryStorage(getContext, { graph: createStoryStateGraph(files), available: () => files.available(), host, document });
     let archiveTask = null, archiveAgain = false, observedNative = null, activeGeneration = null, generationBaseline = null;
+    const pendingArchiveSaves = new WeakMap();
     const streaming = () => { const ctx=getContext(),stream=ctx?.streamingProcessor; return !!stream && !stream.isFinished || !!activeGeneration && activeGeneration.metadata===ctx?.chatMetadata && activeGeneration.identity===chatIdentity(ctx); };
     function captureOptions(ctx) {
         const base=generationBaseline;
@@ -78,13 +79,26 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         return {expectedReference:base.reference};
     }
     const external = () => getContext()?.chatMetadata?.amin_os_story_storage_v2?.version === 2;
-    const removeSavePreparation = registerChatSavePreparation(async ctx => {
+    const prepareStorySave = async (ctx, receipt) => {
+        // Check a supplied receipt before any early exit. Switching chats or
+        // candidates during another preparation must never turn this into a skip.
+        const prepared = receipt && story.consumeCaptureReceipt?.(receipt, ctx);
+        if (receipt && (restoring || streaming())) throw Error('保存准备期间正在恢复或生成回复，请稍后重试。');
         if (!external() || ctx.chatMetadata !== getContext()?.chatMetadata || restoring || streaming()) return;
         if (!ready(ctx)) throw Error('外置剧情状态尚未恢复，不能保存新的状态引用。' + (sameChat(ctx) && restoreError ? '原因：' + restoreError : '请在世界状态 → 联动更新查看变量恢复状态。'));
-        const result = await story.capture(captureOptions(ctx));
+        const finalCheck = check => check && (() => {
+            check();
+            if (!ready(ctx) || restoring || streaming()) throw Error('保存准备期间聊天正在恢复或生成回复，请稍后重试。');
+        });
+        if (prepared) return finalCheck(prepared);
+        const result = await story.capture({ ...captureOptions(ctx), saveReceipt: true });
         generationBaseline=null;
         if (result.changed) markChatIdsDirty(ctx);
-    });
+        const check = story.consumeCaptureReceipt?.(result.receipt, ctx);
+        if (result.receipt && !check) throw Error('保存准备期间剧情变量已变化，请重试。');
+        return finalCheck(check);
+    };
+    const removeSavePreparation = registerChatSavePreparation(prepareStorySave);
     const say = text => { if (text !== lastMessage) { lastMessage = text; report(text); } };
     const available = () => getContext()?.extensionSettings?.LittleWhiteBox?.variablesMode === '2.0' && typeof host.LWB_StateV2?.applyText === 'function';
     const removeExpansion = registerOperationPatchExpansion((ctx, patches) => {
@@ -164,17 +178,28 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         if (archiveTask) { archiveAgain = true; return archiveTask; }
         const ctx = getContext();
         if (metadataWriteStatus(getContext).busy || metadataWriteStatus(getContext).dirty) return;
+        const metadata = ctx.chatMetadata, identity = chatIdentity(ctx);
         const capturedSignature = signature(ctx);
         archiveTask = (async () => {
             let release = () => {};
             try {
                 release = acquireMetadataWrite(getContext, captureContext(getContext));
-                const result = await story.capture(captureOptions(ctx));
+                const result = await story.capture({ ...captureOptions(ctx), saveReceipt: true });
                 generationBaseline=null;
-                if (result.changed) { markChatIdsDirty(ctx); await saveChatMetadata(ctx); }
+                if (result.changed) pendingArchiveSaves.set(metadata, { identity });
+                const pending = pendingArchiveSaves.get(metadata);
+                if (pending?.identity === identity) {
+                    if (ctx.chatMetadata !== metadata || chatIdentity(ctx) !== identity) throw Error('保存准备期间聊天已切换，请返回原聊天后重试。');
+                    markChatIdsDirty(ctx);
+                    await saveChatMetadata(ctx, { prepared: new Map([[prepareStorySave, result.receipt]]) });
+                    if (pendingArchiveSaves.get(metadata) === pending) pendingArchiveSaves.delete(metadata);
+                }
                 observedNative = capturedSignature;
             } catch (error) {
                 if (error?.code === 'INCOMPLETE_CANDIDATE') return;
+                // Keep the pending host save for the next explicit generation/
+                // native-update event. Unchanged timer ticks must not retry a
+                // failing disk write every interval.
                 observedNative = capturedSignature;
                 say('外置剧情状态保存未完成：' + error.message); return { error };
             }

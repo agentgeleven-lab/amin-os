@@ -2,25 +2,51 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStoryStorage } from '../apps/state2/story-storage.js';
 import { createStoryStateGraph } from '../apps/shared/story-state-graph.js';
+import { STORY_CANDIDATE_ID } from '../apps/shared/story-chat-index.js';
 
 function fixture() {
-  const nodes = new Map();
-  const graph = createStoryStateGraph({ get: async id => structuredClone(nodes.get(id) ?? null),
+  const nodes = new Map(), reads = new Map();
+  const graph = createStoryStateGraph({ get: async id => { reads.set(id, (reads.get(id) ?? 0) + 1); return structuredClone(nodes.get(id) ?? null); },
     put: async (id, value) => { nodes.set(id, structuredClone(value)); } });
   let ctx = { chatId: 'origin', characterId: 0, characters: [{ avatar: 'a.png' }],
     extensionSettings: { LittleWhiteBox: { variablesMode: '2.0' } },
     chat: [{ mes: 'first', is_user: false }],
     chatMetadata: { integrity: 'ready', variables: { 状态栏: '{"hp":10}' }, LWB_RULES_V2: {} } };
   const service = createStoryStorage(() => ctx, { graph });
-  return { service, nodes, graph, get ctx() { return ctx; }, set ctx(value) { ctx = value; } };
+  return { service, nodes, graph, reads, get ctx() { return ctx; }, set ctx(value) { ctx = value; } };
 }
+
+test('reference inspection shares parent reads within a batch and reloads changed files next time', async () => {
+  const f = fixture();
+  f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ hp: 10, notes: '背景'.repeat(3000) });
+  const { baseStateId } = await f.service.enable(); await f.service.ensureIndex();
+  f.ctx.chat.push({ mes: 'next', is_user: false });
+  f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ hp: 7, notes: '背景'.repeat(3000) });
+  const { stateId } = await f.service.capture();
+  assert.equal(f.nodes.get(stateId).kind, 'delta');
+  f.reads.clear();
+  assert.deepEqual((await f.service.inspectReferences()).repairs, []);
+  assert.equal(f.reads.get(baseStateId), 1);
+  assert.equal(f.reads.get(stateId), 1);
+  f.nodes.get(baseStateId).state.variables.状态栏.hp = 999;
+  await assert.rejects(f.service.inspectReferences(), { code: 'STORY_STATE_CORRUPT' });
+});
+
+test('inspection keeps compatibility with adapters exposing only single-state load', async () => {
+  const f = fixture(); delete f.graph.visitMany;
+  await f.service.enable(); await f.service.ensureIndex();
+  assert.equal((await f.service.inspectIndex()).unreadableStates, 0);
+  assert.deepEqual((await f.service.inspectReferences()).repairs, []);
+});
 
 test('index inspection includes unselected swipes and inherited branch without mutating chat or files', async () => {
   const f = fixture();
+  // Saved JSON sorts UUID-like keys; display must follow Swipe numbers instead.
+  f.ctx.chat[0].extra = { [STORY_CANDIDATE_ID]: 'z-first' };
   await f.service.enable(); await f.service.ensureIndex();
   const message = f.ctx.chat[0];
   message.swipes = ['first', 'alternative']; message.swipe_id = 0;
-  message.swipe_info = [{ extra: structuredClone(message.extra) }, { extra: {} }];
+  message.swipe_info = [{ extra: structuredClone(message.extra) }, { extra: { [STORY_CANDIDATE_ID]: 'a-second' } }];
   await f.service.ensureIndex();
   message.swipe_id = 1; message.mes = 'alternative';
   f.ctx.chatMetadata.variables.状态栏 = '{"hp":5}';

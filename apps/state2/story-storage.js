@@ -43,6 +43,8 @@ function contextToken(ctx) {
         identity: chatIdentity(ctx),
         revisions: JSON.stringify(chatRevisions(ctx.chat)),
         references: referenceFingerprint(ctx),
+        candidates: ctx.chat.map(message => ({ system: !!message.is_system,
+            swipes: Array.isArray(message.swipes) ? message.swipes.slice() : null })),
     };
 }
 
@@ -61,7 +63,12 @@ function assertCurrent(getContext, token) {
         || ctx.chatMetadata.integrity !== token.integrity
         || chatIdentity(ctx) !== token.identity
         || JSON.stringify(chatRevisions(ctx.chat)) !== token.revisions
-        || referenceFingerprint(ctx) !== token.references) {
+        || referenceFingerprint(ctx) !== token.references
+        || ctx.chat.some((message, index) => {
+            const before = token.candidates[index], swipes = Array.isArray(message.swipes) ? message.swipes : null;
+            return !before || before.system !== !!message.is_system || (before.swipes === null) !== (swipes === null)
+                || swipes && (swipes.length !== before.swipes.length || swipes.some((text, i) => text !== before.swipes[i]));
+        })) {
         throw failure('STORY_CHAT_CHANGED', '聊天或消息候选已变化，外置剧情状态未关联到新聊天。');
     }
     return ctx;
@@ -141,6 +148,35 @@ export function createStoryStorage(getContext, {
         || typeof graph?.exportClosure !== 'function' || typeof graph?.importClosure !== 'function')
         throw new TypeError('外置剧情存储需要当前聊天接口与完整状态图。');
     let busy = false;
+    const captureReceipts = new WeakMap();
+
+    function completedCapture(ctx, state, result, saveReceipt) {
+        if (!saveReceipt) return result;
+        const receipt = Object.freeze({});
+        captureReceipts.set(receipt, {
+            token: contextToken(ctx), state: JSON.stringify(state),
+        });
+        return { ...result, receipt };
+    }
+
+    /** A receipt is private, one-use, and never serialized into a chat/file. */
+    function consumeCaptureReceipt(receipt, ctx) {
+        const saved = receipt && captureReceipts.get(receipt);
+        if (!saved) return null;
+        captureReceipts.delete(receipt);
+        requireAvailable();
+        const assertContext = () => {
+            const now = assertCurrent(getContext, saved.token);
+            if (ctx?.chatMetadata !== saved.token.metadata || chatIdentity(ctx) !== saved.token.identity)
+                throw failure('STORY_CHAT_CHANGED', '聊天或消息候选已变化，外置剧情状态未关联到新聊天。');
+            return now;
+        };
+        if (JSON.stringify(currentState(assertContext())) !== saved.state) return null;
+        return () => {
+            if (JSON.stringify(currentState(assertContext())) !== saved.state)
+                throw failure('STORY_STATE_CHANGED', '保存准备期间剧情变量已变化，请重试。');
+        };
+    }
 
     function current() {
         const ctx = getContext();
@@ -187,7 +223,7 @@ export function createStoryStorage(getContext, {
             const { index, copies } = buildIndex(ctx.chat, chatIdentity(ctx), old, marker.indexId);
             if (!old) {
                 // Verify every migrated state before removing old pointers.
-                for (const id of new Set([marker.baseStateId, ...indexStateIds(index)])) decodeState(await graph.load(id));
+                await visitStates([marker.baseStateId, ...indexStateIds(index)], state => { decodeState(state); });
             }
             const indexId = await graph.save(index, { parentId: marker.indexId ?? null });
             const now = assertCurrent(getContext, token);
@@ -198,7 +234,7 @@ export function createStoryStorage(getContext, {
         });
     }
 
-    async function captureIndexed(ctx, marker) {
+    async function captureIndexed(ctx, marker, saveReceipt) {
         const token = contextToken(ctx), old = await loadIndex(marker);
         const { index, copies } = buildIndex(ctx.chat, chatIdentity(ctx), old, marker.indexId);
         const floor = ctx.chat.length - 1;
@@ -210,10 +246,10 @@ export function createStoryStorage(getContext, {
         const indexId = await graph.save(index, { parentId: marker.indexId });
         const now = assertCurrent(getContext, token);
         if (JSON.stringify(currentState(now)) !== JSON.stringify(state)) throw failure('STORY_STATE_CHANGED', '保存期间剧情变量已变化，请重试。');
-        if (indexId === marker.indexId) return { changed: false, stateId };
+        if (indexId === marker.indexId) return completedCapture(now, state, { changed: false, stateId }, saveReceipt);
         commitIdentities(now.chat, copies);
         now.chatMetadata[STORY_STORAGE_KEY] = { ...marker, indexId };
-        return { changed: true, stateId };
+        return completedCapture(now, state, { changed: true, stateId }, saveReceipt);
     }
 
     function refsTo(ctx, target, marker) {
@@ -266,12 +302,12 @@ export function createStoryStorage(getContext, {
         });
     }
 
-    async function capture({ expectedReference } = {}) {
+    async function capture({ expectedReference, saveReceipt = false } = {}) {
         return locked(async () => {
             requireAvailable();
             const ctx = current(), marker = assertMarker(ctx);
             if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
-            if (marker.indexId) return captureIndexed(ctx, marker);
+            if (marker.indexId) return captureIndexed(ctx, marker, saveReceipt);
             const floor = ctx.chat.length - 1;
             if (floor < 0) return { changed: false, stateId: marker.baseStateId };
             const parentStateId = refsTo(ctx, floor - 1, marker);
@@ -289,9 +325,10 @@ export function createStoryStorage(getContext, {
             const now = assertCurrent(getContext, token);
             if (JSON.stringify(currentState(now)) !== JSON.stringify(state))
                 throw failure('STORY_STATE_CHANGED', '保存期间剧情变量已变化，请重试。');
-            if (old?.stateId === stateId && old.revision === chatRevisions([now.chat[floor]])[0]) return { changed: false, stateId };
+            if (old?.stateId === stateId && old.revision === chatRevisions([now.chat[floor]])[0])
+                return completedCapture(now, state, { changed: false, stateId }, saveReceipt);
             setReference(now.chat[floor], stateId, { parentStateId });
-            return { changed: true, stateId };
+            return completedCapture(now, state, { changed: true, stateId }, saveReceipt);
         });
     }
 
@@ -345,6 +382,16 @@ export function createStoryStorage(getContext, {
 
     // Explicit repair only: inspect saved states without treating stale text as
     // permission to replace them with the latest chat's variables.
+    async function visitStates(ids, visitor, options = {}) {
+        if (typeof graph.visitMany === 'function') return graph.visitMany(ids, visitor, options);
+        // Custom adapters from older hosts keep their existing load contract.
+        for (const id of new Set(ids)) {
+            let state, error = null;
+            try { state = await graph.load(id); }
+            catch (cause) { if (!options.settled) throw cause; error = cause; }
+            await visitor(state, id, error);
+        }
+    }
     async function inspectReferences() {
         requireAvailable();
         const ctx = current(), marker = assertMarker(ctx);
@@ -352,7 +399,7 @@ export function createStoryStorage(getContext, {
         const token = contextToken(ctx), repairs = [];
         if (marker.indexId) {
             const index = await loadIndex(marker);
-            for (const id of indexStateIds(buildIndex(ctx.chat, chatIdentity(ctx), index, marker.indexId).index)) decodeState(await graph.load(id));
+            await visitStates(indexStateIds(buildIndex(ctx.chat, chatIdentity(ctx), index, marker.indexId).index), state => { decodeState(state); });
             stateFromIndex(ctx, ctx.chat.length - 1, marker, index);
             assertCurrent(getContext, token);
             return { repairs, token };
@@ -457,20 +504,17 @@ export function createStoryStorage(getContext, {
         const token = contextToken(ctx), saved = await loadIndex(marker);
         const index = buildIndex(ctx.chat, chatIdentity(ctx), saved, marker.indexId).index;
         const health = new Map();
-        async function check(id) {
-            if (!health.has(id)) {
-                try { decodeState(await graph.load(id)); health.set(id, { readable: true }); }
-                catch (error) { health.set(id, { readable: false, error: error.message }); }
-            }
-            return health.get(id);
-        }
-        await check(marker.baseStateId);
-        for (const id of indexStateIds(index)) await check(id);
-        for (const backup of marker.backups ?? []) await check(backup.stateId);
+        await visitStates([marker.baseStateId, ...indexStateIds(index), ...(marker.backups ?? []).map(backup => backup.stateId)], (state, id, error) => {
+            try {
+                if (error) throw error;
+                decodeState(state); health.set(id, { readable: true });
+            } catch (error) { health.set(id, { readable: false, error: error.message }); }
+        }, { settled: true });
         const rows = [];
         for (const [floor, messageId] of Object.entries(index.order)) {
             const row = index.messages[messageId], message = ctx.chat[Number(floor)];
-            for (const [candidateId, candidate] of Object.entries(row.candidates)) rows.push({
+            // Canonical storage orders keys by ID; the UI follows Swipe order.
+            for (const [candidateId, candidate] of Object.entries(row.candidates).sort((a, b) => a[1].swipe - b[1].swipe)) rows.push({
                 floor: Number(floor), messageId, candidateId, swipe: candidate.swipe,
                 selected: candidate.swipe === row.selected,
                 role: message.is_user ? 'user' : message.is_system ? 'system' : 'assistant',
@@ -514,5 +558,5 @@ export function createStoryStorage(getContext, {
         }
     }
 
-    return { enable, ensureIndex, capture, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, inspectIndex, status };
+    return { enable, ensureIndex, capture, consumeCaptureReceipt, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, inspectIndex, status };
 }

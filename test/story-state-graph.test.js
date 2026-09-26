@@ -24,6 +24,126 @@ const story = (hp, scene = '工坊') => ({
     inventory: ['接口校准仪', '调试终端'],
 });
 
+test('batch visits share validated parents and isolate each mutable callback result', async () => {
+    const t = fixture();
+    const base = await t.graph.save(story(10));
+    const shared = await t.graph.save(story(9), { parentId: base });
+    const left = await t.graph.save(story(8), { parentId: shared });
+    const right = await t.graph.save(story(7), { parentId: shared });
+    const expected = new Map([[left, story(8)], [right, story(7)], [shared, story(9)], [base, story(10)]]);
+    const visited = [];
+    t.reads.length = 0;
+    await t.graph.visitMany([left, right, shared, base, right], async (state, id, error) => {
+        assert.equal(error, null);
+        assert.deepEqual(state, expected.get(id));
+        await Promise.resolve();
+        visited.push(id);
+        // If a callback changes its result, subsequent roots/parents must
+        // still use the validated original rather than the exposed object.
+        state.characters.HK416.hp = -100;
+        state.inventory.push('callback only');
+    });
+    assert.deepEqual(visited, [left, right, shared, base]);
+    assert.deepEqual(t.reads, [left, shared, base, right]);
+    assert.deepEqual(await t.graph.load(left), story(8));
+});
+
+test('batch visits revalidate changed parents on each call and recover after a failed call', async () => {
+    const t = fixture();
+    const base = await t.graph.save(story(10));
+    const child = await t.graph.save(story(9), { parentId: base });
+    const original = structuredClone(t.nodes.get(base));
+    await t.graph.visitMany([child], state => assert.deepEqual(state, story(9)));
+    t.nodes.get(base).state.characters.HK416.hp = 999;
+    t.reads.length = 0;
+    await assert.rejects(t.graph.visitMany([child], () => assert.fail('corrupt state exposed')),
+        { code: 'STORY_STATE_CORRUPT' });
+    assert.deepEqual(t.reads, [child, base]);
+    t.nodes.set(base, original);
+    t.reads.length = 0;
+    await t.graph.visitMany([child], state => assert.deepEqual(state, story(9)));
+    assert.deepEqual(t.reads, [child, base]);
+});
+
+test('settled batch visits report missing and corrupt chains independently and continue', async () => {
+    const t = fixture(undefined, true);
+    const base = await t.graph.save(story(10));
+    const left = await t.graph.save(story(9), { parentId: base });
+    const right = await t.graph.save(story(8), { parentId: base });
+    const healthy = await t.graph.save(story(20));
+    const missing = `sha256:${'f'.repeat(64)}`;
+    t.nodes.get(base).state.characters.HK416.hp = 999;
+    t.reads.length = 0;
+    const outcomes = [];
+    await t.graph.visitMany([left, healthy, right, missing], (state, id, error) => {
+        outcomes.push([id, error?.code ?? null]);
+        if (error) assert.equal(state, undefined);
+        else assert.deepEqual(state, story(20));
+    }, { settled: true });
+    assert.deepEqual(outcomes, [[left, 'STORY_STATE_CORRUPT'], [healthy, null],
+        [right, 'STORY_STATE_CORRUPT'], [missing, 'STORY_STATE_MISSING']]);
+    assert.deepEqual(t.reads, [left, base, healthy, right, base, missing]);
+});
+
+test('batch visits fail fast by default and never swallow callback errors', async () => {
+    const t = fixture();
+    const healthy = await t.graph.save(story(10));
+    const missing = `sha256:${'f'.repeat(64)}`;
+    t.reads.length = 0;
+    await assert.rejects(t.graph.visitMany([missing, healthy], () => assert.fail('unexpected visit')),
+        { code: 'STORY_STATE_MISSING' });
+    assert.deepEqual(t.reads, [missing]);
+    const consumerError = new Error('consumer cancelled');
+    for (const first of [healthy, missing]) {
+        t.reads.length = 0;
+        await assert.rejects(t.graph.visitMany([first, healthy], async () => {
+            throw consumerError;
+        }, { settled: true }), error => error === consumerError);
+        assert.deepEqual(t.reads, [first]);
+    }
+});
+
+test('batch parent cache evicts older records after 64 nodes', async () => {
+    const t = fixture();
+    const base = await t.graph.save(story(10));
+    const child = await t.graph.save(story(9), { parentId: base });
+    const others = [];
+    for (let value = 0; value < 64; value++) others.push(await t.graph.save({ value }));
+    t.reads.length = 0;
+    let visits = 0;
+    await t.graph.visitMany([base, ...others, child], (state, id) => {
+        visits++;
+        if (id === child) assert.deepEqual(state, story(9));
+    });
+    assert.equal(visits, 66);
+    assert.equal(t.reads.filter(id => id === base).length, 2);
+    assert.equal(t.reads.length, 67);
+});
+
+test('states larger than the batch cache budget still load without being retained', async () => {
+    const maxBytes = new TextEncoder().encode(JSON.stringify(story(10))).byteLength + 100;
+    const t = fixture({ maxBytes });
+    const base = await t.graph.save(story(10));
+    const left = await t.graph.save(story(9), { parentId: base });
+    const right = await t.graph.save(story(8), { parentId: base });
+    t.reads.length = 0;
+    const states = [];
+    await t.graph.visitMany([left, right], state => states.push(state));
+    assert.deepEqual(states, [story(9), story(8)]);
+    assert.deepEqual(t.reads, [left, base, right, base]);
+});
+
+test('batch visits validate their input and enforce the configured entry limit', async () => {
+    const t = fixture({ maxEntries: 2 });
+    const id = `sha256:${'f'.repeat(64)}`;
+    await assert.rejects(t.graph.visitMany(id, () => {}), TypeError);
+    await assert.rejects(t.graph.visitMany([], null), TypeError);
+    await assert.rejects(t.graph.visitMany([id, id, id], () => {}), { code: 'STORY_STATE_INVALID' });
+    await assert.rejects(t.graph.visitMany(['invalid'], () => {}), { code: 'STORY_STATE_INVALID' });
+    await t.graph.visitMany([], () => assert.fail('empty batch visited'));
+    assert.deepEqual(t.reads, []);
+});
+
 test('existing save and import nodes are read once while their parents remain validated', async () => {
     const t = fixture();
     const base = await t.graph.save(story(10));

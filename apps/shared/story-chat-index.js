@@ -43,19 +43,57 @@ export function validateIndex(value) {
     return value;
 }
 
-// Work on clones. The caller commits the identities only after index files have
-// been persisted and the live chat token has been checked again.
+// Reuse only after checking every candidate. A changed/invalid identity, copied
+// Swipe, or legacy reference takes the normal rebuilding and validation path.
+function reusableRow(message, row) {
+    if (!row || row.selected !== (message.swipe_id ?? 0) || !plain(message.extra)
+        || Object.hasOwn(message.extra, STORY_REFERENCE_KEY)) return false;
+    const count = Array.isArray(message.swipes) ? message.swipes.length : 1;
+    if (Object.keys(row.candidates).length !== count) return false;
+    const seen = new Set();
+    for (let swipe = 0; swipe < count; swipe++) {
+        const extra = extraAt(message, swipe), cid = extra?.[STORY_CANDIDATE_ID];
+        if (typeof cid !== 'string' || !idPattern.test(cid) || seen.has(cid)
+            || Object.hasOwn(extra, STORY_REFERENCE_KEY) || !Object.hasOwn(row.candidates, cid)
+            || row.candidates[cid].swipe !== swipe) return false;
+        seen.add(cid);
+    }
+    return message.extra[STORY_CANDIDATE_ID] === extraAt(message, message.swipe_id ?? 0)?.[STORY_CANDIDATE_ID];
+}
+function copyRow(row) {
+    return { ...row, candidates: Object.fromEntries(Object.entries(row.candidates).map(([id, entry]) => [id, { ...entry }])) };
+}
+function copyMessage(message) {
+    return { ...message, extra: { ...message.extra },
+        ...(Array.isArray(message.swipe_info) ? { swipe_info: message.swipe_info.map(info => info ? { ...info, extra: { ...info.extra } } : info) } : {}) };
+}
+
+// Clone only messages whose persisted identities need work. The caller commits
+// them after files are persisted and the live chat token is checked again.
 export function buildIndex(chat, identity, previous = null, previousId = null) {
-    const copies = chat.map(message => ({ ...message, extra: { ...message.extra },
-        ...(Array.isArray(message.swipe_info) ? { swipe_info: message.swipe_info.map(info => info ? { ...info, extra: { ...info.extra } } : info) } : {}) })), seen = new Set();
+    const copies = new Array(chat.length), seen = new Set();
     const index = { kind: 'amin-story-index', version: 1, chat: identity,
         inheritedFrom: previous && previous.chat !== identity ? { chat: previous.chat, indexId: previousId } : previous?.inheritedFrom ?? null,
         order: {}, messages: {} };
-    for (let floor = 0; floor < copies.length; floor++) {
-        const message = copies[floor];
-        let id = message[STORY_MESSAGE_ID];
+    for (let floor = 0; floor < chat.length; floor++) {
+        const source = chat[floor];
+        let id = source[STORY_MESSAGE_ID];
         if (id !== undefined && !idPattern.test(id)) fail('消息的稳定标识无效，不能按楼层猜测存档。');
         if (seen.has(id)) fail('聊天中出现重复消息标识，已停止关联以防串档。');
+        const savedRow = previous?.messages[id];
+        if (id && reusableRow(source, savedRow)) {
+            seen.add(id);
+            const tail = floor === chat.length - 1;
+            // The tail candidate is also read after awaiting the state write.
+            // Snapshot it so a live Swipe switch cannot alter that lookup.
+            copies[floor] = tail ? copyMessage(source) : source;
+            index.order[floor] = id;
+            // captureIndexed assigns the tail's stateId after building. It must
+            // never mutate the previous index, including another branch's row.
+            index.messages[id] = tail ? copyRow(savedRow) : savedRow;
+            continue;
+        }
+        const message = copies[floor] = copyMessage(source);
         if (!id) id = message[STORY_MESSAGE_ID] = uuid();
         seen.add(id);
         const row = { selected: message.swipe_id ?? 0, candidates: {} }, candidateIds = new Set();
@@ -100,6 +138,7 @@ export function buildIndex(chat, identity, previous = null, previousId = null) {
 export function commitIdentities(chat, copies) {
     for (let i = 0; i < chat.length; i++) {
         const message = chat[i], copy = copies[i];
+        if (message === copy) continue;
         message[STORY_MESSAGE_ID] = copy[STORY_MESSAGE_ID];
         message.extra ??= {};
         delete message.extra[STORY_REFERENCE_KEY];
