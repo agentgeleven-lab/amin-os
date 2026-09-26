@@ -1,6 +1,6 @@
 import { EFFECT_CONTINUITY_RULES } from '../effects/prompt-rules.js';
 import { adapters } from './registry.js';
-import { mayRead, mayWrite, readLinkageSettings } from './policy.js';
+import { mayRead, mayWrite, readLinkageSettings, MODULES } from './policy.js';
 import { buildReferenceIndex } from './references.js';
 import { compileRules, readGlobalRules } from '../status/rules.js';
 
@@ -94,14 +94,8 @@ function inheritedRules(ctx, writable) {
     return rules.filter(Boolean).join('\n\n').replace(/\{\{user\}\}/gi,()=>ctx.name1||'用户').replace(/\{\{char\}\}/gi,()=>ctx.characters?.[ctx.characterId]?.name||ctx.name2||'角色');
 }
 
-export function buildDataPrompt(ctx) {
-    const settings = readLinkageSettings(ctx);
-    if (!settings.enabled || settings.dataSource === 'external') return '';
-    const selected = adapters.filter(adapter => mayRead(ctx, adapter.id));
+function renderDataPrompt(ctx, settings, selected, data) {
     if (!selected.length) return '';
-    // Adapter projections enforce knowledge and visibility rules. Never expose
-    // unfiltered journal, information, map or dice roots to the model.
-    const data = Object.fromEntries(selected.map(adapter => [adapter.id, (adapter.readForPrompt ?? adapter.read)(ctx)]));
     const readable = new Set(selected.map(adapter=>adapter.id));
     const links = (settings.links ?? []).filter(link=>readable.has(link.from.split(':')[0]) && readable.has(link.to.split(':')[0]));
     const references = buildReferenceIndex(data, links);
@@ -127,6 +121,68 @@ export function buildDataPrompt(ctx) {
     ].join('\n\n').replaceAll('{{', '\\u007b\\u007b');
 }
 
+/** Budget only the data projection, never the update protocol or user instructions.
+ * Whole modules keep JSON structure and native array paths intact. */
+export function buildDataPromptReport(ctx) {
+    const settings = readLinkageSettings(ctx);
+    const budget = settings.contextBudget ?? { enabled: false, maxChars: 24000, requiredModules: [] };
+    const report = { enabled: budget.enabled, maxChars: budget.maxChars, usedChars: 0, prompt: '', error: '', modules: [] };
+    const sourceOff = !settings.enabled || settings.dataSource === 'external';
+    const selected = adapters.filter(adapter => !sourceOff && mayRead(ctx, adapter.id));
+    // Always use privacy-aware projections before applying any size policy.
+    const data = Object.fromEntries(selected.map(adapter => [adapter.id, (adapter.readForPrompt ?? adapter.read)(ctx)]));
+    const required = new Map(selected.flatMap(adapter => {
+        const id = adapter.id;
+        if (mayWrite(ctx, id)) return [[id, '允许变量更新，必须提供完整当前资料']];
+        if (budget.requiredModules.includes(id)) return [[id, '用户固定保留']];
+        if (id === 'journal' && data.journal?.entries?.length) return [[id, '保留用户确认启用的剧情引用']];
+        if (id === 'effects' && data.effects?.enabled && data.effects.effects?.length) return [[id, '保留当前生效能力约束']];
+        return [];
+    }));
+    const render = included => renderDataPrompt(ctx, settings, included, Object.fromEntries(included.map(adapter => [adapter.id, data[adapter.id]])));
+    let included = selected;
+    const reasons = new Map();
+    if (budget.enabled) {
+        included = selected.filter(adapter => required.has(adapter.id));
+        const mandatory = render(included);
+        if (mandatory.length > budget.maxChars) report.error = `必需资料需要 ${mandatory.length} 字符，超过 ${budget.maxChars} 字符预算。请提高预算或调整模块权限；未截断资料，也未省略更新规则。`;
+        else {
+            // Only explicit links from the active scene establish priority. Never
+            // infer attendance from names, narrative text, or predicted schedules.
+            const active = data.scene?.activeSceneId;
+            const references = buildReferenceIndex(data);
+            const sceneKey = active && `scene:${active}`;
+            const known = new Set(references.entities.map(entity => entity.id));
+            const related = new Set(references.links.filter(link => sceneKey && link.from === sceneKey && known.has(link.to)).map(link => link.to.split(':')[0]));
+            if (active && data.scene.scenes?.[active]) related.add('scene');
+            const optional = selected.filter(adapter => !required.has(adapter.id)).sort((a, b) => Number(related.has(b.id)) - Number(related.has(a.id)));
+            for (const adapter of optional) {
+                const candidate = [...included, adapter];
+                if (render(candidate).length <= budget.maxChars) { included = candidate; reasons.set(adapter.id, related.has(adapter.id) ? '当前场景存在明确关联，优先纳入' : '完整模块在预算内'); }
+                else reasons.set(adapter.id, '完整模块超出剩余预算，本轮未纳入');
+            }
+        }
+    }
+    const includedIds = new Set(included.map(adapter => adapter.id));
+    report.prompt = report.error ? '' : render(included);
+    report.usedChars = report.error ? render(included).length : report.prompt.length;
+    report.modules = Object.entries(MODULES).map(([id, [label]]) => ({ id, label,
+        included: !report.error && includedIds.has(id), required: required.has(id),
+        chars: data[id] === undefined ? 0 : JSON.stringify(data[id], null, 2).length,
+        reason: sourceOff ? (!settings.enabled ? '联动已关闭' : '资料由外部预设或世界书提供')
+            : !mayRead(ctx, id) ? '模块未启用或无读取权限'
+            : report.error ? '必需资料超出预算，已停止生成资料提示词'
+            : required.get(id) ?? reasons.get(id) ?? '预算未启用，完整纳入',
+    }));
+    return report;
+}
+
+export function buildDataPrompt(ctx) {
+    const report = buildDataPromptReport(ctx);
+    if (report.error) throw Error(report.error);
+    return report.prompt;
+}
+
 const FIELD_RULES = Object.freeze({
     status: '状态栏.项目.项目名.字段名：只改已有字段，保留类型；进度值仅改 .当前 或 .最大，须满足 0≤当前≤最大。',
     organizations: '势力资料.organizations.主体ID.字段名、势力资料.alliances.主体ID.字段名、势力资料.regions.主体ID.字段名：按实际类别、已有主体与字段修改；不得改锁定字段、ID 或版本。新增主体须完整且引用有效。',
@@ -134,7 +190,7 @@ const FIELD_RULES = Object.freeze({
     inventory: 'AminOS背包.items[实际索引].字段名、AminOS背包.balances[实际索引].字段名、AminOS背包.ledger[实际索引].字段名：消耗或转交只记录一次，不凭空创造资源。新物品最少 {"id":"唯一安全ID","ownerId":"现有人物ID","name":"名称","quantity":1,"equipped":false,"notes":""}；新余额最少 {"id":"唯一安全ID","ownerId":"现有人物ID","name":"名称","amount":0,"unit":"","notes":""}。若改数量或余额，同步追加账目 {id,at:有效ISO时间,op,reason,summary,entries:[{kind,id,ownerId,name,before,after,delta}]}；前后值与 delta 必须一致，不伪造时间。',
     relationships: 'AminOS关系.relationships[实际索引].字段名：关系方向、类别、强度、证据与说明；引用现有人物 ID，反向关系需单独记录。新关系最少 {"id":"唯一安全ID","fromId":"人物ID","toId":"另一个人物ID","type":"关系类型","label":"","notes":""}。',
     scene: 'AminOS场景.clock、AminOS场景.scenes.场景ID、AminOS场景.schedules[实际索引]：只记录已发生的时间、地点、在场与日程变化；日程预测不等于已在场，不改用户时间规则与设置。新场景写 AminOS场景.scenes.新ID: {"id":"同一新ID","name":"场景名"}；新日程向 schedules 追加 {id,characterId,title,startMinute,endMinute,mapId,nodeId}，人物与已发现地点须存在。',
-    journal: 'AminOS剧情.entries[实际索引].字段名：事实、人物记忆、伏笔与编年史；只写有当前分支依据的内容。新事实仅先追加待核对记录 {"id":"唯一安全ID","kind":"fact","title":"标题","body":"事实内容","truth":"uncertain","confirmed":true,"enabled":false,"sources":null}；真实来源楼层须由应用绑定，用户确认启用前不能当作已知事实。不得伪造来源消息签名；传闻不能改成已确认，未登记知情人不能当作已知；不改自动整理设置或未确认草稿。',
+    journal: 'AminOS剧情.entries[实际索引].字段名：事实、人物记忆、伏笔、任务、线索与编年史；任务使用 kind:"task"、goal、status(open/active/completed/abandoned)、progress(0..100)、deadline、reward；线索使用 kind:"clue"、source、confidence(0..100)、status(unverified/confirmed)、taskId。关联人物、场景、物品使用 characterIds/locationIds/itemIds 的现有稳定 ID。新增任务和线索保留 id/title/body、confirmed:true、enabled:false、sources:null，来源由应用绑定；任务完成须有明确剧情依据，奖励说明不等于已发放。只写有当前分支依据的内容。新事实仅先追加待核对记录 {"id":"唯一安全ID","kind":"fact","title":"标题","body":"事实内容","truth":"uncertain","confirmed":true,"enabled":false,"sources":null}；真实来源楼层须由应用绑定，用户确认启用前不能当作已知事实。不得伪造来源消息签名；传闻不能改成已确认，未登记知情人不能当作已知；不改自动整理设置或未确认草稿。',
     effects: 'AminOS效果.effects[实际索引].字段名：已建立的持续效果、暂停、时长与结算状态；技能定义来自全局能力库，不得修改。周期结算须与状态栏、背包和场景时间一致。',
     map: 'AminOS地图.maps.地图ID.nodes.地点ID 或 .edges[实际索引]：仅写已发现且允许模型读取的地点、道路、当前位置；不改未发现区域、地图类型、坐标或通行规则。',
     information: 'AminOS信息.records[实际索引].fields[实际索引].value/status：只改已可见的信息字段；未知、推断值不能当已确认事实，不改资料库与设置。新面板最少 {"id":"唯一安全ID","name":"面板名","kind":"person","mode":"forward","fields":[]}，kind 可为 person/thing/world；新字段最少 {"id":"唯一安全ID","category":"分类","label":"字段名","value":"文本","status":"known"}。',

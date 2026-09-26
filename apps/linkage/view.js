@@ -2,6 +2,7 @@ import { mountGeneration } from '../generation/view.js';
 import { getSharedService } from './service.js';
 import { installUnifiedWorldbook, inspectUnifiedWorldbook } from './lorebook.js';
 import { uuid } from '../../uuid.js';
+import { renderContextBudgetControls, renderContextBudgetReport } from './context-budget-view.js';
 
 const mounted = new WeakMap();
 const clone = value => structuredClone(value);
@@ -26,10 +27,12 @@ export function mount(target, options = {}) {
     notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite');
     const settingsPanel = make('section', '', 'amin-card amin-stack'), retryPanel = make('section', '', 'amin-stack');
     const nativePanel = make('section', '', 'amin-card amin-stack');
+    const diagnosticsPanel = make('details', '', 'amin-card amin-stack');
+    const budgetReportPanel = make('section', '', 'amin-card amin-stack');
     const reviewPanel = make('section', '', 'amin-stack'), suggestionsPanel = make('section', '', 'amin-card amin-stack');
     const promptPanel = make('details', '', 'amin-card amin-stack'), referencesPanel = make('details', '', 'amin-card amin-stack');
     const manualPanel = make('details', '', 'amin-card amin-stack'), dataPanel = make('details', '', 'amin-card amin-stack');
-    page.append(context, notice, nativePanel, retryPanel, reviewPanel, settingsPanel, suggestionsPanel, promptPanel, dataPanel, referencesPanel, manualPanel); target.append(page);
+    page.append(context, notice, nativePanel, diagnosticsPanel, retryPanel, reviewPanel, settingsPanel, suggestionsPanel, promptPanel, dataPanel, budgetReportPanel, referencesPanel, manualPanel); target.append(page);
     const generationView = mountGeneration(page, { joint: true, getContext, document, service: options.generationService, ai: options.ai });
     let disposed = false, unavailable = false, localBusy = false, message = '', failed = false;
     let lastServiceStatus = '', referenceRepairPlan = null;
@@ -106,6 +109,8 @@ export function mount(target, options = {}) {
         sourceControl.value = draft.dataSource === 'external' ? 'external' : 'amin';
         sourceControl.addEventListener('change', () => { draft.dataSource = sourceControl.value; markDraft(); }); inputNodes.push(sourceControl);
         sourceRow.append(make('span', '资料发送来源'), sourceControl, make('small', '选择外部来源后，Amin 不再插入当前剧情资料。请确认预设或世界书的小白变量宏提供所有选中模块的资料；统一世界书更新规则仍照常使用。')); settingsPanel.append(sourceRow);
+        const budgetControls = renderContextBudgetControls(settingsPanel, { document, settings: draft, onChange: value => { draft.contextBudget = value; markDraft(); } });
+        inputNodes.push(...budgetControls.inputs);
         const modules = make('div', '', 'amin-linkage-modules');
         for (const module of moduleRows) {
             const current = moduleConfig(module), card = make('section', '', 'amin-linkage-module amin-stack'); card.dataset.module = module.id;
@@ -154,6 +159,28 @@ export function mount(target, options = {}) {
                 const result = await api.migrateState2();
                 say(result?.message || (result?.changed ? '剧情变量已迁移。' : '剧情变量已是最新状态。'));
             }, { primary: !migrated, lock: 'migration' }), make('p', '迁移前会保留备份和旧记录；发现已有变量冲突会提示，不直接覆盖。', 'amin-meta'));
+        }
+    }
+    function renderDiagnostics() {
+        diagnosticsPanel.hidden = typeof api.updateDiagnostics !== 'function';
+        if (diagnosticsPanel.hidden) return;
+        const records = api.updateDiagnostics() ?? [];
+        diagnosticsPanel.replaceChildren(make('summary', `本轮与近期变量更新记录（${records.length}）`),
+            make('p', '仅保留当前聊天、本次运行的有限记录；刷新或切换聊天后清空，不写入聊天或外置存档。记录反映观察到的变量变化，不保证每项模型指令都已执行。', 'amin-meta'));
+        if (typeof api.clearUpdateDiagnostics === 'function') diagnosticsPanel.append(button('清空更新记录', async () => { await api.clearUpdateDiagnostics(); }, { lock: 'busy' }));
+        if (!records.length) diagnosticsPanel.append(make('p', '尚无本次运行的更新记录。', 'amin-meta'));
+        const labels = { changed: '观察到变量变化', 'native-error': '小白报告更新错误', unknown: '无法比较更新前后', 'state-without-change': '收到 <state>，未观察到变化', 'no-state': '未收到 <state>，未观察到变化' };
+        for (const record of records.slice(0, 24)) {
+            const entry = make('section', '', 'amin-stack');
+            entry.append(make('h4', `${Number.isInteger(record.index) ? `第 ${record.index + 1} 楼` : '当前回复'}${Number.isInteger(record.swipe) ? ` · Swipe ${record.swipe + 1}` : ''} · ${labels[record.outcome] ?? '更新记录'}`),
+                make('p', `来源：${record.source || '未知'} · ${record.receivedState ? '检测到更新块' : '未检测到更新块'}`, 'amin-meta'));
+            for (const error of (record.errors ?? []).slice(0, 5)) entry.append(make('p', `小白反馈：${error}`, 'amin-notice'));
+            for (const warning of (record.warnings ?? []).slice(0, 4)) entry.append(make('p', warning, 'amin-meta'));
+            for (const change of (record.changes ?? []).slice(0, 40)) {
+                const row = make('div', '', 'amin-card amin-stack');
+                row.append(make('strong', change.path), make('p', `更新前：${change.before}`), make('p', `更新后：${change.after}`)); entry.append(row);
+            }
+            diagnosticsPanel.append(entry);
         }
     }
     function refreshPrompt() {
@@ -298,7 +325,9 @@ export function mount(target, options = {}) {
             else if (changed) { saved = clone(current); markDraft(); }
             else if(modulesChanged)renderSettings();
             context.textContent = `统一联动 · 当前聊天 · ${current.enabled ? '小白变量 2.0' : '尚未启用'} · 已选 ${moduleRows.filter(row => row.enabled).length} 个模块`;
-            renderNativeState2(); refreshPrompt(); refreshData(); renderReview(); renderSuggestions(); renderReferences(); retryPanel.replaceChildren();retryPanel.hidden=!api.dirty();
+            renderNativeState2(); renderDiagnostics(); refreshPrompt(); refreshData(); renderReview(); renderSuggestions(); renderReferences(); retryPanel.replaceChildren();retryPanel.hidden=!api.dirty();
+            budgetReportPanel.replaceChildren(); budgetReportPanel.hidden = typeof api.dataPromptReport !== 'function';
+            if (!budgetReportPanel.hidden) renderContextBudgetReport(budgetReportPanel, api.dataPromptReport(), { document });
             if (api.dirty()) retryPanel.append(make('h3', '保存尚未完成'), make('p', '已确认变更保留在当前聊天内存中。重试只保存这组结果，不再执行一次更新。', 'amin-meta'), button('重试保存整组更新', async () => { await api.retrySave(); say('此前确认的整组更新已保存。'); }, { primary: true, lock: 'busy' }));
             const status = api.status(), serviceStatus = typeof status === 'string' ? status : status?.message || '';
             if(serviceStatus!==lastServiceStatus){lastServiceStatus=serviceStatus;if(!localBusy){message='';failed=false;}}

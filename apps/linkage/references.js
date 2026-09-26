@@ -44,6 +44,9 @@ export function buildReferenceIndex(data = {}, manualLinks = []) {
     for (const entry of data.journal?.entries ?? []) {
         const key = add('journal', entry.id, entry.title);
         for (const id of entry.characterIds ?? []) link(key, 'characters', id, '关联人物');
+        for (const id of entry.locationIds ?? []) link(key, 'scene', id, '关联场景');
+        for (const id of entry.itemIds ?? []) link(key, 'inventory', id, '关联物品');
+        link(key, 'journal', entry.taskId, '关联任务');
         link(key, 'characters', entry.characterId ?? entry.knowerId, '知情人物');
         link(key, 'characters', entry.learnedFromId, '获知来源人物');
         link(key, 'journal', entry.factId, '所知事实');

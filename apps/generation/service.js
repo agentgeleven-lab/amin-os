@@ -13,7 +13,7 @@ const actions = {
     characters:['create-character','save-character','set-appearance','save-stat'],
     inventory:['create-item','save-item','create-balance','save-balance','set-condition'],
     relationships:['save'], scene:['set-time','save-scene','save-schedule'],
-    journal:['set_fact','set_knowledge','set_hook','draft_chronicle'],
+    journal:['set_fact','set_knowledge','set_hook','set_task','set_clue','draft_chronicle'],
 };
 const clone = value => structuredClone(value), same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 const empty = value => value == null || value === '' || (Array.isArray(value) && !value.length);
@@ -103,8 +103,9 @@ export function createGenerationService(getContext, { ai = getAI, collectSources
                 if(effective.length!==modules.length)warnings.push('剧情档案需要所选真实聊天楼层，本次跳过档案生成。');
                 if(!effective.length)throw Error(warnings[0]);
                 const references={characters:basis.data.characters.characters.map(({id,name})=>({id,name})),bindings:effective.includes('characters')?bindings(ctx).map(({binding,component,label})=>({binding,component,label})):[],locations:effective.includes('scene')?Object.values(basis.data.map.maps).flatMap(map=>Object.values(map.nodes).map(({id,name})=>({mapId:map.id,nodeId:id,name}))):[]};
+                if(effective.includes('journal'))Object.assign(references,{scenes:Object.values(basis.data.scene.scenes).map(({id,name})=>({id,name})),items:basis.data.inventory.items.map(({id,name})=>({id,name})),tasks:basis.data.journal.entries.filter(e=>e.kind==='task').map(({id,title})=>({id,title}))});
                 const prompt=JSON.stringify({mode,modules:effective,existing:Object.fromEntries(effective.map(id=>[id,basis.data[id]])),references,sources:sourceResult.text,provenance:sourceResult.provenance,instruction});
-                const systemPrompt=`根据用户选定来源整理资料，不续写剧情。只输出 JSON {"version":1,"changes":[{"module":"characters","action":"create-character","target":"safe_id","data":{},"reason":"来源依据"}]}。最多64项。仅处理指定模块。先人物后物品、关系、场景，先事实后记忆；使用稳定ID，不重复建立已有实体。create仅新增；supplement仅填空，不覆盖已有内容（0和false也是已有值）；update允许有依据的资料修订。不得删除、消费、转账、结算、调整配置、掷骰或凭空生成属性数值。档案必须提供所选真实sourceStart/sourceEnd；关系sources仅可用所选楼层，非聊天来源填[]并在reason说明。无适用内容输出空changes。下列协议中只允许每个模块列出的操作：\n`+effective.map(id=>`${id}: 允许 ${actions[id].join(',')}\n${adapters.find(a=>a.id===id).contract}`).join('\n');
+                const systemPrompt=`根据用户选定来源整理资料，不续写剧情。只输出 JSON {"version":1,"changes":[{"module":"characters","action":"create-character","target":"safe_id","data":{},"reason":"来源依据"}]}。最多64项。仅处理指定模块。先人物后物品、关系、场景，先事实后记忆，先任务后关联线索；任务奖励仅为说明，不自动发放；使用稳定ID，不重复建立已有实体。create仅新增；supplement仅填空，不覆盖已有内容（0和false也是已有值）；update允许有依据的资料修订。不得删除、消费、转账、结算、调整配置、掷骰或凭空生成属性数值。档案必须提供所选真实sourceStart/sourceEnd；关系sources仅可用所选楼层，非聊天来源填[]并在reason说明。无适用内容输出空changes。下列协议中只允许每个模块列出的操作：\n`+effective.map(id=>`${id}: 允许 ${actions[id].join(',')}\n${adapters.find(a=>a.id===id).contract}`).join('\n');
                 const raw=await provider.generate(`${labels[route]} · 资料生成`,{...ctx,chat:clone(ctx.chat),chatMetadata:clone(ctx.chatMetadata)},{systemPrompt:systemPrompt+'\n人物数值属性只可绑定 references.bindings 中已有字段；没有可用字段时 stats=[]，来源数值可记在 notes 供用户以后配置。',prompt},{signal:activeController.signal,snapshot,data:{request:prompt},includeEffects:false,includeJournal:false,includeScene:false,includeLinkage:false}); assertCurrent();
                 const parsed=parseUpdate(typeof raw==='string'?raw.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i,'$1'):raw);
                 current={modules:effective,mode,sources:clone(sources),provenance:clone(sourceResult.provenance),sourceText:sourceResult.text,warnings,basis,changes:parsed.changes};

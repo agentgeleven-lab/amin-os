@@ -22,7 +22,7 @@ function fixture() {
     const graph = createStoryStateGraph(store);
     let saves = 0, fullSaves = 0, nativeCalls = 0;
     const ctx = {
-        eventTypes: { MESSAGE_SWIPED: 'swiped',GENERATION_AFTER_COMMANDS:'generating',GENERATION_ENDED:'ended' }, eventSource: { on(name,fn){handlers.set(name,fn);}, removeListener(name){handlers.delete(name);} },
+        eventTypes: { CHAT_CHANGED:'chat',MESSAGE_SWIPED: 'swiped',GENERATION_AFTER_COMMANDS:'generating',GENERATION_ENDED:'ended' }, eventSource: { on(name,fn){handlers.set(name,fn);}, removeListener(name){handlers.delete(name);} },
         chatId: 'new-chat', getCurrentChatId() { return this.chatId; },
         characterId: 0, characters: [{ avatar: 'npc.png' }],
         chat: [{ name: 'NPC', mes: '开场', is_user: false }],
@@ -204,6 +204,20 @@ test('late Swipe synchronization retries indexing even when the final body and v
   const m={mes:'最终正文',swipes:['尚未同步'],swipe_id:0,swipe_info:[{extra:{}}]};f.ctx.chat.push(m);
   await f.runtime.reconcile();assert.equal(await reference(f,m),null);
   m.swipes[0]=m.mes;await f.runtime.reconcile();assert.ok(await reference(f,m));
+ }finally{f.runtime.destroy();}
+});
+
+test('runtime diagnostics compare native variable changes after generation and clear across chats', async () => {
+ const f=fixture();try{
+  await f.runtime.migrate();f.ctx.chat.push({name:'User',mes:'继续',is_user:true});await f.handlers.get('generating')('normal',{},false);
+  f.ctx.chat.push({name:'NPC',mes:'回复<state>状态栏.项目.世界.时间: 7</state>'});
+  f.ctx.chatMetadata.variables.状态栏=JSON.stringify({项目:{世界:{时间:7}}});f.handlers.get('ended')();
+  await new Promise(r=>setTimeout(r,100));
+  const rows=f.runtime.updateDiagnostics();assert.equal(rows.length,1);assert.equal(rows[0].receivedState,true);
+  assert.ok(rows[0].changes.some(row=>row.path==='状态栏.项目.世界.时间'&&row.before==='1'&&row.after==='7'));
+  assert.equal(f.nativeCalls,0);
+  f.ctx.chatId='different';assert.deepEqual(f.runtime.updateDiagnostics(),[]);
+  await f.handlers.get('chat')();assert.deepEqual(f.runtime.updateDiagnostics(),[]);
  }finally{f.runtime.destroy();}
 });
 

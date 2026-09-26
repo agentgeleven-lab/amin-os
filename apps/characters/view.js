@@ -2,6 +2,7 @@ import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { createCharactersService, getSharedCharactersService } from './service.js';
 import { createDiceService, getSharedDiceService } from '../dice/service.js';
+import { KNOWLEDGE_STATES } from '../journal/model.js';
 
 const mounted = new WeakMap();
 const componentNames = { value: '数值', current: '当前值', max: '最大值' };
@@ -262,6 +263,42 @@ export function mount(target, options = {}) {
             if (stat.check !== 'none') button(tools, `检定 ${stat.label}`, () => openCheck(character, stat), { primary: true, blocked: () => !resolved || !!dice.dirty?.() });
             else item.append(make('span', '只显示数值', 'amin-help'));
         }
+        drawOverview(panel, character);
+    }
+    function drawOverview(panel, character) {
+        if (!api.overview) return;
+        try {
+            const data = api.overview(character.id), section = card(panel, '人物关联总览');
+            section.append(make('p', '读取当前分支的原始记录；在上方关联应用中修改。', 'amin-help'));
+            const group = (title, values, describe, empty) => {
+                const details = make('details', '', 'amin-card amin-stack');
+                details.append(make('summary', `${title} · ${values.length} 项`));
+                for (const value of values) {
+                    const row = make('p', describe(value));
+                    row.setAttribute('style', 'overflow-wrap:anywhere;white-space:pre-wrap;min-width:0');
+                    details.append(row);
+                }
+                if (!values.length) details.append(make('p', empty, 'amin-empty'));
+                section.append(details);
+            };
+            group('持有物品', data.items, item => `${item.name} × ${item.quantity}${item.equipped ? ' · 已装备' : ''}${item.notes ? '\n' + item.notes : ''}`, '没有绑定给此人物的物品。');
+            group('资源与余额', data.balances, item => `${item.name}：${item.amount} ${item.unit}`, '没有绑定给此人物的资源。');
+            group('人物关系', data.relationships, item => `${item.from.name} → ${item.to.name}：${item.label || item.type}${item.strength == null ? '' : ' · 强度 ' + item.strength}${item.notes ? '\n' + item.notes : ''}`, '没有此人物的关系记录。');
+            group('已知事实与记忆', data.memories, item => `${KNOWLEDGE_STATES[item.state] ?? item.state} · ${item.fact?.title ?? item.title} · 可信度 ${item.confidence}%\n${item.belief || item.fact?.body || ''}${item.missing.length ? '\n引用提示：' + item.missing.join('；') : ''}${item.stale ? '\n来源提示：' + item.staleReason : ''}`, '没有此人物的记忆记录。');
+            const scene = card(section, '位置与日程');
+            scene.append(make('p', data.scene?.time ?? '场景暂时无法读取', 'amin-meta'));
+            scene.append(make('p', data.scene?.present ? `已确认在场：${data.scene.present.name}` : '尚未在当前场景明确登记此人物；日程不能作为实际位置。'));
+            const time = value => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+            group('个人日程（计划）', data.schedules, item => `${item.title} · ${time(item.startMinute)}–${time(item.endMinute)} · ${item.locationName}\n${!item.enabled ? '已停用' : item.due ? '当前计划时段' : '非当前时段'}${item.overlap ? ' · 日程重叠' : ''}${item.conflict ? ' · 与确认位置不符' : ''}`, '尚未登记个人日程。');
+            section.append(make('p', '能力面板目前使用文本目标，不能可靠归属到人物 ID；请在能力面板查看生效中效果。', 'amin-help'));
+            const actions = toolbar(section);
+            button(actions, '查看能力面板', async () => {
+                const openApp = options.openApp ?? globalThis.AminOS?.openApp;
+                if (!openApp) throw Error('请在 Amin OS 中打开关联应用。');
+                await openApp('effects');
+            });
+            for (const error of data.errors) section.append(make('p', `部分资料暂时无法读取：${error}`, 'amin-notice'));
+        } catch (error) { panel.append(make('p', `人物总览暂时无法读取：${error.message}`, 'amin-help')); }
     }
     function render() {
         if (disposed) return;

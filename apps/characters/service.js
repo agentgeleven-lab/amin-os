@@ -4,19 +4,33 @@ import { createOperationService, subscribeStateChanges } from '../shared/operati
 import { KEY, STATUS_PATH, readStore, readCharacters, resolveStat, bindings, validateCharacter, appendSnapshot, withStatValue } from './model.js';
 import { KEY as INVENTORY_KEY } from '../inventory/model.js';
 import { readCharacterAppearance } from './appearance.js';
+import { readCharacterOverview } from './overview.js';
+import { KEY as RELATIONSHIPS_KEY } from '../relationships/model.js';
+import { KEY as JOURNAL_KEY } from '../journal/model.js';
+import { KEY as SCENE_KEY } from '../scene/model.js';
 
 const relevantPaths = [[KEY], [...STATUS_PATH]];
+const overviewKeys = [RELATIONSHIPS_KEY, JOURNAL_KEY, SCENE_KEY];
 export function createCharactersService(getContext = () => globalThis.SillyTavern?.getContext?.(), { createId = uuid, now = () => new Date().toISOString(), poll = false } = {}) {
     const operations = createOperationService(getContext), listeners = new Set(), removers = [];
-    let disposed = false, lastScope = '', lastMetadata = null;
+    let disposed = false, lastScope = '', lastMetadata = null, lastOverview = [];
     const notify = () => { for (const callback of listeners) { try { callback(); } catch { /* One window must not interrupt another. */ } } };
     const capture = () => operations.capture(relevantPaths);
     const check = token => operations.check(token);
-    function sync() {
+    function sync(forceOverview = false) {
         if (disposed) return;
         const ctx = getContext();
         const next = JSON.stringify([ctx?.getCurrentChatId?.() ?? ctx?.chatId, ctx?.characterId, ctx?.groupId, chatRevision(ctx?.chat), ctx?.chatMetadata?.[KEY], ctx?.chatMetadata?.[INVENTORY_KEY], ctx?.chatMetadata?.variables?.状态栏]);
-        if (next !== lastScope || ctx?.chatMetadata !== lastMetadata) { lastScope = next; lastMetadata = ctx?.chatMetadata; notify(); }
+        // Canonical writes replace roots; length/tail also detect append-only host writers.
+        // Never traverse or stringify journal/scene/relationship histories on idle polls.
+        const overview = overviewKeys.flatMap(key => {
+            const root = ctx?.chatMetadata?.[key], events = root?.events, tail = events?.[events.length - 1];
+            return [root, events, events?.length, tail, tail?.id, tail?.at];
+        });
+        const overviewChanged = overview.some((value, index) => value !== lastOverview[index]);
+        if (forceOverview === true || overviewChanged || next !== lastScope || ctx?.chatMetadata !== lastMetadata) {
+            lastScope = next; lastMetadata = ctx?.chatMetadata; lastOverview = overview; notify();
+        }
     }
     function stageCharacter(input, token = capture()) {
         const ctx = check(token), state = readCharacters(ctx);
@@ -45,14 +59,19 @@ export function createCharactersService(getContext = () => globalThis.SillyTaver
         return operations.preview();
     }
     async function setStatValue(characterId, statId, value, token = capture()) { stageStatValue(characterId, statId, value, token); await operations.confirm(); return resolveStat(getContext(), characterId, statId); }
-    removers.push(operations.subscribe(notify), subscribeStateChanges(sync));
+    removers.push(operations.subscribe(notify), subscribeStateChanges((detail, metadata) => {
+        const relevant = metadata === getContext()?.chatMetadata && detail.paths?.some(path => overviewKeys.includes(path[0]));
+        sync(relevant);
+    }));
     const ctx = getContext(), source = ctx?.eventSource, types = ctx?.eventTypes ?? ctx?.event_types ?? {};
     for (const name of ['CHAT_CHANGED', 'MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_UPDATED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED']) if (types[name] && source?.on) {
-        source.on(types[name], sync); removers.push(() => source.removeListener ? source.removeListener(types[name], sync) : source.off?.(types[name], sync));
+        const refresh = () => sync(true);
+        source.on(types[name], refresh); removers.push(() => source.removeListener ? source.removeListener(types[name], refresh) : source.off?.(types[name], refresh));
     }
     const timer = poll ? setInterval(sync, 800) : null;
     sync();
     return { context: getContext, capture, check, read: () => readCharacters(getContext()), bindings: () => bindings(getContext()), resolveStat: (characterId, statId) => resolveStat(getContext(), characterId, statId), appearance: characterId => readCharacterAppearance(getContext(), characterId),
+        overview: characterId => readCharacterOverview(getContext(), characterId),
         stageCharacter, saveCharacter, stageDeleteCharacter, deleteCharacter, stageStatValue, setStatValue, sync,
         preview: operations.preview, confirm: operations.confirm, retrySave: operations.retrySave, discard: operations.discard, status: operations.status, busy: operations.busy, dirty: operations.dirty,
         subscribe(callback) { listeners.add(callback); return () => listeners.delete(callback); },

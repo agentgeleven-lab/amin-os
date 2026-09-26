@@ -448,6 +448,56 @@ export function createStoryStorage(getContext, {
         return { imported: true, roots: bundle.graph.roots.length };
     }
 
+    // Inspection is explicit and read-only: never migrates identities, restores
+    // variables, or changes a shared branch snapshot.
+    async function inspectIndex() {
+        requireAvailable();
+        const ctx = current(), marker = assertMarker(ctx);
+        if (!marker) throw failure('STORY_NOT_ENABLED', '当前聊天尚未启用外置剧情存储。');
+        const token = contextToken(ctx), saved = await loadIndex(marker);
+        const index = buildIndex(ctx.chat, chatIdentity(ctx), saved, marker.indexId).index;
+        const health = new Map();
+        async function check(id) {
+            if (!health.has(id)) {
+                try { decodeState(await graph.load(id)); health.set(id, { readable: true }); }
+                catch (error) { health.set(id, { readable: false, error: error.message }); }
+            }
+            return health.get(id);
+        }
+        await check(marker.baseStateId);
+        for (const id of indexStateIds(index)) await check(id);
+        for (const backup of marker.backups ?? []) await check(backup.stateId);
+        const rows = [];
+        for (const [floor, messageId] of Object.entries(index.order)) {
+            const row = index.messages[messageId], message = ctx.chat[Number(floor)];
+            for (const [candidateId, candidate] of Object.entries(row.candidates)) rows.push({
+                floor: Number(floor), messageId, candidateId, swipe: candidate.swipe,
+                selected: candidate.swipe === row.selected,
+                role: message.is_user ? 'user' : message.is_system ? 'system' : 'assistant',
+                stateId: candidate.stateId,
+                ...(candidate.stateId ? health.get(candidate.stateId) : { readable: null }),
+            });
+        }
+        let storage = null, storageError = null;
+        try {
+            const indices = marker.indexId ? await graph.exportClosure([marker.indexId]) : { nodes: {} };
+            const states = await graph.exportClosure([...health.keys()]);
+            const bytes = node => new TextEncoder().encode(JSON.stringify(node)).length;
+            const indexBytes = Object.values(indices.nodes).reduce((sum, node) => sum + bytes(node), 0);
+            const stateBytes = Object.entries(states.nodes).reduce((sum, [id, node]) => sum + (own(indices.nodes, id) ? 0 : bytes(node)), 0);
+            storage = { indexBytes, stateBytes, totalBytes: indexBytes + stateBytes,
+                records: new Set([...Object.keys(indices.nodes), ...Object.keys(states.nodes)]).size };
+        } catch (error) { storageError = error.message; }
+        assertCurrent(getContext, token);
+        return { chat: chatIdentity(ctx), indexed: !!saved, indexId: marker.indexId ?? null,
+            inheritedFrom: clone(index.inheritedFrom), baseStateId: marker.baseStateId,
+            baseHealth: health.get(marker.baseStateId), rows,
+            storage, storageError,
+            states: health.size, unreadableStates: [...health.values()].filter(item => !item.readable).length,
+            cleanupAvailable: false,
+            cleanupReason: '当前检查仅覆盖本聊天及其 Swipe；Amin 尚未实现覆盖全部聊天、分支和备份的引用扫描，因此暂不提供文件清理。' };
+    }
+
     function status() {
         const ctx = getContext();
         try {
@@ -464,5 +514,5 @@ export function createStoryStorage(getContext, {
         }
     }
 
-    return { enable, ensureIndex, capture, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, status };
+    return { enable, ensureIndex, capture, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, inspectIndex, status };
 }

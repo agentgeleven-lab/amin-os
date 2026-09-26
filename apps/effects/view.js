@@ -31,7 +31,7 @@ export function mount(target,options={}){
  recovery.append(node('p','效果变更已应用到当前内存，聊天存储尚未完成。重试只保存这次结果，不会重复发动、暂停或延长效果。'));
  button(recovery,'重试保存',async()=>{await api.retrySave();finish('已保存之前的效果变更');},true);
  function syncRecovery(){const dirty=!!api.dirty?.();recovery.hidden=!dirty;for(const b of page.querySelectorAll('[data-effect-mutation]'))b.disabled=dirty||b.dataset.expired==='true';}
- const tabButtons=['能力面板','能力管理','生效中','周期结算','变更记录','提示预览'].map((name,i)=>{
+ const tabButtons=['能力面板','能力管理','生效中','行动结算','周期结算','变更记录','提示预览'].map((name,i)=>{
   const b=button(tabs,name,()=>navigate(()=>{selected=name;render();}));b.id=instanceId+'-tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-controls',body.id);return b;
  });
  tabs.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();let i=tabButtons.findIndex(b=>b.textContent===selected),n=tabButtons.length;i=e.key==='Home'?0:e.key==='End'?n-1:(i+(e.key==='ArrowRight'?1:n-1))%n;navigate(()=>{selected=tabButtons[i].textContent;render();tabButtons[i].focus();});};
@@ -111,6 +111,26 @@ export function mount(target,options={}){
   for(const row of preview.rows){const section=node('section',null,'amin-card');section.append(node('h3',row.name+' · '+row.target),node('p',`${row.ticks} 个周期${row.stacks>1?' × '+row.stacks+' 层':''}`));for(const change of row.changes)section.append(node('p',`${change.label}：${change.before} → ${change.after}`));c.append(section);}
   const actions=toolbar(c);operationButton(actions,'确认结算',async()=>{await api.confirmSettlement();finish('周期结算已保存，重复预览不会再次扣除');},true);button(actions,'取消结算',()=>{api.discardSettlement?.();render();});
  }
+ function actionForm(){
+  const c=card('行动结算'),resources=api.actionResources?.();
+  c.append(node('p','设置一次能力使用、治疗、伤害或物品消耗。预览后统一确认；不会自动发送消息，也不会自动判断完整游戏规则。','amin-meta'));
+  if(!resources){c.append(node('p','请刷新插件以使用行动结算。'));return;}
+  const previous=api.actionResult?.();if(previous){const result=card('最近已结算行动',c);result.append(node('pre',previous.text));button(toolbar(result),'复制最近结算结果',async()=>{if(api.actionResult?.()?.text!==previous.text)throw Error('聊天或回复版本已变化，请重新查看行动结果');await navigator.clipboard.writeText(previous.text);say('已复制固定结果');});}
+  openForm();const token=api.capture(),fields=grid(c),skills=api.read().skills;
+  const skill=select(fields,'参考能力',[['','自定义行动'],...skills.map(s=>[s.id,s.name])]);
+  const name=field(fields,'行动名称','使用能力');skill.onchange=()=>{if(skill.value)name.value=skills.find(s=>s.id===skill.value).name;};
+  const cost=select(fields,'消耗资源',[['','无消耗'],...resources.costs.map((r,i)=>[String(i),`${r.label} · ${r.value}`])]),amount=field(fields,'消耗数量','1');amount.type='number';amount.min='0';amount.step='any';
+  const targetStat=select(fields,'目标属性',[['','不改变属性'],...resources.stats.map((r,i)=>[String(i),`${r.label} · ${r.value}`])]),delta=field(fields,'目标增减（治疗填正数，伤害填负数）','1');delta.type='number';delta.step='any';
+  const minutes=field(fields,'耗时（分钟，0 不推进）','0');minutes.type='number';minutes.min='0';minutes.step='1';
+  const roll=select(fields,'引用已有骰点',[['','不引用'],...(resources.rolls??[]).map(r=>[r.id,r.text])]);
+  c.append(node('p','属性来自人物卡已绑定的世界状态数值；请先在人物卡绑定生命、魔力等字段。超出进度上限会拒绝结算，请调整数值。','amin-meta'));
+  operationButton(toolbar(c),'预览行动结算',()=>{
+   api.check(token);const plan=api.stageAction({name:name.value,cost:cost.value===''?null:resources.costs[Number(cost.value)],costAmount:Number(amount.value),target:targetStat.value===''?null:resources.stats[Number(targetStat.value)],delta:Number(delta.value),minutes:Number(minutes.value),rollId:roll.value});
+   clearBody();openForm();const preview=card('确认行动：'+plan.name);for(const row of plan.rows)preview.append(node('p',row));
+   const actions=toolbar(preview);operationButton(actions,'确认行动结算',async()=>{await api.confirmAction();formOpen=false;clearBody();const done=card('行动已结算');done.append(node('pre',plan.text));button(toolbar(done),'复制固定结果',async()=>{if(api.actionResult?.()?.text!==plan.text)throw Error('聊天或回复版本已变化，请重新查看行动结果');await navigator.clipboard.writeText(plan.text);say('已复制，可粘贴到聊天草稿');});button(toolbar(done),'返回行动结算',render);say('行动已保存；复制结果不会再次扣除资源');},true);
+   button(actions,'取消行动结算',()=>{api.discardSettlement?.();render();});
+  },true);
+ }
  function render(){
   formOpen=false;formDirty=false;
   body.onpointerdown=body.onpointermove=body.onpointerup=body.onpointercancel=null;
@@ -141,6 +161,7 @@ export function mount(target,options={}){
     button(toolbar(body),'建立生效记录',()=>effectForm(),true).disabled=!store.skills.length;
     const effects=api.timedEffects?.()??activeEffects(store,chat);if(!effects.length)body.append(node('p',store.skills.length?'当前分支没有持续效果。选择能力并确认发动后，会显示在这里。':'先在能力管理中添加能力，再建立生效记录。','amin-empty'));
     for(const e of effects){const c=card(e.skill.name+' · '+effectTarget(e));c.append(node('p',timingLabel(e),'amin-meta'),node('p','持有者：'+e.holder+' ｜ 层面：'+e.scope),node('p','当前指令：'+(e.command||'未指定')),node('p','持续条件：'+e.condition));appendTiming(c,e);appendRules(c,e);const actions=toolbar(c);button(actions,'调整 / 转让 / 时长',()=>effectForm(e));const pause=operationButton(actions,e.paused?'恢复效果':'暂停效果',async()=>{const token=api.capture();await mutate(token,'pause',{id:e.id,paused:!e.paused});finish(e.paused?'已恢复效果':'已暂停效果');});pause.dataset.expired=String(e.timingStatus?.state==='expired');pause.disabled=!!api.dirty?.()||e.timingStatus?.state==='expired';if(e.timingStatus?.state==='expired')c.append(node('p','效果已到期；可调整时长重新计时，或解除记录。','amin-meta'));button(actions,'分割',()=>splitForm(e));button(actions,'解除',()=>endForm(e));operationButton(actions,'删除生效记录',()=>deleteEffect(e),'amin-danger');}
+   }else if(selected==='行动结算'){actionForm();
    }else if(selected==='周期结算'){
     const forecast=api.periodicPreview?.();const intro=card('周期效果与资源结算');intro.append(node('p','推进游戏时间只产生待结算周期。请先预览生命、资源与物品变更，再确认整组保存。读取剧情提示不会执行伤害或消耗。','amin-meta'));
     if(!forecast)intro.append(node('p','当前服务暂不支持周期结算，请刷新扩展。','amin-empty'));

@@ -24,6 +24,22 @@ async function toggle(root, label, checked) { const node = find(root, label, 'in
 async function input(root, label, value, tag = 'textarea') { const node = find(root, label, tag); assert.ok(node, 'missing field: ' + label); node.value = value; await node.dispatch(tag === 'select' ? 'change' : 'input'); return node; }
 const notice = root => walk(root).find(node => node.className === 'amin-notice')?.textContent;
 
+test('session update records render text safely and clear without triggering execution', async () => {
+    const f = fixture();
+    let records = [{ index: 4, swipe: 1, source: 'generation', receivedState: true, outcome: 'native-error', errors: ['字段不存在'], warnings: [], changes: [{ path: '状态栏.hp', before: '10', after: '<script>7</script>' }] }];
+    f.api.updateDiagnostics = () => records;
+    f.api.clearUpdateDiagnostics = () => { records = []; };
+    try {
+        f.nativeStatus({ ready: true });
+        assert.match(f.root.textContent, /第 5 楼 · Swipe 2 · 小白报告更新错误/);
+        assert.match(f.root.textContent, /更新前：10/); assert.match(f.root.textContent, /更新后：<script>7<\/script>/);
+        assert.equal(walk(f.root).some(node => node.tagName === 'SCRIPT'), false);
+        await click(f.root, '清空更新记录');
+        assert.match(f.root.textContent, /尚无本次运行的更新记录/);
+        assert.equal(f.calls.includes('confirm'), false);
+    } finally { f.view.dispose(); }
+});
+
 test('stale story references require inspection and explicit confirmation before rebinding', async () => {
     const f = fixture({ nativeMigrated: true });
     const plan = { repairs: [{ index: 10, stateId: 'original-state' }], token: 'preview-token' };

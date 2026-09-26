@@ -1,4 +1,6 @@
 import { getReference } from '../shared/story-message-refs.js';
+import { performanceDiagnostics } from '../shared/performance-diagnostics.js';
+import { createUpdateDiagnostics } from './update-diagnostics.js';
 import { migrateState2, projectState2, manualState2Patches, ROOTS, MIGRATION_KEY, nativeState2Status as storageStatus, prepareState2ManualWrite as prepareManual } from './storage.js';
 import { restoreNativeState2ToFloor } from './native-bridge.js';
 import { isChatReady } from '../shared/chat-lifecycle.js';
@@ -44,6 +46,25 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     let disposed = false, projecting = false, migrating = false, lastMessage = '', timer = null, lastErrors = null, restoreError = '';
     let activeMetadata = null, activeIdentity = null, restoring = false, restoreTask = null, restoreFailed = false, settled = false, epoch = 0, cached = null, eventTimer = null;
     const subscriptions = [], operation = createOperationService(getContext);
+    const updates = createUpdateDiagnostics({roots:[...Object.values(ROOTS),'状态栏','势力资料']});
+    let updateRound = null, updateTimer = null, updateOwner = null;
+    function clearUpdates() { clearTimeout(updateTimer); updateRound = null; updateOwner = null; updates.clear(); }
+    function scheduleUpdateRecord() {
+        if (!updateRound?.ended || streaming()) return;
+        clearTimeout(updateTimer);
+        updateTimer = setTimeout(() => {
+            const ctx = getContext(), round = updateRound;
+            if (!round || disposed || streaming()) return;
+            if (ctx?.chatMetadata !== round.metadata || chatIdentity(ctx) !== round.identity) { clearUpdates(); return; }
+            const index = ctx.chat.length - 1, message = ctx.chat[index];
+            if (!message || message.is_user || message.is_system) return;
+            updateRound = null;
+            updates.finish({variables:ctx.chatMetadata.variables,index,swipe:message.swipe_id??0,
+                receivedState:/<state>[\s\S]*<\/state>/.test(message.mes??''),errors:ctx.chatMetadata.variables?.LWB_STATE_ERRORS??[],source:round.source});
+            // Snapshot at this point in time; no <state> execution or metadata write.
+            report(lastMessage);
+        }, 60);
+    }
     const files = createStoryFileStore({ getHostWindow: () => host.window ?? host });
     const story = storyStorage ?? createStoryStorage(getContext, { graph: createStoryStateGraph(files), available: () => files.available(), host, document });
     let archiveTask = null, archiveAgain = false, observedNative = null, activeGeneration = null, generationBaseline = null;
@@ -90,6 +111,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         const ctx = getContext();
         if (!isChatReady(ctx) || !ctx?.chatMetadata || !storageStatus(ctx).migrated || disposed) return;
         if (sameChat(ctx) && restoring) return restoreTask;
+        if (!sameChat(ctx)) clearUpdates();
         activeMetadata = ctx.chatMetadata; activeIdentity = chatIdentity(ctx);
         settled = false; restoreFailed = false; restoreError = ''; cached = null;
         const lock = metadataWriteStatus(getContext);
@@ -98,6 +120,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         const ticket = ++epoch;
         say('正在通过小白变量 2.0 恢复当前分支楼层…');
         restoreTask = (async () => {
+            const measured = performanceDiagnostics.begin('restore'); let failed = false;
             let release = () => {};
             try {
                 if (!available()) throw Error('请启用小白 X 变量管理 2.0。');
@@ -120,8 +143,10 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
                 try { publishExternalMetadataChange(getContext, [['variables','状态栏'], ['variables','势力资料']]); }
                 finally { projecting = false; }
             } catch (error) {
+                failed = true;
                 if (ticket === epoch && sameChat(getContext())) { restoreFailed = true; restoreError = error.message; say('楼层变量恢复未完成：' + error.message); }
             } finally {
+                measured({failed});
                 release();
                 if (ticket === epoch) restoring = false;
             }
@@ -240,20 +265,29 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
             const result = await archive();
             if (result?.error) throw result.error;
         }
+        if (['normal','swipe','regenerate','continue'].includes(type)) {
+            const ctx = getContext(); clearTimeout(updateTimer);
+            updateRound = { metadata:ctx.chatMetadata, identity:chatIdentity(ctx), source:type };
+            updateOwner = { metadata:ctx.chatMetadata, identity:chatIdentity(ctx) };
+            updates.begin({variables:ctx.chatMetadata.variables,source:type});
+        }
     }
     function collectReply(index) {
         const text=getContext()?.chat?.[index]?.mes??'';
         sync();
         const errors=getContext()?.chatMetadata?.variables?.LWB_STATE_ERRORS;
         const message=errors ? '小白变量 2.0 反馈：'+String(errors) : /<state>[\s\S]*<\/state>/.test(text) ? '已检测到 <state>；由小白变量 2.0 执行，Amin 不重复执行。' : '本轮回复没有原生 <state> 更新块。';
-        say(message);return {outcome:'native',message};
+        if (updateRound) updateRound.ended=true;
+        scheduleUpdateRecord();say(message);return {outcome:'native',message};
     }
     const source=getContext()?.eventSource, events=getContext()?.eventTypes??getContext()?.event_types??{};
     for(const name of ['CHAT_CHANGED','MESSAGE_SENT','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_DELETED','GENERATION_ENDED','GENERATION_STOPPED'])if(source?.on&&events[name]){
         const fn=(index)=>{
             cached = null;
-            if (name === 'CHAT_CHANGED') {activeGeneration=null;generationBaseline=null;return restoreChat();}
+            if (name === 'CHAT_CHANGED') {clearUpdates();activeGeneration=null;generationBaseline=null;return restoreChat();}
             if (['GENERATION_ENDED','GENERATION_STOPPED'].includes(name)) activeGeneration=null;
+            if (name === 'GENERATION_ENDED') { if(updateRound)updateRound.ended=true; scheduleUpdateRecord(); }
+            if (name === 'GENERATION_STOPPED') { clearTimeout(updateTimer); updateRound=null; }
             if (streaming() && ['MESSAGE_UPDATED','MESSAGE_RECEIVED'].includes(name)) return;
             // TT emits MESSAGE_SWIPED before Generate('swipe') when selecting
             // the empty slot after the saved candidates. It has no state yet.
@@ -298,18 +332,21 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     }
     const jq=host.jQuery??host.$;
     const nativeEvent='xiaobaix:variables:stateAtomsGenerated.aminState2';
-    const nativeChanged = () => { sync(); void archive(); };
+    const nativeChanged = () => { sync(); void archive(); scheduleUpdateRecord(); };
     if(typeof jq==='function'&&document)jq(document).on(nativeEvent,nativeChanged);
     // LWB restoration has no stable public completion event in supported versions.
     // A cheap periodic reconciliation also covers variable-panel edits and delayed replay.
     function reconcile() {
         sync();
+        if (updateRound?.ended) scheduleUpdateRecord();
         // Some LWB versions signal before applying variables. Reconcile a late
         // native write once; unchanged reads and unchanged failures never save.
         if (external() && ready() && !sameSignature(observedNative, signature(getContext()))) return archive();
     }
     if(interval>0){timer=setInterval(reconcile,interval);timer.unref?.();}
     return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),ready:ready(),restoring:sameChat(getContext())&&restoring,restoreError:sameChat(getContext())?restoreError:'',message:lastMessage||nativeState2Status(getContext()).message}),
+        updateDiagnostics:()=>updateOwner?.metadata===getContext()?.chatMetadata&&updateOwner.identity===chatIdentity(getContext())?updates.records():[],clearUpdateDiagnostics(){clearUpdates();report(lastMessage);},
+        inspectStoryIndex:()=>story.inspectIndex(),
         inspectStoryReferences: () => story.inspectReferences(),
         async repairStoryReferences(plan) {
             if (streaming()) throw Error('请等待生成结束再修复引用。');
@@ -356,7 +393,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
             finally { release(); sync(); }
         },
         async retrySave(){return operation.retrySave();},
-        destroy(){disposed=true;epoch++;clearInterval(timer);clearTimeout(eventTimer);removeSavePreparation();removeExpansion();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,nativeChanged);},
+        destroy(){disposed=true;epoch++;clearUpdates();clearInterval(timer);clearTimeout(eventTimer);removeSavePreparation();removeExpansion();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,nativeChanged);},
     };
 }
 export function initializeState2(getContext = context, options = {}) { return shared ??= createState2Runtime(getContext,options); }

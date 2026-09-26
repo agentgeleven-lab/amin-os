@@ -36,6 +36,12 @@ function fixture(){
  return {ctx,api,target,view,setClock,fail:value=>fail=value,saves:()=>saves,close(){view.dispose();api.dispose();}};
 }
 
+test('action page previews and confirms elapsed time without invoking generation',()=>withDocument(async()=>{
+ const f=fixture();await click(f.target,'行动结算');edit(f.target,'行动名称','休息');edit(f.target,'耗时（分钟，0 不推进）','10');
+ await click(f.target,'预览行动结算');assert.match(f.target.textContent,/剧情时间推进 10 分钟/);assert.equal(f.saves(),0);
+ await click(f.target,'确认行动结算');assert.equal(f.saves(),1);assert.match(f.target.textContent,/行动已结算/);assert.ok(find(f.target,'复制固定结果'));f.close();
+}));
+
 test('duration units are exact integers and reject ambiguous or oversized durations',()=>{
  assert.equal(durationInMinutes('2','hours'),120);assert.equal(durationInMinutes('3','days'),4320);
  for(const [amount,unit]of [['','minutes'],['1.5','hours'],['-1','days'],['1','rounds'],['5256001','minutes']])assert.throws(()=>durationInMinutes(amount,unit));

@@ -14,6 +14,19 @@ function setup(initial=[person,item]) {
     return {ctx,api,calls,get saves(){return saves;},set fail(v){fail=v;},set changes(v){changes=v;},set source(v){sourceText=v;},set callback(v){callback=v;}};
 }
 const options={modules:['characters','inventory'],mode:'create',sources:{includeChat:true,start:0,end:0}};
+
+test('journal AI generation accepts linked tasks and clues without awarding rewards', async () => {
+    const t=setup([
+        change('journal','set_task','task-one',{title:'调查信件',body:'寻找寄信人',goal:'确认寄信人',reward:'一瓶药水',sourceStart:0,sourceEnd:0}),
+        change('journal','set_clue','clue-one',{title:'署名',body:'信尾有署名',taskId:'task-one',source:'所选楼层',confidence:50,sourceStart:0,sourceEnd:0}),
+    ]);
+    try {
+        const draft=await t.api.generate({...options,modules:['journal']});t.api.stage(draft.changes);await t.api.confirm();
+        assert.equal(t.saves,1);assert.equal(inventory.read(t.ctx).items.length,0);
+        const snapshots=t.ctx.chatMetadata.amin_os_journal_v1.events;
+        assert.ok(snapshots.length>=2);
+    } finally { t.api.dispose(); }
+});
 test('joint generation and preview stay read-only then commit once with master off',async()=>{
     const t=setup();const draft=await t.api.generate(options);assert.deepEqual(t.ctx.chatMetadata,{});assert.equal(t.saves,0);
     t.api.stage(draft.changes);assert.deepEqual(t.ctx.chatMetadata,{});await t.api.confirm();

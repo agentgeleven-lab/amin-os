@@ -5,7 +5,7 @@ import { checkpointState } from '../status/state-checkpoint.js';
 import { adapters as allAdapters } from './registry.js';
 import { KEY, MODULES, readLinkageState, readLinkageSettings, validateLinkageState, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
 import { parseUpdate, hasUpdate } from './protocol.js';
-import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules } from './prompt.js';
+import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules, buildDataPromptReport } from './prompt.js';
 import { buildReferenceIndex } from './references.js';
 
 const clone = value => structuredClone(value), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -171,13 +171,15 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     const unsubscribeState = subscribeStateChanges((_event, metadata) => { if (metadata === getContext()?.chatMetadata) notify(); });
     return {
         nativeState2Status:()=>getState2Runtime()?.status()??nativeState2Status(context()),
+        updateDiagnostics:()=>getState2Runtime()?.updateDiagnostics()??[],
+        clearUpdateDiagnostics:()=>getState2Runtime()?.clearUpdateDiagnostics(),
         inspectStoryReferences:()=>getState2Runtime().inspectStoryReferences(),
         repairStoryReferences:plan=>getState2Runtime().repairStoryReferences(plan),
         retryState2Restore:async()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量运行时尚未初始化，请刷新插件。');await runtime.restoreChat();const status=runtime.status();if(!runtime.ready())throw Error(status.restoreError||status.message);return status;},
         migrateState2:()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量 2.0 运行时尚未初始化，请刷新插件。');return runtime.migrate();},
         settings:()=>readLinkageSettings(context()), saveSettings,
         modules:()=>{const ctx=context();return adapters.map(a=>({id:a.id,label:a.label,available:moduleAvailable(ctx,a.id),...modulePolicy(ctx,a.id)}));},
-        prompt:()=>buildUpdateRules(context()), dataPrompt:()=>buildDataPrompt(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),
+        prompt:()=>buildUpdateRules(context()), dataPrompt:()=>buildDataPrompt(context()), dataPromptReport:()=>buildDataPromptReport(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),
         saveLinks(links){
             const ctx=context(),known=new Set(buildReferenceIndex(rawData(ctx)).entities.map(item=>item.id)),old=readLinkageState(ctx).links;
             for(const link of links)if(!old.some(value=>same(value,link))&&(!known.has(link.from)||!known.has(link.to)))throw Error('新的手动关联必须选择当前存在的条目。');

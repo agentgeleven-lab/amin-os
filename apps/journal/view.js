@@ -1,13 +1,14 @@
 import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
-import { STATUSES, KINDS, TRUTHS, KNOWLEDGE_STATES, change, changeWithContext, compile, inspectEntries, filterEntries, sourceFromRange, exportRecords, parseImport,
+import { STATUSES, TASK_STATUSES, CLUE_STATUSES, KINDS, TRUTHS, KNOWLEDGE_STATES, change, changeWithContext, compile, inspectEntries, filterEntries, sourceFromRange, exportRecords, parseImport,
     parsePriorImport, memoryEntries, autoSettings, configureAuto, dueRanges, currentDrafts, resolveAutoDraft } from './model.js';
 import { createJournal, getSharedService } from './service.js';
 import { readCurrentScene, formatGameTime } from '../scene/model.js';
+import { readInventory } from '../inventory/model.js';
 import { readCharacters } from '../characters/model.js';
 
 const mounted = new WeakMap();
-const tabNames = { hook: '伏笔', chronicle: '编年史', memory: '事实与记忆', auto: '自动整理', prior: '前作参考', references: '引用预览', transfer: '导入 / 导出' };
+const tabNames = { task: '任务', clue: '线索', hook: '伏笔', chronicle: '编年史', memory: '事实与记忆', auto: '自动整理', prior: '前作参考', references: '引用预览', transfer: '导入 / 导出' };
 
 export function mount(target, options = {}) {
     if (mounted.has(target)) return mounted.get(target);
@@ -110,16 +111,42 @@ export function mount(target, options = {}) {
         const initialTimeText = editable ? entry.gameTimeText : entry?.gameTimeText || time.label;
         const state = { token, id: editable ? entry.id : uuid(), dirty: false, revision: 0, valid: true };
         form = state; body.replaceChildren();
-        const card = section(`${editable ? '编辑' : '新增'}${kind === 'hook' ? '伏笔' : '编年史'}`), fields = grid(card);
+        const card = section(`${editable ? '编辑' : '新增'}${KINDS[kind]}`), fields = grid(card);
         const title = field(fields, '标题', entry?.title ?? ''); title.maxLength = 120;
         const gameTime = field(fields, '剧情时间（可选）', initialTimeText); gameTime.maxLength = 160;
         const actors = field(fields, '关联人物（逗号分隔，可选）', entry?.actors?.join('，') ?? '');
-        let hookStatus, remindAfter;
+        let hookStatus, remindAfter, recordStatus, goal, progress, deadline, reward, clueSource, confidence, task, links;
+        if (['task','clue'].includes(kind)) {
+            recordStatus = select(fields, '状态', Object.entries(kind === 'task' ? TASK_STATUSES : CLUE_STATUSES), entry?.status ?? (kind === 'task' ? 'open' : 'unverified'));
+            links = Object.fromEntries([['characterIds','关联人物 ID'],['locationIds','关联地点 ID'],['itemIds','关联物品 ID']].map(([key,label]) => [key, field(fields, label + '（逗号分隔）', entry?.[key]?.join(', ') ?? '')]));
+            const catalogs = { characterIds: readCharacters(ctx).characters, locationIds: Object.values(readCurrentScene(ctx).scenes), itemIds: readInventory(ctx).items };
+            for (const [key,label] of [['characterIds','人物'],['locationIds','地点'],['itemIds','物品']]) {
+                const picker = select(fields, '选择关联' + label, [['','请选择'], ...(catalogs[key] ?? []).map(item => [item.id, item.name || item.title || item.id])]);
+                button(fields, '添加关联' + label, () => {
+                    if (!picker.value) return;
+                    const ids = links[key].value.split(/[,，、\n]/).map(value => value.trim()).filter(Boolean);
+                    links[key].value = [...new Set([...ids, picker.value])].join(', '); touch();
+                });
+            }
+            if (kind === 'task') {
+                goal = field(fields, '任务目标', entry?.goal ?? '', true);
+                progress = field(fields, '进度（0–100）', entry?.progress ?? 0); progress.type = 'number'; progress.min = 0; progress.max = 100;
+                deadline = field(fields, '期限（可选）', entry?.deadline ?? '');
+                reward = field(fields, '奖励说明（可选）', entry?.reward ?? '', true);
+            } else {
+                clueSource = field(fields, '线索来源', entry?.source ?? '');
+                confidence = field(fields, '可信程度（0–100）', entry?.confidence ?? 50); confidence.type = 'number'; confidence.min = 0; confidence.max = 100;
+                const choices = [['','未关联任务'], ...inspectEntries(api.read(), chat).filter(item => item.current && item.kind === 'task').map(item => [item.id,item.title])];
+                if (entry?.taskId && !choices.some(([id]) => id === entry.taskId)) choices.push([entry.taskId, '原任务已缺失 · ' + entry.taskId]);
+                task = select(fields, '关联任务', choices, entry?.taskId ?? '');
+            }
+            card.append(make('p', '编号用于关联现有资料。进度与确认程度仅作记录；保存不会自动完成任务、发放奖励或更改背包。', 'amin-help'));
+        }
         if (kind === 'hook') {
             hookStatus = select(fields, '伏笔状态', Object.entries(STATUSES), editable ? entry.status : 'open');
             remindAfter = field(fields, '经过多少楼层后提醒（可选）', entry?.remindAfter ?? ''); remindAfter.type = 'number'; remindAfter.min = 1; remindAfter.max = 100000; remindAfter.step = 1;
         }
-        const bodyInput = field(fields, kind === 'hook' ? '伏笔内容' : '编年史正文', entry?.body ?? '', true); bodyInput.maxLength = 60000;
+        const bodyInput = field(fields, kind === 'hook' ? '伏笔内容' : kind === 'chronicle' ? '编年史正文' : '内容说明', entry?.body ?? '', true); bodyInput.maxLength = 60000;
         const sourceCard = section('绑定来源', card);
         sourceCard.append(make('p', `目前加载 ${chat.length} 个楼层，楼层号从 1 开始。来源正文会随保存一起留档。`, 'amin-help'));
         const bind = checkbox(sourceCard, '绑定当前聊天的来源楼层', editable ? !!entry.sources : chat.length > 0); bind.disabled = chat.length === 0;
@@ -160,13 +187,16 @@ export function mount(target, options = {}) {
             if (!chat.length) generate.disabled = true;
         }
         const savebar = toolbar(card, 'amin-savebar');
-        const save = button(savebar, kind === 'hook' ? '保存伏笔' : '保存编年史', async () => {
+        const save = button(savebar, '保存' + KINDS[kind], async () => {
             if (controller) throw Error('请先完成或取消生成');
             if (!state.valid) throw Error('来源已变化，请取消编辑后重新打开');
             const context = api.check(token), values = bind.checked ? rangeValues() : null;
             const record = { id: state.id, kind, title: title.value, body: bodyInput.value, actors: actors.value.split(/[,，、\n]/).map(value => value.trim()).filter(Boolean),
                 enabled: reference.checked, sources: values ? sourceFromRange(context.chat, values.start, values.end) : null,
                 sourceNote: sourceNote.value, gameTime: gameTime.value === initialTimeText ? savedClock : null, gameTimeText: gameTime.value,
+                ...(['task','clue'].includes(kind) ? { status: recordStatus.value, ...Object.fromEntries(Object.entries(links).map(([key,input]) => [key,input.value.split(/[,，、\n]/).map(value => value.trim()).filter(Boolean)])) } : {}),
+                ...(kind === 'task' ? { goal: goal.value, progress: Number(progress.value), deadline: deadline.value, reward: reward.value } : {}),
+                ...(kind === 'clue' ? { source: clueSource.value, confidence: Number(confidence.value), taskId: task.value || null } : {}),
                 ...(kind === 'hook' ? { status: hookStatus.value, remindAfter: remindAfter.value } : {}) };
             await api.save(token, store => change(store, context.chat, editable ? 'update' : 'create', record, token.operationId));
             if (form === state) finish('已保存' + (record.enabled ? '并启用引用。' : '，引用保持关闭。'));
@@ -186,11 +216,12 @@ export function mount(target, options = {}) {
 
     function drawEntries() {
         const ctx = api.context(), store = api.read(), entries = inspectEntries(store, ctx?.chat ?? []), tools = toolbar(body);
-        button(tools, selected === 'hook' ? '新增伏笔' : '新增编年史', () => openForm(), true);
+        button(tools, '新增' + KINDS[selected], () => openForm(), true);
         button(tools, '刷新', render);
         const controls = grid(body), query = field(controls, '搜索标题、正文或人物', filters.query); query.type = 'search';
         const scope = select(controls, '显示范围', [['current', '当前分支'], ['inactive', '来源变化 / 其他分支'], ['all', '全部保存记录']], filters.scope);
         let status, due;
+        if (['task','clue'].includes(selected)) status = select(controls, '状态筛选', [['','全部状态'], ...Object.entries(selected === 'task' ? TASK_STATUSES : CLUE_STATUSES)], filters.status);
         if (selected === 'hook') {
             status = select(controls, '状态筛选', [['', '全部状态'], ...Object.entries(STATUSES)], filters.status);
             due = checkbox(controls, '只看已到提醒间隔的伏笔', filters.dueOnly);
@@ -198,11 +229,14 @@ export function mount(target, options = {}) {
         const list = make('div', '', 'amin-stack'); body.append(list);
         function drawList() {
             list.replaceChildren(); const matching = filterEntries(entries, { ...filters, kind: selected });
-            if (!matching.length) { list.append(make('p', entries.some(entry => entry.kind === selected) ? '没有匹配条目，试试调整筛选条件。' : selected === 'hook' ? '还没有伏笔。记下一个线索，或先选择它的来源楼层。' : '还没有编年史。选定一段对话后，可以手工记录或让 AI 起草摘要。', 'amin-empty')); return; }
+            if (!matching.length) { list.append(make('p', entries.some(entry => entry.kind === selected) ? '没有匹配条目，试试调整筛选条件。' : selected === 'hook' ? '还没有伏笔。记下一个线索，或先选择它的来源楼层。' : selected === 'chronicle' ? '还没有编年史。选定一段对话后，可以手工记录或让 AI 起草摘要。' : `还没有${KINDS[selected]}，点击上方新增。`, 'amin-empty')); return; }
             for (const entry of [...matching].reverse()) {
-                const card = section(entry.title, list), labels = [entry.kind === 'hook' ? STATUSES[entry.status] : '已保存', entry.current ? '当前分支' : '原分支记录', entry.enabled && !entry.stale ? '引用已启用' : '不参与引用'];
+                const card = section(entry.title, list), labels = [entry.kind === 'hook' ? STATUSES[entry.status] : entry.kind === 'task' ? TASK_STATUSES[entry.status] : entry.kind === 'clue' ? CLUE_STATUSES[entry.status] : '已保存', entry.current ? '当前分支' : '原分支记录', entry.enabled && !entry.stale ? '引用已启用' : '不参与引用'];
                 if (entry.due) labels.push('已到提醒间隔'); if (entry.gameTimeText) labels.push(entry.gameTimeText);
                 card.append(make('p', labels.join(' · '), 'amin-meta'), make('pre', entry.body));
+                if (entry.kind === 'task') card.append(make('p', `目标：${entry.goal} · 进度：${entry.progress}%`, 'amin-meta'), make('p', `期限：${entry.deadline || '未设定'} · 奖励说明：${entry.reward || '未设定'}`, 'amin-meta'));
+                if (entry.kind === 'clue') card.append(make('p', `来源：${entry.source || '未注明'} · 可信程度：${entry.confidence}% · 关联任务：${entries.find(item => item.current && item.kind === 'task' && item.id === entry.taskId)?.title ?? (entry.taskId ? '已缺失 (' + entry.taskId + ')' : '无')}`, 'amin-meta'));
+                if (['task','clue'].includes(entry.kind)) for (const [key,label] of [['characterIds','人物'],['locationIds','地点'],['itemIds','物品']]) if (entry[key]?.length) card.append(make('p', `关联${label}编号：${entry[key].join('、')}`, 'amin-meta'));
                 if (entry.actors.length) card.append(make('p', '关联人物：' + entry.actors.join('、'), 'amin-meta'));
                 if (entry.stale) card.append(make('p', entry.staleReason + '；不会附加到生成中。', 'amin-notice'));
                 showSources(card, entry); const actions = toolbar(card);

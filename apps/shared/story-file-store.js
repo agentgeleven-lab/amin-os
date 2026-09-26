@@ -3,6 +3,7 @@
 // deliberately has no chat-metadata or browser-storage fallback: a reference
 // must never be saved unless the pointed-to record was durably written.
 
+import { performanceDiagnostics } from './performance-diagnostics.js';
 export const STORY_STORE_NAMESPACE = 'amin-os';
 export const STORY_STORE_TABLE = 'story-v2';
 
@@ -109,9 +110,12 @@ export function createStoryFileStore({ getHostWindow = () => globalThis.window }
 
   async function read(store, id) {
     let result;
+    const finished = performanceDiagnostics.begin('fileRead');
     try {
       result = await store.tryGetJson({ namespace: STORY_STORE_NAMESPACE, table: STORY_STORE_TABLE, key: id });
+      finished();
     } catch (cause) {
+      finished({failed:true});
       throw new StoryFileStoreError('STORY_READ_FAILED', `无法读取剧情状态 ${id}。`, { cause });
     }
     if (!result || typeof result.found !== 'boolean' || (result.found && !Object.hasOwn(result, 'value'))) {
@@ -156,9 +160,12 @@ export function createStoryFileStore({ getHostWindow = () => globalThis.window }
         }
         return;
       }
+      const finished = performanceDiagnostics.begin('fileWrite');
       try {
         await store.setJson({ namespace: STORY_STORE_NAMESPACE, table: STORY_STORE_TABLE, key: target.key, value: snapshot });
+        finished({bytes:performanceDiagnostics.enabled() ? new TextEncoder().encode(signature).length : 0});
       } catch (cause) {
+        finished({failed:true});
         throw new StoryFileStoreError('STORY_WRITE_FAILED', `无法保存剧情状态 ${target.id}。`, { cause });
       }
       const saved = await read(store, target.key);

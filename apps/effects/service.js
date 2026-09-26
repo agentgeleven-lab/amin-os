@@ -1,3 +1,4 @@
+import {actionResources,buildActionSettlement} from '../shared/action-settlement.js';
 import {KEY,readStore,anchor,compile,change,splitEffect,timedEffects,contextExpiryPreview,currentPrompt} from './model.js';
 import {LIBRARY_KEY,mergeLibrary,libraryStamp} from './library.js';
 import {KEY as SCENE_KEY,readCurrentScene} from '../scene/model.js';
@@ -9,7 +10,10 @@ import {buildSettlement,periodicPreview,SETTLEMENT_PATHS,MANUAL_SETTLEMENT_PATHS
 import {prepareState2ManualWrite} from '../state2/runtime.js';
 export const PROMPT_KEY='amin-os-persistent-effects';
 export function createEffects(getContext){
- let busy=false,message='尚未发送提醒';const listeners=new Set(),operations=createOperationService(getContext);
+ let pendingAction=null,actionResult=null;let busy=false,message='尚未发送提醒';const listeners=new Set(),operations=createOperationService(getContext);
+ const actionScope=()=>{const c=getContext();return {metadata:c?.chatMetadata,identity:chatIdentity(c),path:JSON.stringify(anchor(c?.chat))};};
+ const matchesAction=record=>{if(!record)return false;const current=actionScope();return record.scope.metadata===current.metadata&&record.scope.identity===current.identity&&record.scope.path===current.path;};
+ const currentActionResult=()=>matchesAction(actionResult)?structuredClone(actionResult.plan):null;
  const notify=event=>listeners.forEach(f=>{try{f(event);}catch{}});
  function clear(){getContext()?.setExtensionPrompt?.(PROMPT_KEY,'',1,0,false);}
  function identity(c){return String(c?.groupId??'')+' / '+String(c?.getCurrentChatId?.()??'');}
@@ -47,16 +51,18 @@ export function createEffects(getContext){
  async function commit(token,label,update){
   ensureAvailable();const c=check(token);migrate(c);
   const next=forMetadata(update(readStore(c),c),c);
-  operations.stage({label,patches:[{path:[KEY],value:next}]},token.operation);
+  pendingAction=null;operations.stage({label,patches:[{path:[KEY],value:next}]},token.operation);
   try{const result=await operations.confirm();clear();message='生效记录已保存，下次生成使用当前游戏时间';return result;}
   catch(error){message=error.message;throw error;}
   finally{notify({error:operations.dirty()});}
  }
  const mutate=(token,op,data)=>commit(token,'更新持续效果',(store,c)=>{if(data.periodic)validatePeriodicReferences(c,data.periodic);return change(store,c.chat,op,data,{clock:readCurrentScene(c).clock});});
  const split=(token,id,parts)=>commit(token,'分割持续效果',(store,c)=>splitEffect(store,c.chat,id,parts));
- function stageSettlement(token=capture(),effectIds){ensureAvailable();const c=check(token),basis=operations.capture(MANUAL_SETTLEMENT_PATHS),plan=buildSettlement(c,{effectIds,operationId:uuid(),includeCheckpoint:true});operations.stage({label:'确认周期效果结算',patches:plan.patches,summary:{rows:plan.rows,clock:plan.clock}},basis);return {summary:plan.summary,rows:plan.rows,clock:plan.clock};}
+ function stageSettlement(token=capture(),effectIds){ensureAvailable();pendingAction=null;const c=check(token),basis=operations.capture(MANUAL_SETTLEMENT_PATHS),plan=buildSettlement(c,{effectIds,operationId:uuid(),includeCheckpoint:true});operations.stage({label:'确认周期效果结算',patches:plan.patches,summary:{rows:plan.rows,clock:plan.clock}},basis);return {summary:plan.summary,rows:plan.rows,clock:plan.clock};}
+ function stageAction(input){ensureAvailable();const c=getContext(),basis=operations.capture([...MANUAL_SETTLEMENT_PATHS,['amin_os_dice_v1'],['dynamicMapV1']]),plan=buildActionSettlement(c,input,{operationId:uuid()});operations.stage({label:'确认行动结算：'+plan.name,patches:plan.patches,summary:{rows:plan.rows,text:plan.text}},basis);pendingAction={plan,scope:actionScope()};return plan;}
+ async function confirmAction(){ensureAvailable();if(!matchesAction(pendingAction))throw Error('聊天或回复版本已变化，请重新预览行动结算');const selected=pendingAction;try{const result=await operations.confirm();actionResult=selected;pendingAction=null;clear();message='行动已结算，结果已保存';return result;}catch(error){message=error.message;throw error;}finally{notify({error:operations.dirty()});}}
  async function confirmSettlement(){ensureAvailable();try{const result=await operations.confirm();clear();message='周期结算已保存，重复预览不会再次扣除';return result;}catch(error){message=error.message;throw error;}finally{notify({error:operations.dirty()});}}
- async function retrySave(){try{const result=await operations.retrySave();message=operations.status();return result;}catch(error){message=error.message;throw error;}finally{clear();notify({error:operations.dirty()});}}
+ async function retrySave(){try{const result=await operations.retrySave();if(matchesAction(pendingAction)){actionResult=pendingAction;pendingAction=null;}message=operations.status();return result;}catch(error){message=error.message;throw error;}finally{clear();notify({error:operations.dirty()});}}
  function start(type='normal',params={},dry=false){
   clear();if(dry||!['normal','regenerate','swipe','continue'].includes(type)||params?.signal?.aborted)return;
   try{if(busy||operations.busy()||operations.dirty())throw Error('聊天资料尚未保存，本轮未附加持续效果提醒');const ctx=getContext();if(managesModule(ctx,'effects')){message='持续效果由统一联动条目提供';notify();return;}let chat=ctx.chat??[];
@@ -74,11 +80,11 @@ export function createEffects(getContext){
  }
  const ctx=getContext(),events=ctx.eventTypes??ctx.event_types??{},source=ctx.eventSource;
  const supported=!!(ctx.setExtensionPrompt&&source?.on&&events.GENERATION_AFTER_COMMANDS&&events.CHAT_CHANGED);
- const handlers={GENERATION_AFTER_COMMANDS:start,CHAT_CHANGED:()=>{clear();message='已切换聊天';notify();},GENERATION_ENDED:clear,GENERATION_STOPPED:clear,MESSAGE_DELETED:()=>{clear();notify();},MESSAGE_SWIPED:()=>{clear();notify();},MESSAGE_UPDATED:()=>{clear();notify();}};
+ const handlers={GENERATION_AFTER_COMMANDS:start,CHAT_CHANGED:()=>{pendingAction=null;actionResult=null;clear();message='已切换聊天';notify();},GENERATION_ENDED:clear,GENERATION_STOPPED:clear,MESSAGE_DELETED:()=>{clear();notify();},MESSAGE_SWIPED:()=>{clear();notify();},MESSAGE_UPDATED:()=>{clear();notify();}};
  if(supported)for(const [event,fn]of Object.entries(handlers))if(events[event])source.on(events[event],fn);
  const unsubscribeOperations=operations.subscribe(()=>{if(operations.status())message=operations.status();notify({error:operations.dirty()&&!operations.busy()});});
  const unsubscribeState=subscribeStateChanges((event,metadata)=>{if(metadata===getContext()?.chatMetadata&&event.identity===chatIdentity(getContext())&&event.paths.some(path=>[KEY,SCENE_KEY].includes(path[0]))){clear();notify();}});
- return {promptPreview,capture,check,save,saveLibrary,read,mutate,split,stageSettlement,confirmSettlement,discardSettlement:()=>operations.discard(),periodicPreview:()=>periodicPreview(getContext()),retrySave,dirty:operations.dirty,busy:()=>busy||operations.busy(),gameClock:()=>readCurrentScene(getContext()).clock,timedEffects:()=>{const c=getContext();return timedEffects(readStore(c),c?.chat,readCurrentScene(c).clock);},expiryPreview:afterClock=>contextExpiryPreview(getContext(),afterClock),prompt:()=>currentPrompt(getContext()),context:getContext,status:()=>operations.dirty()?message:supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();unsubscribeOperations();unsubscribeState();operations.dispose();listeners.clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
+ return {actionResult:currentActionResult,actionResources:()=>actionResources(getContext()),stageAction,confirmAction,promptPreview,capture,check,save,saveLibrary,read,mutate,split,stageSettlement,confirmSettlement,discardSettlement:()=>{pendingAction=null;return operations.discard();},periodicPreview:()=>periodicPreview(getContext()),retrySave,dirty:operations.dirty,busy:()=>busy||operations.busy(),gameClock:()=>readCurrentScene(getContext()).clock,timedEffects:()=>{const c=getContext();return timedEffects(readStore(c),c?.chat,readCurrentScene(c).clock);},expiryPreview:afterClock=>contextExpiryPreview(getContext(),afterClock),prompt:()=>currentPrompt(getContext()),context:getContext,status:()=>operations.dirty()?message:supported?message:'当前前端缺少持续提示接口；可管理记录并复制预览',supported,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){clear();unsubscribeOperations();unsubscribeState();operations.dispose();listeners.clear();for(const [event,fn]of Object.entries(handlers))if(events[event])source?.removeListener?.(events[event],fn);}};
 }
 
 let sharedService;

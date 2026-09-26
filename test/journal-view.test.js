@@ -145,3 +145,18 @@ test('prequel import requires selecting entries and explicit source confirmation
     check.checked = true; check.dispatch('change'); reference.checked = true; reference.dispatch('change'); await click(f.root, '确认前作引用范围');
     [prior] = currentEntries(f.ctx().chatMetadata[KEY], chat); assert.equal(prior.enabled, true); assert.match(compile(f.ctx().chatMetadata[KEY], chat), /第一卷/); f.view.dispose();
 });
+
+
+test('task and clue forms save linked records without awarding inventory or completing tasks', async () => {
+    const f = fixture(); await click(f.root, '任务'); await click(f.root, '新增任务');
+    input(f.root, '标题', '寻找钥匙'); input(f.root, '内容说明', '调查古堡', 'textarea'); input(f.root, '任务目标', '找到地下室钥匙', 'textarea');
+    input(f.root, '进度（0–100）', '40'); input(f.root, '期限（可选）', '今晚'); input(f.root, '奖励说明（可选）', '十枚金币', 'textarea');
+    await click(f.root, '保存任务'); const task = currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat)[0];
+    assert.equal(task.status, 'open'); assert.equal(task.progress, 40); assert.equal(task.reward, '十枚金币');
+    await click(f.root, '线索'); await click(f.root, '新增线索'); input(f.root, '标题', '钥匙位置'); input(f.root, '内容说明', '钥匙曾挂在墙上', 'textarea');
+    input(f.root, '线索来源', '向导'); input(f.root, '关联任务', task.id, 'select'); input(f.root, '可信程度（0–100）', '80');
+    await click(f.root, '保存线索'); const records = currentEntries(f.ctx().chatMetadata[KEY], f.ctx().chat);
+    assert.equal(records[1].taskId, task.id); assert.equal(records[1].status, 'unverified'); assert.equal(records[0].progress, 40);
+    assert.deepEqual(Object.keys(f.ctx().chatMetadata).sort(), [KEY, 'unrelated'].sort());
+    assert.match(f.root.textContent, /寻找钥匙/); f.view.dispose();
+});
