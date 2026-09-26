@@ -74,7 +74,8 @@ test('prompt and update shortcuts scroll only the owned panel and never pan the 
     } finally { f.view.dispose(); }
 });
 
-function fixture({ enabled = false, dataPreview = true, nativeAvailable = true, nativeMigrated = false } = {}) {
+function fixture({ enabled = false, dataPreview = true, nativeAvailable = true, nativeMigrated = false, templates = false } = {}) {
+    let template = null;
     const listeners = new Set(), calls = [], availability = { status: true, inventory: true, scene: false, dice: true };
     const labels = { status: '世界状态', inventory: '背包与账本', scene: '场景与时间', dice: '固定骰点（只读）' };
     let settings = { version: 1, enabled, mode: 'review', dataSource: 'amin', modules: { status: { enabled: true, read: true, write: true }, inventory: { enabled: true, read: true, write: true }, scene: { enabled: false, read: false, write: false }, dice: { enabled: true, read: true, write: false } }, extraRules: '' };
@@ -86,6 +87,7 @@ function fixture({ enabled = false, dataPreview = true, nativeAvailable = true, 
         { module: 'status', action: 'set', target: '生命', reason: '<script>text only</script>', before: { hp: 7 }, after: { hp: 10 } },
     ], warnings: [] };
     const api = {
+        ...(templates ? { scopeTemplate: () => structuredClone(template), async saveScopeTemplate() { template = { enabled: settings.enabled, modules: structuredClone(settings.modules) }; calls.push('template'); } } : {}),
         settings: () => structuredClone(settings), modules: () => Object.keys(labels).map(id => ({ id, label: labels[id], available: availability[id], ...settings.modules[id] })),
         async saveSettings(value) { calls.push('settings'); settings = structuredClone(value); emit(); },
         async saveLinks(links) { calls.push('links'); settings = { ...settings, links: structuredClone(links) }; emit(); },
@@ -303,4 +305,23 @@ test('Amin sends storyline data by default and an external source can disable du
         await input(f.root,'资料发送来源','amin','select');await click(f.root,'保存联动设置');
         assert.equal(f.settings().dataSource,'amin');assert.match(data.value,/红色围巾/);
     }finally{f.view.dispose();}
+});
+
+test('scope template saves only saved permissions and loads into a draft before applying', async () => {
+    const f = fixture({ enabled: true, templates: true });
+    try {
+        await input(f.root, '额外联动规则', '本聊天规则');
+        assert.equal(find(f.root, '将已保存范围设为通用模板').disabled, true);
+        await click(f.root, '保存联动设置');
+        await click(f.root, '将已保存范围设为通用模板');
+        assert.deepEqual(Object.keys(f.api.scopeTemplate()).sort(), ['enabled', 'modules']);
+        await toggle(f.root, '背包与账本 · 启用此模块', false);
+        await click(f.root, '保存联动设置');
+        await click(f.root, '将通用模板载入当前草稿');
+        assert.equal(f.settings().modules.inventory.enabled, false);
+        assert.equal(find(f.root, '背包与账本 · 启用此模块', 'input').checked, true);
+        assert.equal(find(f.root, '额外联动规则', 'textarea').value, '本聊天规则');
+        await click(f.root, '保存联动设置');
+        assert.equal(f.settings().modules.inventory.enabled, true);
+    } finally { f.view.dispose(); }
 });

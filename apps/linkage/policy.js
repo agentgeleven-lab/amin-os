@@ -1,5 +1,6 @@
 export const KEY = 'amin_os_linkage_v1';
 export const ROOT = KEY;
+export const SCOPE_TEMPLATE_KEY = 'amin_os_linkage_scope_template_v1';
 export const MODULES = Object.freeze({
     characters: ['人物卡与外观', 'amin_os_characters_v1'], inventory: ['背包与账本', 'amin_os_inventory_v1'],
     relationships: ['人物关系', 'amin_os_relationships_v1'], scene: ['场景、时间与日程', 'amin_os_scene_v1'],
@@ -61,7 +62,19 @@ export function validateLinkageState(raw) {
 }
 export function readLinkageState(ctx) {
     const raw = ctx?.chatMetadata?.[KEY];
-    return raw === undefined ? emptyLinkageState() : validateLinkageState(raw);
+    return raw === undefined ? { ...emptyLinkageState(), ...readScopeTemplate(ctx) } : validateLinkageState(raw);
+}
+// A template carries permissions only, never chat data, rules, IDs or history.
+export function scopeTemplate(input) {
+    const state = validateLinkageState({ ...emptyLinkageState(), enabled: input?.enabled, modules: input?.modules });
+    return { version: 1, enabled: state.enabled, modules: Object.fromEntries(Object.keys(MODULES).map(id => [id,
+        state.modules[id] ?? { enabled: false, read: false, write: false }])) };
+}
+export function readScopeTemplate(ctx) {
+    const raw = ctx?.extensionSettings?.[SCOPE_TEMPLATE_KEY];
+    if (raw === undefined) return null;
+    if (raw?.version !== 1) throw Error('通用联动范围模板版本不兼容。');
+    return scopeTemplate(raw);
 }
 export function moduleAvailable(ctx, id) {
     if (!own(MODULES, id)) return false;

@@ -7,6 +7,7 @@ import { KEY, MODULES, readLinkageState, readLinkageSettings, validateLinkageSta
 import { parseUpdate, hasUpdate } from './protocol.js';
 import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules, buildDataPromptReport } from './prompt.js';
 import { buildReferenceIndex } from './references.js';
+import { SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate } from './policy.js';
 
 const clone = value => structuredClone(value), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -45,7 +46,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     const batchLabel = manualScope ? 'AI 资料生成' : '跨应用剧情更新';
     const operation = createOperationService(getContext), listeners = new Set(), candidates = new Map();
     const paths = [...new Map([[KEY], ...adapters.flatMap(a => a.paths).filter(path => !derivedHistories.has(path[0]))].map(path => [JSON.stringify(path), path])).values()];
-    let pending = null, generation = null, message = '', hostMessage = '', disposed = false;
+    let pending = null, generation = null, message = '', hostMessage = '', disposed = false, templateBusy = false;
     const notify = () => { for (const callback of [...listeners]) { try { callback(); } catch { /* A view cannot interrupt a commit. */ } } };
     const context = () => { if (disposed) throw Error('联动更新服务已关闭。'); const ctx = getContext(); if (!ctx?.chatMetadata || (ctx.getCurrentChatId?.() ?? ctx.chatId) == null) throw Error('请先打开聊天。'); return ctx; };
     const rawData = ctx => Object.fromEntries(adapters.map(a => [a.id, a.read(ctx)]));
@@ -119,12 +120,29 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         finally { notify(); }
     }
     async function saveSettings(input) {
+        if (templateBusy) throw Error('正在保存通用模板，请稍候。');
         if (manualScope) throw Error('手动资料生成不能修改统一联动设置。');
         const ctx = context(), token = operation.capture([[KEY]]), previous = readLinkageState(ctx);
         const next = validateLinkageState({ ...clone(input), version:1, applied:previous.applied });
         operation.stage({ label:'保存联动设置', patches:[{path:[KEY],value:next}] },token); pending = null;
         try { const result = await operation.confirm(); message = '联动设置已保存。'; generation = null; candidates.clear(); return result; }
         finally { notify(); }
+    }
+    async function saveScopeTemplate() {
+        if (manualScope || templateBusy || operation.busy() || operation.dirty() || operation.preview()) throw Error('请先完成当前操作再保存通用模板。');
+        const ctx = context();
+        if (!ctx.extensionSettings || typeof ctx.saveSettingsDebounced !== 'function') throw Error('当前宿主缺少全局设置保存接口。');
+        const before = ctx.extensionSettings[SCOPE_TEMPLATE_KEY], next = scopeTemplate(readLinkageSettings(ctx));
+        templateBusy = true;
+        ctx.extensionSettings[SCOPE_TEMPLATE_KEY] = next;
+        try { await ctx.saveSettingsDebounced(); message = '通用联动范围模板已保存。'; return clone(next); }
+        catch (error) {
+            if (ctx.extensionSettings[SCOPE_TEMPLATE_KEY] === next) {
+                if (before === undefined) delete ctx.extensionSettings[SCOPE_TEMPLATE_KEY];
+                else ctx.extensionSettings[SCOPE_TEMPLATE_KEY] = before;
+            }
+            throw error;
+        } finally { templateBusy = false; notify(); }
     }
     function captureGeneration(type = 'normal', source = {}) {
         generation = null;
@@ -178,6 +196,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         retryState2Restore:async()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量运行时尚未初始化，请刷新插件。');await runtime.restoreChat();const status=runtime.status();if(!runtime.ready())throw Error(status.restoreError||status.message);return status;},
         migrateState2:()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量 2.0 运行时尚未初始化，请刷新插件。');return runtime.migrate();},
         settings:()=>readLinkageSettings(context()), saveSettings,
+        scopeTemplate:()=>readScopeTemplate(context()), saveScopeTemplate,
         modules:()=>{const ctx=context();return adapters.map(a=>({id:a.id,label:a.label,available:moduleAvailable(ctx,a.id),...modulePolicy(ctx,a.id)}));},
         prompt:()=>buildUpdateRules(context()), dataPrompt:()=>buildDataPrompt(context()), dataPromptReport:()=>buildDataPromptReport(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),
         saveLinks(links){
@@ -187,7 +206,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         },
         stage, preview, confirm, discard(){operation.discard();pending=null;message='已取消预览。';notify();},
         async retrySave(){try{return await operation.retrySave();}finally{message=operation.status();notify();}},
-        busy:operation.busy, dirty:operation.dirty, status:()=>[message||operation.status(),hostMessage].filter(Boolean).join('\n'), context,
+        busy:()=>templateBusy || operation.busy(), dirty:operation.dirty, status:()=>[message||operation.status(),hostMessage].filter(Boolean).join('\n'), context,
         reportHost(value){hostMessage=String(value??'');notify();},
         suggestions:()=>[...candidates.values()].filter(c=>c.source.identity===chatIdentity(getContext())).map(({id,source,text})=>({id,source:clone(source),text})),
         stageSuggestion(id){const candidate=candidates.get(id);if(!candidate)throw Error('更新建议已失效。');return stage(candidate.text,{candidate});},

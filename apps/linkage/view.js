@@ -124,6 +124,22 @@ export function mount(target, options = {}) {
             if (module.id === 'dice' || module.writable === false) card.append(make('p', '此模块仅提供已记录的结果，模型不能改写骰点。', 'amin-meta'));
         }
         settingsPanel.append(modules,make('p','允许模型更新时会同时提供当前资料；取消提供资料也会关闭更新权限。','amin-meta'));
+        if (typeof api.saveScopeTemplate === 'function') {
+            const template = api.scopeTemplate();
+            const templateActions = make('div', '', 'amin-toolbar');
+            templateActions.append(button('将已保存范围设为通用模板', async () => {
+                await api.saveScopeTemplate(); renderSettings();
+                say('通用模板已保存。未单独保存联动设置的聊天自动采用；已有聊天配置优先。');
+            }, { lock: 'links' }));
+            if (template) templateActions.append(button('将通用模板载入当前草稿', () => {
+                const value = api.scopeTemplate();
+                if (!value) throw Error('通用模板已不存在。');
+                draft.enabled = value.enabled; draft.modules = clone(value.modules);
+                renderSettings(); say('已载入通用范围，请点击“保存联动设置”应用到当前聊天。');
+            }));
+            settingsPanel.append(make('h4', '通用联动范围模板'), make('p',
+                `${template ? '已设置通用模板。' : '尚未设置通用模板。'}保存前请先保存上面的联动设置。模板只包含总开关与模块权限；没有单独配置的聊天自动采用。单独保存后仅影响当前聊天，分支继承原聊天配置。世界书仍需绑定统一条目。`, 'amin-meta'), templateActions);
+        }
         const rulesRow = make('label', '', 'amin-field'); extraControl = make('textarea'); extraControl.rows = 5; extraControl.maxLength = 40000; extraControl.value = draft.extraRules ?? ''; extraControl.setAttribute('aria-label', '额外联动规则');
         extraControl.placeholder = '例如：只有正文明确发生的变化才能更新；传闻不得直接写成已确认事实。';
         extraControl.addEventListener('input', () => { draft.extraRules = extraControl.value; markDraft(); }); inputNodes.push(extraControl);
