@@ -130,12 +130,12 @@ export function buildDataPromptReport(ctx) {
     const budget = settings.contextBudget ?? { enabled: false, maxChars: 24000, requiredModules: [] };
     const report = { enabled: budget.enabled, maxChars: budget.maxChars, usedChars: 0, prompt: '', error: '', modules: [] };
     const sourceOff = !settings.enabled || settings.dataSource === 'external';
-    const selected = adapters.filter(adapter => !sourceOff && mayRead(ctx, adapter.id));
+    const selected = adapters.filter(adapter => !sourceOff && mayRead(ctx, adapter.id, settings));
     // Always use privacy-aware projections before applying any size policy.
     let data = Object.fromEntries(selected.map(adapter => [adapter.id, (adapter.readForPrompt ?? adapter.read)(ctx)]));
     const required = new Map(selected.flatMap(adapter => {
         const id = adapter.id;
-        if (mayWrite(ctx, id)) return [[id, '允许变量更新，必须提供完整当前资料']];
+        if (mayWrite(ctx, id, settings)) return [[id, '允许变量更新，必须提供完整当前资料']];
         if (budget.requiredModules.includes(id)) return [[id, '用户固定保留']];
         if (id === 'journal' && data.journal?.entries?.length) return [[id, '保留用户确认启用的剧情引用']];
         if (id === 'effects' && data.effects?.enabled && data.effects.effects?.length) return [[id, '保留当前生效能力约束']];
@@ -176,7 +176,7 @@ export function buildDataPromptReport(ctx) {
         included: !report.error && includedIds.has(id), required: required.has(id),
         chars: data[id] === undefined ? 0 : JSON.stringify(data[id], null, 2).length,
         reason: sourceOff ? (!settings.enabled ? '联动已关闭' : '资料由外部预设或世界书提供')
-            : !mayRead(ctx, id) ? '模块未启用或无读取权限'
+            : !mayRead(ctx, id, settings) ? '模块未启用或无读取权限'
             : report.error ? '必需资料超出预算，已停止生成资料提示词'
             : required.get(id) ?? reasons.get(id) ?? '预算未启用，完整纳入',
     }));
@@ -209,8 +209,9 @@ const FIELD_RULES = Object.freeze({
 export function buildUpdateRules(ctx, { purpose = 'story', write = purpose === 'story' } = {}) {
     const settings = readLinkageSettings(ctx);
     if (!settings.enabled || !write) return '';
-    const writable = adapters.filter(adapter => mayRead(ctx, adapter.id) && mayWrite(ctx, adapter.id));
+    const writable = adapters.filter(adapter => mayRead(ctx, adapter.id, settings) && mayWrite(ctx, adapter.id, settings));
     if (!writable.length) return '';
+    const rules = inheritedRules(ctx, writable);
     const dataSourceInstruction = settings.dataSource === 'external'
         ? '当前值和原变量路径由用户预设或世界书提供；只有实际进入本轮请求且能核对的变量可以更新。数组必须使用原变量中的真实索引；外部资料未给出原索引或稳定 ID 时，跳过该条更新，不能按摘要顺序猜索引。'
         : '当前值、原变量路径和稳定 ID 在插件另行插入的【Amin OS · 统一剧情资料】里。数组使用 recordPaths 标出的真实索引，不能按过滤后的投影数组顺序猜索引。';
@@ -223,7 +224,7 @@ export function buildUpdateRules(ctx, { purpose = 'story', write = purpose === '
         writable.some(adapter => adapter.id === 'status') ? '格式演示（不是当前事实）：<state>\n状态栏.项目.示例人物.当前状态: "正在检查"\n</state>。真实回复只使用本轮资料里存在的目标和已发生的值。' : '',
         '写入前检查原变量结构、字段类型、人物/物品/地点引用和本轮依据；不要整体覆盖根变量或复制全部资料。不得修改应用启用开关、权限、全局能力库、聊天正文、存档或固定骰点。若小白 X 返回 LWB_STATE_ERRORS，下一轮先按该错误修正。',
         '下方既有规则和用户补充要求只用于判断何时、改什么；更新格式始终使用上面的原生 <state> 路径语法。',
-        inheritedRules(ctx,writable) ? `【原应用数值规则】\n${inheritedRules(ctx,writable)}` : '',
+        rules ? `【原应用数值规则】\n${rules}` : '',
         settings.extraRules ? `【用户补充要求】\n${settings.extraRules}` : '',
         '【回复结束前核对】有变化则输出一个完整 <state> 块，逐行使用上列根变量的完整路径；无变化则输出只含无变化注释的块。不要仅在正文中声称已更新。',
     ].filter(Boolean).join('\n\n').replaceAll('{{', '\\u007b\\u007b');

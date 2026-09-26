@@ -1,3 +1,4 @@
+import { createFormControls } from '../../ui/forms.js';
 import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { createCharactersService, getSharedCharactersService } from './service.js';
@@ -16,7 +17,8 @@ export function mount(target, options = {}) {
     const api = options.service ?? options.api ?? (ownsService ? createCharactersService(options.getContext) : getSharedCharactersService());
     const ownsDice = !options.diceService && !options.dice && !!options.getContext;
     const dice = options.diceService ?? options.dice ?? (ownsDice ? createDiceService(options.getContext) : getSharedDiceService());
-    const make = (tag, text = '', cls = '') => { const node = doc.createElement(tag); node.textContent = text; if (cls) node.className = cls; return node; };
+    const formControls = createFormControls(doc, { register: node => controls.add({ node, blocked: () => node.dataset.fixed === 'true' || !!(form?.committed && api.dirty?.()) }) });
+    const { make, select, grid, toolbar } = formControls;
     const page = make('section', '', 'amin-ui amin-app-page amin-characters');
     const context = make('div', '', 'amin-context'), notice = make('div', '', 'amin-notice');
     const body = make('div', '', 'amin-stack'), recovery = make('div', '', 'amin-toolbar');
@@ -49,24 +51,10 @@ export function mount(target, options = {}) {
         const control = { node, blocked }; controls.add(control);
         node.addEventListener('click', () => { if (!node.disabled) void action(fn); }); parent.append(node); return node;
     }
-    function field(parent, label, value = '', multiline = false) {
-        const row = make('label', '', 'amin-field' + (multiline ? ' amin-span-full' : ''));
-        const node = make(multiline ? 'textarea' : 'input'); node.value = String(value ?? ''); node.setAttribute('aria-label', label);
-        if (multiline) node.rows = 4;
-        controls.add({ node, blocked: () => node.dataset.fixed === 'true' || !!(form?.committed && api.dirty?.()) });
-        row.append(make('span', label), node); parent.append(row); return node;
-    }
-    function select(parent, label, choices, value) {
-        const row = make('label', '', 'amin-field'), node = make('select'); node.setAttribute('aria-label', label);
-        for (const [id, text] of choices) { const option = make('option', text); option.value = id; node.append(option); }
-        controls.add({ node, blocked: () => node.dataset.fixed === 'true' || !!(form?.committed && api.dirty?.()) });
-        node.value = value; row.append(make('span', label), node); parent.append(row); return node;
-    }
+    const field = (parent, label, value = '', multiline = false) => formControls.field(parent, label, value, { multi: multiline });
     function card(parent, title, cls = 'amin-card amin-stack') {
         const node = make('section', '', cls); if (title) node.append(make('h3', title)); parent.append(node); return node;
     }
-    function grid(parent) { const node = make('div', '', 'amin-form-grid'); parent.append(node); return node; }
-    function toolbar(parent) { const node = make('div', '', 'amin-toolbar'); parent.append(node); return node; }
     function clearBody() { controls.clear(); body.replaceChildren(); }
     const writable = () => !!api.dirty?.();
     function releasePreview(state) {

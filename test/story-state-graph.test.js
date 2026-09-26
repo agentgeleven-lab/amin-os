@@ -5,21 +5,45 @@ import { createStoryStateGraph } from '../apps/shared/story-state-graph.js';
 function fixture(options, missingThrows = false) {
     const nodes = new Map();
     let writes = 0;
+    const reads = [];
     const store = {
         async get(id) {
+            reads.push(id);
             if (nodes.has(id)) return structuredClone(nodes.get(id));
             if (missingThrows) throw Object.assign(new Error('not found'), { code: 'STORY_NOT_FOUND' });
             return null;
         },
         async put(id, value) { writes++; nodes.set(id, structuredClone(value)); },
     };
-    return { graph: createStoryStateGraph(store, options), nodes, store, get writes() { return writes; } };
+    return { graph: createStoryStateGraph(store, options), nodes, store, reads, get writes() { return writes; } };
 }
 
 const story = (hp, scene = '工坊') => ({
     characters: { 'HK416': { hp, mood: '稳定', biography: '追踪这条剧情线。'.repeat(80) } },
     scene: { name: scene, time: '第三天清晨' },
     inventory: ['接口校准仪', '调试终端'],
+});
+
+test('existing save and import nodes are read once while their parents remain validated', async () => {
+    const t = fixture();
+    const base = await t.graph.save(story(10));
+    const child = await t.graph.save(story(9), { parentId: base });
+    const bundle = await t.graph.exportClosure([child]);
+    t.reads.length = 0;
+    assert.equal(await t.graph.save(story(9)), child);
+    assert.deepEqual(t.reads, [child, base]);
+    t.reads.length = 0;
+    await t.graph.importClosure(bundle);
+    assert.deepEqual(t.reads, [base, child, base]);
+    assert.equal(t.writes, 2);
+
+    // A previous successful operation must not hide a changed ancestor.
+    t.nodes.get(base).state.characters.HK416.hp = 999;
+    t.reads.length = 0;
+    await assert.rejects(t.graph.save(story(9)), { code: 'STORY_STATE_CORRUPT' });
+    assert.deepEqual(t.reads, [child, base]);
+    await assert.rejects(t.graph.importClosure(bundle), { code: 'STORY_STATE_CORRUPT' });
+    assert.equal(t.writes, 2);
 });
 
 test('unchanged states reuse parent ID and different branches share the same ancestors', async () => {

@@ -165,6 +165,13 @@ export function createStoryStateGraph(store, options = {}) {
             throw error;
         }
     };
+    async function readStoredIfPresent(id) {
+        const raw = await fromStore(id);
+        if (raw == null) return null;
+        // Reuse only this existence probe. Validation and parent reads still
+        // run normally; later operations and conflict retries read fresh data.
+        return read(id, nodeId => nodeId === id ? raw : fromStore(nodeId));
+    }
     return {
         async save(value, { parentId = null } = {}) {
             const state = normalize(value, limits, true);
@@ -175,10 +182,7 @@ export function createStoryStateGraph(store, options = {}) {
                 parent = await read(parentId, fromStore);
                 if (id === parentId) return id;
             }
-            if (await fromStore(id) != null) {
-                await read(id, fromStore);
-                return id;
-            }
+            if (await readStoredIfPresent(id) != null) return id;
             const snapshot = { version: 1, kind: 'snapshot', depth: 0, state };
             let body = snapshot;
             if (parent && parent.depth < limits.maxDeltaDepth) {
@@ -223,8 +227,7 @@ export function createStoryStateGraph(store, options = {}) {
                 if (written.has(id)) return;
                 const node = cache.get(id).node;
                 if (node.kind === 'delta') await write(node.parentId);
-                if (await fromStore(id) != null) await read(id, fromStore);
-                else {
+                if (await readStoredIfPresent(id) == null) {
                     try { await store.put(id, node); }
                     catch (error) {
                         try { await read(id, fromStore); }

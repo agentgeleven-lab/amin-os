@@ -1,3 +1,4 @@
+import { createFormControls } from '../../ui/forms.js';
 import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { STATUSES, TASK_STATUSES, CLUE_STATUSES, KINDS, TRUTHS, KNOWLEDGE_STATES, change, changeWithContext, compile, inspectEntries, filterEntries, sourceFromRange, exportRecords, parseImport,
@@ -15,7 +16,8 @@ export function mount(target, options = {}) {
     const doc = options.document ?? target.ownerDocument ?? document;
     const ownService = !options.api && !!options.getContext;
     const api = options.api ?? (ownService ? createJournal(options.getContext, options.ai ? { ai: options.ai } : {}) : getSharedService());
-    const make = (tag, text = '', className = '') => { const element = doc.createElement(tag); element.textContent = text; if (className) element.className = className; return element; };
+    const formControls = createFormControls(doc, { rows: 5 });
+    const { make, select, checkbox, grid, toolbar } = formControls;
     const instance = 'journal-' + uuid();
     const page = make('section', '', 'amin-page amin-app-page amin-journal'), context = make('div', '', 'amin-context');
     const tabs = make('div', '', 'amin-tabs'), notice = make('div', '', 'amin-notice'), body = make('section', '', 'amin-stack');
@@ -40,25 +42,10 @@ export function mount(target, options = {}) {
             finally { element.disabled = false; }
         }); parent.append(element); return element;
     }
-    function field(parent, label, value = '', multiline = false) {
-        const row = make('label', '', 'amin-field' + (multiline ? ' amin-span-full' : ''));
-        const input = make(multiline ? 'textarea' : 'input'); input.value = String(value ?? ''); input.setAttribute('aria-label', label);
-        if (multiline) input.rows = 5; row.append(make('span', label), input); parent.append(row); return input;
-    }
-    function select(parent, label, choices, value = '') {
-        const row = make('label', '', 'amin-field'), input = make('select'); input.setAttribute('aria-label', label);
-        for (const [id, text] of choices) { const option = make('option', text); option.value = id; input.append(option); }
-        input.value = value; row.append(make('span', label), input); parent.append(row); return input;
-    }
-    function checkbox(parent, label, checked = false) {
-        const row = make('label', '', 'amin-check'), input = make('input'); input.type = 'checkbox'; input.checked = checked; input.setAttribute('aria-label', label);
-        row.append(input, make('span', label)); parent.append(row); return input;
-    }
+    const field = (parent, label, value = '', multiline = false) => formControls.field(parent, label, value, { multi: multiline });
     function section(title, parent = body, className = 'amin-card amin-stack') {
         const card = make('section', '', className); if (title) card.append(make('h3', title)); parent.append(card); return card;
     }
-    function grid(parent) { const box = make('div', '', 'amin-form-grid'); parent.append(box); return box; }
-    function toolbar(parent, className = 'amin-toolbar') { const box = make('div', '', className); parent.append(box); return box; }
     function go(action) {
         if (form && (form.dirty || controller)) { say('有未保存的编辑，请先保存或点击“取消编辑”。'); return; }
         stop(); form = null; action();

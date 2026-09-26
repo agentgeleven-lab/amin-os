@@ -1,3 +1,4 @@
+import { createFormControls } from '../../ui/forms.js';
 import { mountGeneration } from '../generation/view.js';
 import { uuid } from '../../uuid.js';
 import { createInventoryService, getSharedInventoryService } from './service.js';
@@ -13,7 +14,8 @@ export function mount(target, options = {}) {
     const doc = options.document ?? target.ownerDocument ?? document;
     const ownService = !options.service && !options.api && !!options.getContext;
     const api = options.service ?? options.api ?? (ownService ? createInventoryService(options.getContext) : getSharedInventoryService());
-    const make = (tag, text = '', className = '') => { const node = doc.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
+    const formControls = createFormControls(doc, { rows: 3, register: (node, kind) => register(node, kind) });
+    const { make, select, checkbox, grid, toolbar } = formControls;
     const page = make('section', '', 'amin-ui amin-page amin-app-page amin-inventory');
     const context = make('div', '', 'amin-context'), tabs = make('nav', '', 'amin-tabs'), notice = make('div', '', 'amin-notice');
     const review = make('section', '', 'amin-stack'), body = make('section', '', 'amin-stack');
@@ -36,8 +38,6 @@ export function mount(target, options = {}) {
     function card(title, parent = body, className = 'amin-card amin-stack') {
         const box = make('section', '', className); if (title) box.append(make('h3', title)); parent.append(box); return box;
     }
-    function toolbar(parent, className = 'amin-toolbar') { const box = make('div', '', className); parent.append(box); return box; }
-    function grid(parent) { const box = make('div', '', 'amin-form-grid'); parent.append(box); return box; }
     function register(control, kind = 'mutate', group = bodyControls) { group.push({ control, kind, base: !!control.disabled }); return control; }
     function disable(control) { control.disabled = true; const row = bodyControls.find(item => item.control === control); if (row) row.base = true; }
     function button(parent, label, action, { primary = false, danger = false, kind = 'mutate', group = bodyControls } = {}) {
@@ -50,22 +50,7 @@ export function mount(target, options = {}) {
         });
         parent.append(element); return register(element, kind, group);
     }
-    function field(parent, label, value = '', { type = 'text', multi = false, min, max, step, maxLength, full = false, kind = 'form' } = {}) {
-        const wrap = make('label', '', 'amin-field' + (full || multi ? ' amin-span-full' : ''));
-        const input = make(multi ? 'textarea' : 'input'); input.value = String(value ?? ''); input.setAttribute('aria-label', label);
-        if (!multi) input.type = type; else input.rows = 3;
-        if (min != null) input.min = min; if (max != null) input.max = max; if (step != null) input.step = step; if (maxLength != null) input.maxLength = maxLength;
-        wrap.append(make('span', label), input); parent.append(wrap); return register(input, kind);
-    }
-    function select(parent, label, choices, value = '', kind = 'form') {
-        const wrap = make('label', '', 'amin-field'), input = make('select'); input.setAttribute('aria-label', label);
-        for (const [id, text] of choices) { const option = make('option', text); option.value = String(id); input.append(option); }
-        input.value = String(value ?? ''); wrap.append(make('span', label), input); parent.append(wrap); return register(input, kind);
-    }
-    function checkbox(parent, label, checked = false) {
-        const wrap = make('label', '', 'amin-check'), input = make('input'); input.type = 'checkbox'; input.checked = checked; input.setAttribute('aria-label', label);
-        wrap.append(input, make('span', label)); parent.append(wrap); return register(input, 'form');
-    }
+    const field = formControls.field;
     function ownerChoices(existing = '') {
         const choices = [['', '请选择人物'], ...characters.map(person => [person.id, person.name + (person.kind === 'pc' ? ' · 玩家角色' : '')])];
         if (existing && !characters.some(person => person.id === existing)) choices.push([existing, ownerLabel(existing)]);

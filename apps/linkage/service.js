@@ -3,11 +3,10 @@ import { uuid } from '../../uuid.js';
 import { createOperationService, subscribeStateChanges, chatIdentity, chatPath } from '../shared/operations.js';
 import { checkpointState } from '../status/state-checkpoint.js';
 import { adapters as allAdapters } from './registry.js';
-import { KEY, MODULES, readLinkageState, readLinkageSettings, validateLinkageState, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
+import { KEY, MODULES, SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate, readLinkageState, readLinkageSettings, validateLinkageState, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
 import { parseUpdate, hasUpdate } from './protocol.js';
 import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules, buildDataPromptReport } from './prompt.js';
 import { buildReferenceIndex } from './references.js';
-import { SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate } from './policy.js';
 
 const clone = value => structuredClone(value), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -197,7 +196,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         migrateState2:()=>{const runtime=getState2Runtime();if(!runtime)throw Error('变量 2.0 运行时尚未初始化，请刷新插件。');return runtime.migrate();},
         settings:()=>readLinkageSettings(context()), saveSettings,
         scopeTemplate:()=>readScopeTemplate(context()), saveScopeTemplate,
-        modules:()=>{const ctx=context();return adapters.map(a=>({id:a.id,label:a.label,available:moduleAvailable(ctx,a.id),...modulePolicy(ctx,a.id)}));},
+        modules:()=>{const ctx=context(),settings=readLinkageState(ctx);return adapters.map(a=>({id:a.id,label:a.label,available:moduleAvailable(ctx,a.id),...modulePolicy(ctx,a.id,settings)}));},
         prompt:()=>buildUpdateRules(context()), dataPrompt:()=>buildDataPrompt(context()), dataPromptReport:()=>buildDataPromptReport(context()), references:()=>buildReferenceIndex(rawData(context()),readLinkageState(context()).links),
         saveLinks(links){
             const ctx=context(),known=new Set(buildReferenceIndex(rawData(ctx)).entities.map(item=>item.id)),old=readLinkageState(ctx).links;

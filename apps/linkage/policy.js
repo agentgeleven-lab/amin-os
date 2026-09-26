@@ -81,21 +81,32 @@ export function moduleAvailable(ctx, id) {
     const key = MODULES[id][1], meta = ctx?.chatMetadata ?? {};
     return id === 'status' || id === 'organizations' ? own(meta.variables ?? {}, key) : own(meta, key);
 }
-export function modulePolicy(ctx, id) {
+// Batch callers may reuse a validated state/settings snapshot for this synchronous read.
+export function modulePolicy(ctx, id, state) {
     if (!own(MODULES, id)) throw Error('未知联动模块。');
-    const saved = readLinkageState(ctx).modules[id];
+    state ??= readLinkageState(ctx);
+    const saved = state.modules[id];
     if (saved) return saved;
     const enabled = moduleAvailable(ctx, id);
     return { enabled, read: enabled, write: enabled && id !== 'dice' };
 }
 export function readLinkageSettings(ctx) {
-    const { applied, ...settings } = readLinkageState(ctx);
-    settings.modules = Object.fromEntries(Object.keys(MODULES).map(id => [id, modulePolicy(ctx, id)]));
+    const state = readLinkageState(ctx);
+    const { applied, ...settings } = state;
+    settings.modules = Object.fromEntries(Object.keys(MODULES).map(id => [id, modulePolicy(ctx, id, state)]));
     return settings;
 }
-export function managesModule(ctx, id) {
-    try { return readLinkageState(ctx).enabled && modulePolicy(ctx, id).enabled; }
-    catch { return false; }
+function managedPolicy(ctx, id, state) {
+    try {
+        state ??= readLinkageState(ctx);
+        if (!state.enabled) return null;
+        const policy = modulePolicy(ctx, id, state);
+        return policy.enabled ? policy : null;
+    } catch { return null; }
 }
-export function mayRead(ctx, id) { return managesModule(ctx, id) && modulePolicy(ctx, id).read; }
-export function mayWrite(ctx, id) { return managesModule(ctx, id) && modulePolicy(ctx, id).read && modulePolicy(ctx, id).write && id !== 'dice'; }
+export function managesModule(ctx, id) { return Boolean(managedPolicy(ctx, id)); }
+export function mayRead(ctx, id, state) { return managedPolicy(ctx, id, state)?.read ?? false; }
+export function mayWrite(ctx, id, state) {
+    const policy = managedPolicy(ctx, id, state);
+    return Boolean(policy?.read && policy.write && id !== 'dice');
+}

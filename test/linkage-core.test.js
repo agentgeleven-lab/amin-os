@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createLinkageService } from '../apps/linkage/service.js';
 import { parseUpdate, hasUpdate } from '../apps/linkage/protocol.js';
-import { emptyLinkageState, readLinkageSettings, managesModule, KEY } from '../apps/linkage/policy.js';
+import { emptyLinkageState, readLinkageSettings, managesModule, mayRead, mayWrite, KEY } from '../apps/linkage/policy.js';
 import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules } from '../apps/linkage/prompt.js';
 import { adapter as characters } from '../apps/linkage/adapters/characters.js';
 import { adapter as inventory } from '../apps/linkage/adapters/inventory.js';
@@ -222,4 +222,31 @@ test('user escaped status reply applies both existing text fields atomically in 
     await t.api.collectReply(1);
     assert.equal(t.saves,1);assert.equal(status.read(t.ctx).项目.HK416.心智状态,changes.changes[0].data.value);
     assert.equal(status.read(t.ctx).项目.德尔.当前状态,changes.changes[1].data.value);t.api.dispose();
+});
+
+
+test('policy and prompt batches read one settings snapshot without caching across calls', () => {
+    let reads = 0;
+    const state = { ...emptyLinkageState(), enabled: true, modules: { status: { enabled: true, read: true, write: true } } };
+    const ctx = { chatMetadata: { variables: { 状态栏: { 版本: 1, 项目: { 玩家: { 生命: 10 } } } } }, extensionSettings: {} };
+    Object.defineProperty(ctx.chatMetadata, KEY, { get() { reads++; return state; } });
+    for (const read of [readLinkageSettings, buildDataPrompt, buildUpdateRules]) {
+        reads = 0;
+        assert.ok(read(ctx));
+        assert.equal(reads, 1, 'one validation/clone per synchronous settings batch');
+    }
+    for (const check of [managesModule, mayRead, mayWrite]) {
+        reads = 0;
+        assert.equal(check(ctx, 'status'), true);
+        assert.equal(reads, 1);
+    }
+    state.modules.status.write = false;
+    assert.equal(mayWrite(ctx, 'status'), false);
+    assert.equal(buildUpdateRules(ctx), '');
+    state.enabled = false;
+    assert.equal(mayRead(ctx, 'status'), false);
+    assert.equal(buildDataPrompt(ctx), '');
+    state.version = 99;
+    assert.equal(mayRead(ctx, 'status'), false);
+    assert.equal(mayWrite(ctx, 'status'), false);
 });

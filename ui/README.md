@@ -47,6 +47,8 @@
 
 ## 组件契约
 
+人物卡、背包与剧情档案的基础表单使用 `createFormControls(document, { rows, register })`（`ui/forms.js`）。它只创建标签、文本/数字输入、下拉框、复选框和布局容器；默认保留 `aria-label`，多行输入始终占满表单宽度，`rows` 保留各应用原有高度。`register(control, kind)` 把控件交回应用的锁定管理，事件、草稿、预览和保存仍由应用负责。动态文案仅作为文本写入，不解析 HTML。
+
 | 类名 | 作用 |
 | --- | --- |
 | `amin-app-page` | 自然伸展的页面，统一内边距和纵向间距 |
