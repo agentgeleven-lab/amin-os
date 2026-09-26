@@ -84,6 +84,12 @@ export function validateRecord(value, chat) {
             if (!Number.isFinite(record.progress) || record.progress < 0 || record.progress > 100) throw Error('任务进度需为 0–100 的数字');
             record.deadline = text(value.deadline ?? '', '期限', 160);
             record.reward = text(value.reward ?? '', '奖励说明', 2000);
+            if (value.rewardClaim != null) {
+                const claim = value.rewardClaim;
+                if (!claim || typeof claim !== 'object' || Array.isArray(claim) || Object.keys(claim).some(key => !['operationId', 'at'].includes(key))
+                    || typeof claim.operationId !== 'string' || !claim.operationId || claim.operationId.length > 200 || typeof claim.at !== 'string' || !Number.isFinite(Date.parse(claim.at))) throw Error('任务奖励领取记录无效');
+                record.rewardClaim = { operationId: claim.operationId, at: claim.at };
+            }
         } else {
             record.source = text(value.source ?? '', '线索来源', 1000);
             record.confidence = value.confidence ?? 50;
@@ -176,6 +182,7 @@ export function change(store, chat, op, data, operationId = uuid(), now = new Da
     const event = { id: operationId, op, recordId: data.id, path: path(chat), at: now };
     if (op !== 'delete') {
         if (op === 'reference' && typeof data.enabled !== 'boolean') throw Error('引用开关无效');
+        if (before?.kind === 'task' && before.rewardClaim) data = { ...data, rewardClaim: before.rewardClaim };
         event.record = validateRecord(op === 'reference' ? { ...before, enabled: data.enabled } : data, chat);
         if (before && event.record.kind !== before.kind) throw Error('不能更改已保存档案的类型');
     }
@@ -322,7 +329,7 @@ export function resolveAutoDraft(store, chat, draftId, action, fields = {}, oper
 }
 
 const RECORD_FIELDS = ['id','kind','title','body','enabled','confirmed','actors','gameTime','gameTimeText','sourceNote','sources','status','remindAfter',
-    'goal','progress','deadline','reward','characterIds','locationIds','itemIds','source','taskId','truth','factId','characterId','learnedFromId','state','confidence','belief','learnedAtText','origin','explicitReference'];
+    'goal','progress','deadline','reward','rewardClaim','characterIds','locationIds','itemIds','source','taskId','truth','factId','characterId','learnedFromId','state','confidence','belief','learnedAtText','origin','explicitReference'];
 function shape(value, fields, label) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw Error(label + '包含未知字段或格式无效');
 }

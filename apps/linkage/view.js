@@ -37,7 +37,7 @@ export function mount(target, options = {}) {
     let disposed = false, unavailable = false, localBusy = false, message = '', failed = false;
     let lastServiceStatus = '', referenceRepairPlan = null;
     let saved = null, draft = null, settingsDirty = false, moduleRows = [], inputNodes = [], draftNotice, saveButton;
-    let dataValue, dataStatus, dataCache = '', dataError = '';
+    let dataValue, dataStatus, dataCache = '', dataError = '', savedDataReport = null;
     let promptValue, promptStatus, worldbookStatus, installButton, inspectButton, pasted = '';
     let moduleControls = [], extraControl;
     let modulesSignature = '';
@@ -109,7 +109,7 @@ export function mount(target, options = {}) {
         sourceControl.value = draft.dataSource === 'external' ? 'external' : 'amin';
         sourceControl.addEventListener('change', () => { draft.dataSource = sourceControl.value; markDraft(); }); inputNodes.push(sourceControl);
         sourceRow.append(make('span', '资料发送来源'), sourceControl, make('small', '选择外部来源后，Amin 不再插入当前剧情资料。请确认预设或世界书的小白变量宏提供所有选中模块的资料；统一世界书更新规则仍照常使用。')); settingsPanel.append(sourceRow);
-        const budgetControls = renderContextBudgetControls(settingsPanel, { document, settings: draft, onChange: value => { draft.contextBudget = value; markDraft(); } });
+        const budgetControls = renderContextBudgetControls(settingsPanel, { document, settings: draft, report: savedDataReport, onRefresh: () => run(() => { savedDataReport = api.dataPromptReport?.() ?? null; renderSettings(); for (const details of settingsPanel.querySelectorAll?.('details') ?? []) details.open = true; updateLocks(); }), onChange: value => { draft.contextBudget = value; markDraft(); } });
         inputNodes.push(...budgetControls.inputs);
         const modules = make('div', '', 'amin-linkage-modules');
         for (const module of moduleRows) {
@@ -215,8 +215,8 @@ export function mount(target, options = {}) {
         const worldbookActions = make('div', '', 'amin-toolbar'); worldbookActions.append(inspectButton, installButton);
         promptPanel.append(promptStatus, promptValue, actions, worldbookStatus, worldbookActions, make('p', '世界书模板在生成时只展开变量 2.0 更新规则，不包含插件生成的当前应用资料。再次安装保留条目的停用、位置、触发设置及自定义规则。额外联动规则按聊天保存。', 'amin-meta'));
     }
-    function refreshData() {
-        try { dataCache = text(api.dataPrompt?.() ?? ''); dataError = ''; }
+    function refreshData(report = null) {
+        try { if (report?.error) throw Error(report.error); dataCache = text(report ? report.prompt : api.dataPrompt?.() ?? ''); dataError = ''; }
         catch (error) { dataCache = ''; dataError = error?.message ?? String(error); }
         if (dataValue) dataValue.value = dataCache;
     }
@@ -319,15 +319,16 @@ export function mount(target, options = {}) {
         if (disposed) return;
         try {
             check(); const current = api.settings(); moduleRows = api.modules(); unavailable = false;
+            savedDataReport = typeof api.dataPromptReport === 'function' ? api.dataPromptReport() : null;
             const nextModulesSignature=JSON.stringify(moduleRows), modulesChanged=nextModulesSignature!==modulesSignature;modulesSignature=nextModulesSignature;
             const changed = !saved || JSON.stringify(current) !== JSON.stringify(saved);
             if (!saved || (changed && !settingsDirty)) { saved = clone(current); draft = clone(current); draft.modules ??= {}; settingsDirty = false; renderSettings(); }
             else if (changed) { saved = clone(current); markDraft(); }
             else if(modulesChanged)renderSettings();
             context.textContent = `统一联动 · 当前聊天 · ${current.enabled ? '小白变量 2.0' : '尚未启用'} · 已选 ${moduleRows.filter(row => row.enabled).length} 个模块`;
-            renderNativeState2(); renderDiagnostics(); refreshPrompt(); refreshData(); renderReview(); renderSuggestions(); renderReferences(); retryPanel.replaceChildren();retryPanel.hidden=!api.dirty();
+            renderNativeState2(); renderDiagnostics(); refreshPrompt(); refreshData(savedDataReport); renderReview(); renderSuggestions(); renderReferences(); retryPanel.replaceChildren();retryPanel.hidden=!api.dirty();
             budgetReportPanel.replaceChildren(); budgetReportPanel.hidden = typeof api.dataPromptReport !== 'function';
-            if (!budgetReportPanel.hidden) renderContextBudgetReport(budgetReportPanel, api.dataPromptReport(), { document });
+            if (!budgetReportPanel.hidden) renderContextBudgetReport(budgetReportPanel, savedDataReport, { document });
             if (api.dirty()) retryPanel.append(make('h3', '保存尚未完成'), make('p', '已确认变更保留在当前聊天内存中。重试只保存这组结果，不再执行一次更新。', 'amin-meta'), button('重试保存整组更新', async () => { await api.retrySave(); say('此前确认的整组更新已保存。'); }, { primary: true, lock: 'busy' }));
             const status = api.status(), serviceStatus = typeof status === 'string' ? status : status?.message || '';
             if(serviceStatus!==lastServiceStatus){lastServiceStatus=serviceStatus;if(!localBusy){message='';failed=false;}}

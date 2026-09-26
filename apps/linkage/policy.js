@@ -24,10 +24,17 @@ export function validateLinkageState(raw) {
     if (typeof raw.enabled !== 'boolean' || !['review', 'auto'].includes(raw.mode) || !plain(raw.modules) || typeof raw.extraRules !== 'string' || raw.extraRules.length > 40000) throw Error('联动设置格式无效。');
     if (raw.contextBudget !== undefined) {
         const budget = raw.contextBudget;
-        if (!plain(budget) || Object.keys(budget).some(key => !['enabled', 'maxChars', 'requiredModules'].includes(key))
+        if (!plain(budget) || Object.keys(budget).some(key => !['enabled', 'maxChars', 'requiredModules', 'entrySelection'].includes(key))
             || typeof budget.enabled !== 'boolean' || !Number.isInteger(budget.maxChars) || budget.maxChars < 1000 || budget.maxChars > 2000000
             || !Array.isArray(budget.requiredModules) || budget.requiredModules.some(id => !own(MODULES, id))
             || new Set(budget.requiredModules).size !== budget.requiredModules.length) throw Error('资料预算需为 1000–2000000 字符，固定模块必须有效且不能重复。');
+    }
+    if (raw.contextBudget?.entrySelection !== undefined) {
+        const selection = raw.contextBudget.entrySelection;
+        if (!plain(selection) || Object.keys(selection).some(key => !['enabled', 'pinned'].includes(key))
+            || typeof selection.enabled !== 'boolean' || !Array.isArray(selection.pinned) || selection.pinned.length > 2000
+            || selection.pinned.some(id => typeof id !== 'string' || id.length > 300 || !own(MODULES, id.split(':')[0]) || !id.split(':').slice(1).join(':') || /[\x00-\x1f]/.test(id))
+            || new Set(selection.pinned).size !== selection.pinned.length) throw Error('条目筛选需要有效且不重复的固定条目 ID，最多 2000 项。');
     }
     if (raw.dataSource !== undefined && !['amin','external'].includes(raw.dataSource)) throw Error('请选择有效的资料发送来源。');
     for (const [id, flags] of Object.entries(raw.modules)) {

@@ -9,6 +9,7 @@ import {activeEffects,anchor,belongs,change,compile,splitEffect,directEffect,eff
 import {getSharedService} from './service.js';
 import {durationFields,appendTiming,timingLabel} from './timing-view.js';
 import {ruleFields,appendRules} from './rules-view.js';
+import {ACTION_TEMPLATES,actionTaskFields} from './action-fields.js';
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};
 export function mount(target,options={}){
  const instanceId='amin-'+uuid();
@@ -123,9 +124,13 @@ export function mount(target,options={}){
   const targetStat=select(fields,'目标属性',[['','不改变属性'],...resources.stats.map((r,i)=>[String(i),`${r.label} · ${r.value}`])]),delta=field(fields,'目标增减（治疗填正数，伤害填负数）','1');delta.type='number';delta.step='any';
   const minutes=field(fields,'耗时（分钟，0 不推进）','0');minutes.type='number';minutes.min='0';minutes.step='1';
   const roll=select(fields,'引用已有骰点',[['','不引用'],...(resources.rolls??[]).map(r=>[r.id,r.text])]);
+  const template=select(fields,'行动模板',[['','选择快捷模板'],...ACTION_TEMPLATES.map(t=>[t.id,t.name])]);
+  const templateHint=node('p','','amin-meta');c.append(templateHint);
+  button(toolbar(c),'填入模板到当前草稿',()=>{const preset=ACTION_TEMPLATES.find(t=>t.id===template.value);if(!preset)throw Error('请先选择行动模板');name.value=preset.name;minutes.value=String(preset.minutes);skill.value='';cost.value='';targetStat.value='';roll.value='';amount.value='1';delta.value='1';templateHint.textContent=preset.hint;formDirty=true;});
+  const taskFields=actionTaskFields(c,resources,{node,field,select,button,grid,toolbar});
   c.append(node('p','属性来自人物卡已绑定的世界状态数值；请先在人物卡绑定生命、魔力等字段。超出进度上限会拒绝结算，请调整数值。','amin-meta'));
   operationButton(toolbar(c),'预览行动结算',()=>{
-   api.check(token);const plan=api.stageAction({name:name.value,cost:cost.value===''?null:resources.costs[Number(cost.value)],costAmount:Number(amount.value),target:targetStat.value===''?null:resources.stats[Number(targetStat.value)],delta:Number(delta.value),minutes:Number(minutes.value),rollId:roll.value});
+   api.check(token);const plan=api.stageAction({name:name.value,cost:cost.value===''?null:resources.costs[Number(cost.value)],costAmount:Number(amount.value),target:targetStat.value===''?null:resources.stats[Number(targetStat.value)],delta:Number(delta.value),minutes:Number(minutes.value),rollId:roll.value,task:taskFields.read()});
    clearBody();openForm();const preview=card('确认行动：'+plan.name);for(const row of plan.rows)preview.append(node('p',row));
    const actions=toolbar(preview);operationButton(actions,'确认行动结算',async()=>{await api.confirmAction();formOpen=false;clearBody();const done=card('行动已结算');done.append(node('pre',plan.text));button(toolbar(done),'复制固定结果',async()=>{if(api.actionResult?.()?.text!==plan.text)throw Error('聊天或回复版本已变化，请重新查看行动结果');await navigator.clipboard.writeText(plan.text);say('已复制，可粘贴到聊天草稿');});button(toolbar(done),'返回行动结算',render);say('行动已保存；复制结果不会再次扣除资源');},true);
    button(actions,'取消行动结算',()=>{api.discardSettlement?.();render();});
