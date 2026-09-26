@@ -192,6 +192,16 @@ try {
       if(!result.element.querySelector('[data-selected="true"]'))throw Error('selection not highlighted');
     })()`);
     await layoutsAt('relationships','relationship-dense-graph');
+    await evaluate(`(async()=>{
+      const {renderRelationshipGraph}=await import('/apps/relationships/graph.js');
+      const people=Array.from({length:12},(_,i)=>({id:'p'+i,name:'人物'+i,kind:i?'npc':'pc'}));
+      const edges=[{id:'a',fromId:'p0',toId:'p2',type:'信任'}, {id:'b',fromId:'p0',toId:'p4',type:'长期合作的同伴'}, {id:'c',fromId:'p3',toId:'p5',type:'师徒'}];
+      window.renderFocused=layout=>{const result=renderRelationshipGraph(document,people,edges,{layout,focusId:'p0'});pane('relationships').querySelector('.amin-relationships').replaceChildren(result.element);if(result.graph.nodes.length!==12||!result.element.querySelector('[data-emphasis="muted"]'))throw Error('focus removed context');};
+      renderFocused('map');
+    })()`);
+    await layoutsAt('relationships','relationship-focused-map');
+    await evaluate("renderFocused('ring')");
+    await layoutsAt('relationships','relationship-focused-ring');
     checks.push('mobile list first; dense graph scrolls without overflow and selected relation detail wraps');
     assert.deepEqual(errors,[]); assert.deepEqual(consoleErrors,[]);
     assert.deepEqual(layoutIssues,[]);

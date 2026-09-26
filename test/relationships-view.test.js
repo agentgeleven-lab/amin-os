@@ -48,7 +48,7 @@ async function stageNew(f, { type = '信任', strength, notes = '' } = {}) {
 test('relationship graph retains directed and reciprocal edges and exposes keyboard-selectable PC/NPC nodes', async () => {
     const relationships = [{ id: 'ab', fromId: 'a', toId: 'b', type: '信任' }, { id: 'ba', fromId: 'b', toId: 'a', type: '怀疑' }];
     const graph = buildRelationshipGraph(people, relationships, 'a');
-    assert.equal(graph.nodes.length, 2); assert.deepEqual(graph.edges.map(edge => [edge.from.id, edge.to.id]), [['a', 'b'], ['b', 'a']]); assert.notEqual(graph.edges[0].path, graph.edges[1].path);
+    assert.equal(graph.nodes.length, 3); assert.deepEqual(graph.edges.map(edge => [edge.from.id, edge.to.id]), [['a', 'b'], ['b', 'a']]); assert.notEqual(graph.edges[0].path, graph.edges[1].path);
     const document = doc(); let focus;
     const rendered = renderRelationshipGraph(document, people, relationships, { onSelect: id => { focus = id; } });
     const node = walk(rendered.element).find(node => node.getAttribute('aria-label') === '聚焦 艾琳 · PC');
@@ -58,14 +58,14 @@ test('relationship graph retains directed and reciprocal edges and exposes keybo
 });
 
 test('large graphs disclose truncation and focus finds people beyond the first graph page', () => {
-    const many = Array.from({ length: 80 }, (_, index) => ({ id: 'p' + index, name: '人物' + index, kind: 'npc' }));
+    const many = Array.from({ length: 160 }, (_, index) => ({ id: 'p' + index, name: '人物' + index, kind: 'npc' }));
     const edges = many.slice(1).map((person, index) => ({ id: 'e' + index, fromId: 'p0', toId: person.id, type: '认识' }));
-    const overview = buildRelationshipGraph(many, edges); assert.equal(overview.nodes.length, 32); assert.equal(overview.totalNodes, 80); assert.equal(overview.omittedNodes, 48);
-    const focused = buildRelationshipGraph(many, edges, 'p79'); assert.deepEqual(new Set(focused.nodes.map(person => person.id)), new Set(['p79', 'p0'])); assert.equal(focused.edges.length, 1);
+    const overview = buildRelationshipGraph(many, edges); assert.equal(overview.nodes.length, 128); assert.equal(overview.totalNodes, 160); assert.equal(overview.omittedNodes, 32);
+    const focused = buildRelationshipGraph(many, edges, 'p159'); assert.ok(focused.nodes.some(p => p.id === 'p159' && p.emphasis === 'focus')); assert.ok(focused.nodes.some(p => p.emphasis === 'muted')); assert.equal(focused.edges.filter(e => e.active).length, 1);
 });
 
 test('two-person graph fits a 220px container without scaling down 50px touch targets', () => {
-    const graph = buildRelationshipGraph(people, [{ id: 'ab', fromId: 'a', toId: 'b', type: '信任' }], 'a', { width: 220 });
+    const graph = buildRelationshipGraph(people.slice(0, 2), [{ id: 'ab', fromId: 'a', toId: 'b', type: '信任' }], 'a', { width: 220 });
     assert.equal(graph.width, 220); assert.equal(graph.nodes.length, 2);
     for (const person of graph.nodes) { assert.ok(person.x - 78 >= 0); assert.ok(person.x + 78 <= graph.width); assert.ok(person.y - 25 >= 0); assert.ok(person.y + 25 <= graph.height); }
     assert.ok(Math.abs(graph.nodes[0].y - graph.nodes[1].y) > 50);
@@ -207,4 +207,25 @@ test('dense relations use one full text detail and selectable highlighted edges'
     assert.ok(walk(element).find(n => n.getAttribute('role') === 'status').textContent.endsWith(edges[7].type));
     const picker = find(element, '查看图中关系', 'select'); picker.value = '2'; await picker.dispatch('change');
     assert.equal(groups[2].getAttribute('data-selected'), 'true');
+});
+
+
+test('focus keeps map positions and fades only unrelated people; ring is non-overlapping', () => {
+    const chars = Array.from({length: 20}, (_, i) => ({id: 'p'+i, name:'人物'+i}));
+    const edges = [{id:'ab',fromId:'p0',toId:'p2',type:'信任'}, {id:'bc',fromId:'p2',toId:'p3',type:'认识'}];
+    for (const layout of ['map', 'ring']) {
+        const a = buildRelationshipGraph(chars,edges,'',{layout}), b = buildRelationshipGraph(chars,edges,'p0',{layout});
+        assert.deepEqual(a.nodes.map(n=>[n.id,n.x,n.y]),b.nodes.map(n=>[n.id,n.x,n.y]));
+        assert.equal(b.nodes[0].emphasis,'focus'); assert.equal(b.nodes[2].emphasis,'related'); assert.equal(b.nodes[3].emphasis,'muted');
+        assert.equal(b.edges[0].active,true); assert.equal(b.edges[1].active,false);
+        for (const [i,n] of b.nodes.entries()) for(const m of b.nodes.slice(i+1)) assert.ok(Math.abs(n.x-m.x)>=156 || Math.abs(n.y-m.y)>=50);
+    }
+});
+
+test('map direct edge bypasses intermediate card instead of implying chained relationships', () => {
+    const graph = buildRelationshipGraph(people,[{id:'ac',fromId:'a',toId:'c',type:'信任'}]);
+    const edge = graph.edges[0];
+    assert.match(edge.path,/ H .* V .* H .* V /);
+    assert.ok(edge.path.startsWith(`M ${edge.from.x+78} ${edge.from.y}`));
+    assert.ok(edge.path.endsWith(`V ${edge.to.y-32}`));
 });

@@ -20,7 +20,7 @@ export function mount(target, options = {}) {
     const aiPanel = make('details', '', 'amin-card amin-stack'), rulesPanel = make('details', '', 'amin-card amin-stack'), alertsPanel = make('section', '', 'amin-stack');
     page.append(context, notice, retryPanel, controls, aiPanel, alertsPanel, graphPanel, editorHost, review, listPanel, rulesPanel, settingsPanel); target.append(page);
     const generationView = mountGeneration(page, { modules: ['relationships'], getContext: options.getContext ?? (() => api.context()), document: document, service: options.generationService, ai: options.ai });
-    let state = null, characters = [], focusId = '', direction = 'all', query = '', editor = null, disposed = false, error = '', committedEditor = false, unavailable = false, graphWidth = 0, graphVisible = null;
+    let state = null, characters = [], focusId = '', direction = 'all', query = '', editor = null, disposed = false, error = '', committedEditor = false, unavailable = false, graphWidth = 0, graphVisible = null, graphLayout = 'map';
     const aiDraft = { start: null, end: null, instruction: '' };
     const locked = () => unavailable || api.busy() || api.dirty() || !!api.preview();
     const say = (message, failed = false) => { error = failed ? message : ''; notice.textContent = message; notice.dataset.state = failed ? 'error' : api.busy() ? 'busy' : message ? 'success' : ''; };
@@ -149,18 +149,20 @@ export function mount(target, options = {}) {
         if (characters.length < 2) controls.append(make('p', '先在人物应用中建立至少两个人物，再选择关系两端。已有关系仍保留。', 'amin-empty'));
     }
     function renderGraph() {
-        graphPanel.replaceChildren(make('h3', '有向关系图'), make('p', '箭头：发起者 → 对象。选择人物缩小范围；选择关系后高亮连线并显示完整说明。大图可在框内滚动。', 'amin-meta'));
+        graphPanel.replaceChildren(make('h3', '人物关系地图'), make('p', '选中人物后突出本人和直接关联人物，其余人物淡化保留。箭头表示关系方向；分层仅表示连接远近，不代表辈分。可滚动查看大图。', 'amin-meta'));
         graphWidth = graphPanel.clientWidth || 0;
         const style = document.defaultView?.getComputedStyle?.(graphPanel);
         const availableWidth = graphWidth ? graphWidth - (parseFloat(style?.paddingLeft) || 0) - (parseFloat(style?.paddingRight) || 0) - 2 : undefined;
+        select(graphPanel, '地图布局', graphLayout, [['map', '分层地图'], ['ring', '圆环布局']], value => { graphLayout = value; renderGraph(); });
+        if (focusId) graphPanel.append(button('取消人物聚焦', () => { focusId = ''; direction = 'all'; renderControls(); renderGraph(); renderList(); }));
         const narrow = (availableWidth || document.defaultView?.innerWidth || 800) < 560;
         const visible = graphVisible ?? !narrow;
         graphPanel.append(button(visible ? '收起关系图' : '展开关系图', () => { graphVisible = !visible; renderGraph(); }));
         if (!visible) { graphPanel.append(make('p', '下方列表展示完整关系。可用聚焦人物、关系方向和搜索缩小范围。', 'amin-meta')); return; }
-        const result = renderRelationshipGraph(document, characters, filteredRelationships(), { focusId, width: availableWidth, onSelect: id => { focusId = id; direction = 'all'; renderControls(); renderGraph(); renderList(); controls.querySelector?.('select')?.focus(); } });
+        const result = renderRelationshipGraph(document, characters, state.relationships, { focusId, layout: graphLayout, activeEdgeIds: filteredRelationships().map(edge => edge.id), width: availableWidth, onSelect: id => { focusId = focusId === id ? '' : id; direction = 'all'; renderControls(); renderGraph(); renderList(); controls.querySelector?.('select')?.focus(); } });
         if (!result.graph.nodes.length) { graphPanel.append(make('p', '还没有人物。请先到人物应用建立人物资料。', 'amin-empty')); return; }
         graphPanel.append(result.element);
-        if (result.graph.omittedNodes || result.graph.omittedEdges) graphPanel.append(make('p', `图中显示 ${result.graph.nodes.length} / ${result.graph.totalNodes} 个人物、${result.graph.edges.length} / ${result.graph.totalEdges} 条关系。可聚焦人物缩小范围；下方列表保留全部符合筛选的关系。`, 'amin-meta'));
+        if (result.graph.omittedNodes || result.graph.omittedEdges) graphPanel.append(make('p', `图中显示 ${result.graph.nodes.length} / ${result.graph.totalNodes} 个人物、${result.graph.edges.length} / ${result.graph.totalEdges} 条关系。超过 128 人时保留聚焦人物；下方列表保留全部符合筛选的关系。`, 'amin-meta'));
     }
     function filteredRelationships() {
         const search = query.trim().toLocaleLowerCase();
