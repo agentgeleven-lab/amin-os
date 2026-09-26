@@ -1,6 +1,7 @@
 import { getState2Runtime } from '../apps/state2/runtime.js';
 import { captureContext, assertContext, chatIdentity } from '../apps/shared/operations.js';
 import { mountPerformanceDiagnostics } from './performance-view.js';
+import { mountStoryLibrary } from './story-library-view.js';
 
 const context = () => globalThis.SillyTavern?.getContext?.();
 const make = (tag, text, className) => {
@@ -115,6 +116,7 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     make('p', '导入会先验证备份并写入文件，不会自动覆盖当前小白变量。旧聊天记录与原有数据不会自动删除。', 'amin-meta'),
   );
   target.append(box);
+  const libraryView = mountStoryLibrary(target, { getRuntime, report });
   const performanceView = mountPerformanceDiagnostics(target);
 
   const size = bytes => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(2)} MiB`
@@ -222,5 +224,5 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
   }
 
   void loadStatus();
-  return { dispose() { disposed = true; revision++; importToken = null; performanceView.dispose(); } };
+  return { dispose() { disposed = true; revision++; importToken = null; libraryView.dispose(); performanceView.dispose(); } };
 }

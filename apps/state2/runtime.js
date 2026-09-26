@@ -1,3 +1,4 @@
+import { createStoryLibraryService } from '../shared/story-library-service.js';
 import { getReference } from '../shared/story-message-refs.js';
 import { performanceDiagnostics } from '../shared/performance-diagnostics.js';
 import { createUpdateDiagnostics } from './update-diagnostics.js';
@@ -65,6 +66,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
             report(lastMessage);
         }, 60);
     }
+    const library = createStoryLibraryService({ getHostWindow: () => host.window ?? host, getContext });
     const files = createStoryFileStore({ getHostWindow: () => host.window ?? host });
     const story = storyStorage ?? createStoryStorage(getContext, { graph: createStoryStateGraph(files), available: () => files.available(), host, document });
     let archiveTask = null, archiveAgain = false, observedNative = null, activeGeneration = null, generationBaseline = null;
@@ -347,6 +349,8 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
     return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),ready:ready(),restoring:sameChat(getContext())&&restoring,restoreError:sameChat(getContext())?restoreError:'',message:lastMessage||nativeState2Status(getContext()).message}),
         updateDiagnostics:()=>updateOwner?.metadata===getContext()?.chatMetadata&&updateOwner.identity===chatIdentity(getContext())?updates.records():[],clearUpdateDiagnostics(){clearUpdates();report(lastMessage);},
         inspectStoryIndex:()=>story.inspectIndex(),
+        scanStoryLibrary:options=>library.scan(options),
+        exportStoryLibraryCandidates:(report,options)=>library.exportCandidates(report,options),
         inspectStoryReferences: () => story.inspectReferences(),
         async repairStoryReferences(plan) {
             if (streaming()) throw Error('请等待生成结束再修复引用。');
@@ -393,7 +397,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
             finally { release(); sync(); }
         },
         async retrySave(){return operation.retrySave();},
-        destroy(){disposed=true;epoch++;clearUpdates();clearInterval(timer);clearTimeout(eventTimer);removeSavePreparation();removeExpansion();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,nativeChanged);},
+        destroy(){disposed=true;library.dispose();epoch++;clearUpdates();clearInterval(timer);clearTimeout(eventTimer);removeSavePreparation();removeExpansion();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,nativeChanged);},
     };
 }
 export function initializeState2(getContext = context, options = {}) { return shared ??= createState2Runtime(getContext,options); }
