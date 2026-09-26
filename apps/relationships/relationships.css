@@ -34,3 +34,12 @@
 .amin-relationship-edge[data-selected=true] {opacity:1}
 .amin-relationship-connections {display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}
 .amin-relationship-connections>button {min-height:44px;text-align:start;white-space:normal;overflow-wrap:anywhere;padding:10px}
+
+.amin-relationship-network .amin-relationship-person {touch-action:none;cursor:grab}
+.amin-relationship-network .amin-relationship-person:active {cursor:grabbing}
+.amin-node-hit {fill:transparent;stroke:none}
+.amin-node-dot {fill:var(--amin-card);stroke:var(--amin-muted);stroke-width:1.5}
+.amin-node-symbol {fill:none;stroke:var(--amin-text);stroke-width:1;pointer-events:none}
+.amin-relationship-network .amin-relationship-person>text {font-size:12px;paint-order:stroke;stroke:var(--amin-control);stroke-width:3px;stroke-linejoin:round}
+.amin-relationship-person[data-emphasis=focus]>.amin-node-dot,.amin-relationship-person[aria-pressed=true]>.amin-node-dot {stroke:var(--amin-accent-text,var(--amin-accent));stroke-width:4}
+.amin-relationship-person[data-emphasis=related]>.amin-node-dot,.amin-relationship-person:focus-visible>.amin-node-dot {stroke:var(--amin-accent-text,var(--amin-accent));stroke-width:2.5}

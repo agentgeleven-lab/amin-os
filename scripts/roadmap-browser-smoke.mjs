@@ -202,6 +202,10 @@ try {
     await layoutsAt('relationships','relationship-focused-map');
     await evaluate("renderFocused('ring')");
     await layoutsAt('relationships','relationship-focused-ring');
+    await evaluate("renderFocused('network')");
+    await layoutsAt('relationships','relationship-focused-network');
+    await evaluate(`(()=>{const root=pane('relationships'),node=root.querySelector('[data-person-id="p0"]'),before=node.getAttribute('transform'),rect=node.getBoundingClientRect();const fire=(type,x,y)=>node.dispatchEvent(new PointerEvent(type,{bubbles:true,pointerId:19,clientX:x,clientY:y,button:0}));node.setPointerCapture=()=>{};fire('pointerdown',rect.x+24,rect.y+24);fire('pointermove',rect.x+54,rect.y+54);fire('pointerup',rect.x+54,rect.y+54);if(node.getAttribute('transform')===before)throw Error('network drag did not move');})()`);
+
     checks.push('mobile list first; dense graph scrolls without overflow and selected relation detail wraps');
     assert.deepEqual(errors,[]); assert.deepEqual(consoleErrors,[]);
     assert.deepEqual(layoutIssues,[]);

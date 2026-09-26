@@ -1,3 +1,4 @@
+import { layoutNetwork, networkPath } from './network-layout.js';
 import { uuid } from '../../uuid.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -5,7 +6,7 @@ const MAX_NODES = 128;
 export const personLabel = person => person ? `${person.name} · ${person.kind === 'pc' ? 'PC' : person.kind === 'npc' ? 'NPC' : '未解析'}` : '未解析人物';
 
 /** Deterministic, bounded view data. The complete edge list remains available in the editor. */
-export function buildRelationshipGraph(characters, relationships, focusId = '', { width: availableWidth, layout = 'map', activeEdgeIds = null } = {}) {
+export function buildRelationshipGraph(characters, relationships, focusId = '', { width: availableWidth, layout = 'map', activeEdgeIds = null, savedPositions = new Map(), onMove = () => {} } = {}) {
     const people = new Map(characters.map(person => [person.id, { ...person, missing: false }]));
     for (const edge of relationships) for (const id of [edge.fromId, edge.toId]) {
         if (!people.has(id)) people.set(id, { id, name: `未解析人物（${id}）`, missing: true });
@@ -45,7 +46,10 @@ export function buildRelationshipGraph(characters, relationships, focusId = '', 
         const y = ring ? height / 2 + radius * Math.sin(angle) : slot.row * 140 + 55;
         return { ...people.get(id), x, y: compact ? index * 140 + 55 : y, emphasis: !focusId ? 'normal' : id === focusId ? 'focus' : related.has(id) ? 'related' : 'muted' };
     });
-    const canvasHeight = compact ? Math.max(180, shown.length * 140) : height;
+    const network = layout === 'network' ? layoutNetwork(nodes, relationships, savedPositions) : null;
+    if (network) { const coordinates = new Map(network.points.map(p => [p.id,p])); nodes.forEach(node => Object.assign(node, coordinates.get(node.id))); }
+    const canvasWidth = network?.width ?? width;
+    const canvasHeight = network?.height ?? (compact ? Math.max(180, shown.length * 140) : height);
     const positions = new Map(nodes.map(node => [node.id, node]));
     const edges = relevant.filter(edge => positions.has(edge.fromId) && positions.has(edge.toId)).map((edge, index, all) => {
         const from = positions.get(edge.fromId), to = positions.get(edge.toId);
@@ -61,13 +65,13 @@ export function buildRelationshipGraph(characters, relationships, focusId = '', 
         const cx = (start.x + end.x) / 2 - dy / distance * bend, cy = (start.y + end.y) / 2 + dx / distance * bend;
         const lane = Math.min(width - from.x - 8, 95 + (index % 5) * 5);
         const route = `M ${from.x + 78} ${from.y} H ${from.x + lane} V ${to.y - 45} H ${to.x} V ${to.y - 32}`;
-        return { ...edge, from, to, active: active.has(edge.id), path: ring ? `M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}` : route, labelX: (start.x + 2 * cx + end.x) / 4, labelY: (start.y + 2 * cy + end.y) / 4 - 6, index };
+        return { ...edge, from, to, active: active.has(edge.id), bend, path: network ? networkPath(from,to,bend) : ring ? `M ${start.x} ${start.y} Q ${cx} ${cy} ${end.x} ${end.y}` : route, labelX: (start.x + 2 * cx + end.x) / 4, labelY: (start.y + 2 * cy + end.y) / 4 - 6, index };
     });
-    return { nodes, edges, width, height: canvasHeight, totalNodes: ids.length, totalEdges: relevant.length, omittedNodes: Math.max(0, ids.length - nodes.length), omittedEdges: Math.max(0, relevant.length - edges.length) };
+    return { nodes, edges, width: canvasWidth, height: canvasHeight, totalNodes: ids.length, totalEdges: relevant.length, omittedNodes: Math.max(0, ids.length - nodes.length), omittedEdges: Math.max(0, relevant.length - edges.length) };
 }
 
-export function renderRelationshipGraph(document, characters, relationships, { focusId = '', onSelect = () => {}, width, layout = 'map', activeEdgeIds = null } = {}) {
-    const graph = buildRelationshipGraph(characters, relationships, focusId, { width, layout, activeEdgeIds });
+export function renderRelationshipGraph(document, characters, relationships, { focusId = '', onSelect = () => {}, width, layout = 'map', activeEdgeIds = null, savedPositions = new Map(), onMove = () => {} } = {}) {
+    const graph = buildRelationshipGraph(characters, relationships, focusId, { width, layout, activeEdgeIds, savedPositions });
     const container = document.createElement('div'); container.className = 'amin-stack';
     const details = document.createElement('p'); details.className = 'amin-relationship-direction'; details.setAttribute('role', 'status');
     details.textContent = '选择一条关系查看完整说明；点击人物可聚焦。';
@@ -91,7 +95,7 @@ export function renderRelationshipGraph(document, characters, relationships, { f
         if (text != null) element.textContent = text;
         return element;
     };
-    const id = 'amin-rel-' + uuid(), svg = make('svg', { viewBox: `0 0 ${graph.width} ${graph.height}`, width: graph.width, height: graph.height, class: 'amin-relationships-graph', 'aria-label': '人物关系地图', 'aria-describedby': id + '-description' });
+    const id = 'amin-rel-' + uuid(), svg = make('svg', { viewBox: `0 0 ${graph.width} ${graph.height}`, width: graph.width, height: graph.height, class: 'amin-relationships-graph' + (layout === 'network' ? ' amin-relationship-network' : ''), 'aria-label': '人物关系地图', 'aria-describedby': id + '-description' });
     svg.append(make('desc', { id: id + '-description' }, '箭头从关系发起者指向对象。选择人物可聚焦其关系。每一条关系都在下方列表提供文字与编辑操作。'));
     const defs = make('defs'), marker = make('marker', { id: id + '-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse', markerUnits: 'strokeWidth' });
     marker.append(make('path', { d: 'M 0 0 L 10 5 L 0 10 Z', class: 'amin-relationship-arrow' })); defs.append(marker); svg.append(defs);
@@ -105,8 +109,23 @@ export function renderRelationshipGraph(document, characters, relationships, { f
     }
     for (const person of graph.nodes) {
         const group = make('g', { transform: `translate(${person.x} ${person.y})`, class: 'amin-relationship-person', role: 'button', tabindex: '0', 'aria-label': '聚焦 ' + personLabel(person), 'aria-pressed': String(focusId === person.id), 'data-person-id': person.id, 'data-emphasis': person.emphasis });
+        if (layout === 'network') {
+            group.append(make('title', {}, personLabel(person)), make('circle', {r:24,class:'amin-node-hit'}), make('circle', {r:12,class:'amin-node-dot'}), make('path', {d:'M 0 -5 L 5 0 L 0 5 L -5 0 Z',class:'amin-node-symbol'}), make('text', {y:34,'text-anchor':'middle'}, Array.from(person.name).slice(0,9).join('') + (Array.from(person.name).length>9?'…':'')));
+        } else {
         group.append(make('title', {}, personLabel(person)), make('rect', { x: -78, y: -25, width: 156, height: 50, rx: 8 }), make('text', { y: -3, 'text-anchor': 'middle' }, Array.from(person.name).slice(0, 13).join('') + (Array.from(person.name).length > 13 ? '…' : '')), make('text', { y: 15, 'text-anchor': 'middle', class: 'amin-relationship-person-kind' }, person.missing ? '人物引用未解析' : person.kind === 'pc' ? 'PC · 玩家人物' : 'NPC · 非玩家人物'));
-        group.addEventListener('click', () => onSelect(person.id));
+        }
+        let drag = null, moved = false;
+        const redraw = () => {
+            group.setAttribute('transform', `translate(${person.x} ${person.y})`);
+            graph.edges.forEach((edge,i) => { if(edge.fromId !== person.id && edge.toId !== person.id)return; edge.path=networkPath(edge.from,edge.to,edge.bend); for(const path of groups[i].querySelectorAll('path'))path.setAttribute('d',edge.path); });
+        };
+        if(layout === 'network') {
+            group.addEventListener('pointerdown', event => {if(event.button !== undefined && event.button !== 0)return;drag={id:event.pointerId,x:event.clientX,y:event.clientY,px:person.x,py:person.y};moved=false;group.setPointerCapture?.(event.pointerId);event.preventDefault();});
+            group.addEventListener('pointermove', event => {if(!drag || event.pointerId!==drag.id)return; const rect=svg.getBoundingClientRect();const dx=(event.clientX-drag.x)*graph.width/rect.width,dy=(event.clientY-drag.y)*graph.height/rect.height;if(Math.hypot(dx,dy)>4)moved=true;if(!moved)return;person.x=Math.max(25,Math.min(graph.width-25,drag.px+dx));person.y=Math.max(25,Math.min(graph.height-45,drag.py+dy));redraw();});
+            group.addEventListener('pointerup', event => {if(!drag || event.pointerId!==drag.id)return; if(moved)onMove(person.id,{x:person.x,y:person.y});drag=null;});
+            group.addEventListener('pointercancel', () => {if(drag){person.x=drag.px;person.y=drag.py;redraw();}drag=null;moved=true;});
+        }
+        group.addEventListener('click', () => { if(!moved)onSelect(person.id);moved=false; });
         group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(person.id); } });
         personGroups.push(group); svg.append(group);
     }

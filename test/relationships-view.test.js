@@ -229,3 +229,17 @@ test('map direct edge bypasses intermediate card instead of implying chained rel
     assert.ok(edge.path.startsWith(`M ${edge.from.x+78} ${edge.from.y}`));
     assert.ok(edge.path.endsWith(`V ${edge.to.y-32}`));
 });
+
+
+test('network uses compact circles, stable focus positions and keeps manually moved nodes', () => {
+    const chars = Array.from({length:20},(_,i)=>({id:'p'+i,name:'人物'+i}));
+    const edges=chars.slice(1).map((p,i)=>({id:'e'+i,fromId:'p'+i,toId:p.id,type:'同伴'}));
+    const a=buildRelationshipGraph(chars,edges,'',{layout:'network'}),b=buildRelationshipGraph(chars,edges,'p2',{layout:'network'});
+    assert.deepEqual(a.nodes.map(n=>[n.x,n.y]),b.nodes.map(n=>[n.x,n.y]));
+    for(const [i,n] of a.nodes.entries())for(const m of a.nodes.slice(i+1))assert.ok(Math.abs(n.x-m.x)>100 || Math.abs(n.y-m.y)>65);
+    const moved=buildRelationshipGraph(chars,edges,'p2',{layout:'network',savedPositions:new Map([['p2',{x:130,y:200}]])});
+    assert.equal(moved.nodes[2].x,130);assert.equal(moved.nodes[2].y,200);
+    const {element}=renderRelationshipGraph(doc(),chars,edges,{layout:'network'});
+    assert.equal(walk(element).filter(n=>n.tagName==='RECT').length,0);
+    assert.equal(walk(element).filter(n=>n.getAttribute('class')==='amin-node-dot').length,20);
+});
