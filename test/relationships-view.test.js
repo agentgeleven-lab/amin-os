@@ -179,3 +179,32 @@ test('character entry focuses the stable ID and its document listener is removed
     } finally { f.dispose(); }
     assert.equal(f.document.listeners.get('amin:select-character').size, 0);
 });
+
+
+test('4 to 32 people have disjoint cards in overview and focused graphs', () => {
+    for (let count = 4; count <= 32; count++) {
+        const chars = Array.from({ length: count }, (_, i) => ({ id: 'p' + i, name: '人物' + i }));
+        const edges = chars.slice(1).map((p, i) => ({ id: 'e' + i, fromId: 'p0', toId: p.id, type: '认识' }));
+        for (const focus of ['', 'p0']) {
+            const graph = buildRelationshipGraph(chars, edges, focus, { width: 280 });
+            for (const [i, a] of graph.nodes.entries()) {
+                assert.ok(a.x >= 78 && a.x + 78 <= graph.width && a.y >= 25 && a.y + 25 <= graph.height);
+                for (const b of graph.nodes.slice(i + 1)) assert.ok(Math.abs(a.x - b.x) >= 156 || Math.abs(a.y - b.y) >= 50, `overlap at ${count}`);
+            }
+        }
+    }
+});
+
+test('dense relations use one full text detail and selectable highlighted edges', async () => {
+    const edges = Array.from({length: 20}, (_, i) => ({ id: 'e' + i, fromId: 'a', toId: 'b', type: '很长的关系说明'.repeat(12) + i }));
+    const {element} = renderRelationshipGraph(doc(), people, edges);
+    const groups = walk(element).filter(n => n.getAttribute('class') === 'amin-relationship-edge');
+    assert.equal(groups.length, 20);
+    assert.ok(groups.every(g => !g.children.some(n => n.tagName === 'TEXT')));
+    await groups[7].dispatch('click');
+    assert.equal(groups[7].getAttribute('data-selected'), 'true');
+    assert.equal(groups[0].getAttribute('data-selected'), 'false');
+    assert.ok(walk(element).find(n => n.getAttribute('role') === 'status').textContent.endsWith(edges[7].type));
+    const picker = find(element, '查看图中关系', 'select'); picker.value = '2'; await picker.dispatch('change');
+    assert.equal(groups[2].getAttribute('data-selected'), 'true');
+});

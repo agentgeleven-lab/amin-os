@@ -14,17 +14,16 @@ export function buildRelationshipGraph(characters, relationships, focusId = '', 
     const ids = focusId ? [...new Set([focusId, ...relevant.flatMap(edge => [edge.fromId, edge.toId])])] : [...people.keys()];
     const shown = ids.filter(id => people.has(id)).slice(0, MAX_NODES);
     const compact = shown.length <= 3;
-    const width = compact && Number.isFinite(availableWidth) ? Math.max(220, Math.min(520, availableWidth)) : Math.max(520, Math.min(960, 340 + shown.length * 22));
-    const height = compact ? Math.max(180, shown.length * 120) : Math.max(340, Math.min(900, 240 + shown.length * 24));
+    // Fixed-size cells keep every card readable; the canvas grows vertically.
+    const width = compact ? Math.max(220, Math.min(520, availableWidth || 520)) : Math.max(440, Math.min(880, availableWidth || 880));
+    const columns = Math.max(2, Math.floor(width / 220));
+    const offset = focusId && !compact ? 1 : 0;
+    const height = compact ? Math.max(180, shown.length * 120) : (Math.ceil((shown.length - offset) / columns) + offset) * 130;
     const nodes = shown.map((id, index) => {
-        // Small relationships use a vertical stack at native text/touch size.
-        // Scaling a 520px SVG down would shrink its 50px interactive nodes.
         if (compact) return { ...people.get(id), x: width / 2, y: shown.length === 1 ? height / 2 : 45 + index * (height - 90) / (shown.length - 1) };
-        if (focusId && index === 0) return { ...people.get(id), x: width / 2, y: height / 2 };
-        const offset = focusId ? 1 : 0, count = Math.max(1, shown.length - offset);
-        const angle = (index - offset) * Math.PI * 2 / count - Math.PI / 2;
-        const alone = shown.length === 1;
-        return { ...people.get(id), x: alone ? width / 2 : width / 2 + (width / 2 - 100) * Math.cos(angle), y: alone ? height / 2 : height / 2 + (height / 2 - 50) * Math.sin(angle) };
+        if (offset && index === 0) return { ...people.get(id), x: width / 2, y: 45 };
+        const cell = index - offset;
+        return { ...people.get(id), x: (cell % columns + .5) * width / columns, y: (Math.floor(cell / columns) + offset) * 130 + 45 };
     });
     const positions = new Map(nodes.map(node => [node.id, node]));
     const edges = relevant.filter(edge => positions.has(edge.fromId) && positions.has(edge.toId)).map((edge, index, all) => {
@@ -46,6 +45,20 @@ export function buildRelationshipGraph(characters, relationships, focusId = '', 
 
 export function renderRelationshipGraph(document, characters, relationships, { focusId = '', onSelect = () => {}, width } = {}) {
     const graph = buildRelationshipGraph(characters, relationships, focusId, { width });
+    const container = document.createElement('div'); container.className = 'amin-stack';
+    const details = document.createElement('p'); details.className = 'amin-relationship-direction'; details.setAttribute('role', 'status');
+    details.textContent = '选择一条关系查看完整说明；点击人物可聚焦。';
+    const picker = document.createElement('select'); picker.setAttribute('aria-label', '查看图中关系');
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '选择关系查看完整说明'; picker.append(placeholder);
+    const groups = [];
+    const selectEdge = index => {
+        const edge = graph.edges[index];
+        details.textContent = edge ? `${edge.from.name} → ${edge.to.name}：${edge.label || edge.type}${edge.strength !== undefined ? ' · 强度：' + edge.strength : ''}` : '选择一条关系查看完整说明；点击人物可聚焦。';
+        picker.value = edge ? String(index) : '';
+        groups.forEach((group, i) => group.setAttribute('data-selected', edge ? String(i === index) : 'none'));
+    };
+    picker.addEventListener('change', () => selectEdge(picker.value === '' ? -1 : Number(picker.value)));
+    container.append(picker, details);
     const wrap = document.createElement('div'); wrap.className = 'amin-relationships-graph-scroll';
     wrap.setAttribute('role', 'region'); wrap.setAttribute('aria-label', '有向人物关系图，可横向滚动；完整关系见下方列表'); wrap.tabIndex = 0;
     const make = (tag, attributes = {}, text) => {
@@ -60,7 +73,10 @@ export function renderRelationshipGraph(document, characters, relationships, { f
     marker.append(make('path', { d: 'M 0 0 L 10 5 L 0 10 Z', class: 'amin-relationship-arrow' })); defs.append(marker); svg.append(defs);
     for (const edge of graph.edges) {
         const group = make('g', { class: 'amin-relationship-edge', 'data-relationship-id': edge.id });
-        group.append(make('title', {}, `${edge.from.name} → ${edge.to.name}：${edge.label || edge.type}`), make('path', { d: edge.path, 'marker-end': `url(#${id}-arrow)` }), make('text', { x: edge.labelX, y: edge.labelY, 'text-anchor': 'middle' }, Array.from(edge.label || edge.type).slice(0, 14).join('')));
+        const label = `${edge.from.name} → ${edge.to.name}：${edge.label || edge.type}`;
+        const option = document.createElement('option'); option.value = String(edge.index); option.textContent = label; picker.append(option);
+        group.append(make('title', {}, label), make('path', { d: edge.path, 'marker-end': `url(#${id}-arrow)` }), make('path', { d: edge.path, class: 'amin-relationship-hit' }));
+        group.addEventListener('click', () => selectEdge(edge.index)); groups.push(group);
         svg.append(group);
     }
     for (const person of graph.nodes) {
@@ -70,6 +86,6 @@ export function renderRelationshipGraph(document, characters, relationships, { f
         group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(person.id); } });
         svg.append(group);
     }
-    wrap.append(svg);
-    return { element: wrap, graph };
+    wrap.append(svg); container.append(wrap);
+    return { element: container, graph };
 }

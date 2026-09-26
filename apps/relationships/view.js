@@ -20,7 +20,7 @@ export function mount(target, options = {}) {
     const aiPanel = make('details', '', 'amin-card amin-stack'), rulesPanel = make('details', '', 'amin-card amin-stack'), alertsPanel = make('section', '', 'amin-stack');
     page.append(context, notice, retryPanel, controls, aiPanel, alertsPanel, graphPanel, editorHost, review, listPanel, rulesPanel, settingsPanel); target.append(page);
     const generationView = mountGeneration(page, { modules: ['relationships'], getContext: options.getContext ?? (() => api.context()), document: document, service: options.generationService, ai: options.ai });
-    let state = null, characters = [], focusId = '', direction = 'all', query = '', editor = null, disposed = false, error = '', committedEditor = false, unavailable = false, graphWidth = 0;
+    let state = null, characters = [], focusId = '', direction = 'all', query = '', editor = null, disposed = false, error = '', committedEditor = false, unavailable = false, graphWidth = 0, graphVisible = null;
     const aiDraft = { start: null, end: null, instruction: '' };
     const locked = () => unavailable || api.busy() || api.dirty() || !!api.preview();
     const say = (message, failed = false) => { error = failed ? message : ''; notice.textContent = message; notice.dataset.state = failed ? 'error' : api.busy() ? 'busy' : message ? 'success' : ''; };
@@ -65,7 +65,7 @@ export function mount(target, options = {}) {
             inputs.push(select(form, label, draft[key], available, value => { draft[key] = value; }));
         }
         inputs.push(field(form, '关系类型', draft.type, value => { draft.type = value; }, { help: '例如信任、师徒、敌对、亲属。' }));
-        inputs.push(field(form, '关系标签（可选）', draft.label, value => { draft.label = value; }, { help: '图上优先显示此标签；留空显示关系类型。' }));
+        inputs.push(field(form, '关系标签（可选）', draft.label, value => { draft.label = value; }, { help: '查看关系时优先显示此标签；留空显示关系类型。' }));
         inputs.push(field(form, '强度（可选）', draft.strength, value => { if (value.trim() === '') delete draft.strength; else draft.strength = Number(value); }, { type: 'number', help: '没有默认好感值；数值含义由你的规则决定。' }));
         inputs.push(field(form, '关系备注（可选）', draft.notes, value => { draft.notes = value; }, { multi: true, full: true }));
         let reason = '';
@@ -140,28 +140,35 @@ export function mount(target, options = {}) {
         const form = make('div', '', 'amin-form-grid');
         const extra = [...new Set((state?.relationships ?? []).flatMap(edge => [edge.fromId, edge.toId]))].filter(id => !characters.some(item => item.id === id));
         select(form, '聚焦人物', focusId, [['', '全部人物'], ...characters.map(item => [item.id, personLabel(item)]), ...extra.map(id => [id, person(id).name])], value => { focusId = value; direction = 'all'; renderControls(); renderGraph(); renderList(); });
-        const directionSelect = select(form, '关系方向', direction, [['all', '全部方向'], ['out', '该人物指向别人'], ['in', '别人指向该人物']], value => { direction = value; renderList(); });
+        const directionSelect = select(form, '关系方向', direction, [['all', '全部方向'], ['out', '该人物指向别人'], ['in', '别人指向该人物']], value => { direction = value; renderGraph(); renderList(); });
         directionSelect.disabled = !focusId;
-        field(form, '搜索人物、类型或备注', query, value => { query = value; renderList(); }, { full: true });
+        field(form, '搜索人物、类型或备注', query, value => { query = value; renderGraph(); renderList(); }, { full: true });
         const actions = make('div', '', 'amin-toolbar');
         const create = button('新增人物关系', () => openEditor(), { primary: true, mutation: true, disabled: characters.length < 2 }); create.dataset.minimumPeople = 'true';
         actions.append(create); controls.append(form, actions);
         if (characters.length < 2) controls.append(make('p', '先在人物应用中建立至少两个人物，再选择关系两端。已有关系仍保留。', 'amin-empty'));
     }
     function renderGraph() {
-        graphPanel.replaceChildren(make('h3', '有向关系图'), make('p', '箭头：发起者 → 对象。点击或用键盘选择人物可聚焦；下方列表提供完整文字与编辑操作。', 'amin-meta'));
+        graphPanel.replaceChildren(make('h3', '有向关系图'), make('p', '箭头：发起者 → 对象。选择人物缩小范围；选择关系后高亮连线并显示完整说明。大图可在框内滚动。', 'amin-meta'));
         graphWidth = graphPanel.clientWidth || 0;
         const style = document.defaultView?.getComputedStyle?.(graphPanel);
         const availableWidth = graphWidth ? graphWidth - (parseFloat(style?.paddingLeft) || 0) - (parseFloat(style?.paddingRight) || 0) - 2 : undefined;
-        const result = renderRelationshipGraph(document, characters, state.relationships, { focusId, width: availableWidth, onSelect: id => { focusId = id; direction = 'all'; renderControls(); renderGraph(); renderList(); controls.querySelector?.('select')?.focus(); } });
+        const narrow = (availableWidth || document.defaultView?.innerWidth || 800) < 560;
+        const visible = graphVisible ?? !narrow;
+        graphPanel.append(button(visible ? '收起关系图' : '展开关系图', () => { graphVisible = !visible; renderGraph(); }));
+        if (!visible) { graphPanel.append(make('p', '下方列表展示完整关系。可用聚焦人物、关系方向和搜索缩小范围。', 'amin-meta')); return; }
+        const result = renderRelationshipGraph(document, characters, filteredRelationships(), { focusId, width: availableWidth, onSelect: id => { focusId = id; direction = 'all'; renderControls(); renderGraph(); renderList(); controls.querySelector?.('select')?.focus(); } });
         if (!result.graph.nodes.length) { graphPanel.append(make('p', '还没有人物。请先到人物应用建立人物资料。', 'amin-empty')); return; }
         graphPanel.append(result.element);
         if (result.graph.omittedNodes || result.graph.omittedEdges) graphPanel.append(make('p', `图中显示 ${result.graph.nodes.length} / ${result.graph.totalNodes} 个人物、${result.graph.edges.length} / ${result.graph.totalEdges} 条关系。可聚焦人物缩小范围；下方列表保留全部符合筛选的关系。`, 'amin-meta'));
     }
+    function filteredRelationships() {
+        const search = query.trim().toLocaleLowerCase();
+        return state.relationships.filter(edge => (!focusId || (direction === 'out' ? edge.fromId === focusId : direction === 'in' ? edge.toId === focusId : edge.fromId === focusId || edge.toId === focusId)) && (!search || [person(edge.fromId).name, person(edge.toId).name, edge.type, edge.label, edge.notes].join('\n').toLocaleLowerCase().includes(search)));
+    }
     function renderList() {
         listPanel.replaceChildren();
-        const search = query.trim().toLocaleLowerCase();
-        const entries = state.relationships.filter(edge => (!focusId || (direction === 'out' ? edge.fromId === focusId : direction === 'in' ? edge.toId === focusId : edge.fromId === focusId || edge.toId === focusId)) && (!search || [person(edge.fromId).name, person(edge.toId).name, edge.type, edge.label, edge.notes].join('\n').toLocaleLowerCase().includes(search)));
+        const entries = filteredRelationships();
         listPanel.append(make('h3', `关系列表 · ${entries.length} 条`));
         if (!entries.length) { listPanel.append(make('p', state.relationships.length ? '没有符合当前筛选的关系。' : '还没有已确认的人物关系。', 'amin-empty')); return; }
         const list = make('ul', '', 'amin-stack amin-relationships-list');

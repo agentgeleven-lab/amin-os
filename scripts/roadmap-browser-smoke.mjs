@@ -178,6 +178,21 @@ try {
     await click('settings','开始测量'); await click('settings','停止测量');
     await layoutsAt('settings','storage-performance');
     checks.push('storage index controls and performance start stop render');
+    await app('relationships');
+    await send('Emulation.setDeviceMetricsOverride', { width:390, height:900, deviceScaleFactor:1, mobile:true });
+    await waitFor("!![...pane('relationships').querySelectorAll('button')].find(b=>b.textContent==='展开关系图')", 'mobile list first');
+    await layoutsAt('relationships','relationship-list');
+    await evaluate(`(async()=>{
+      const {renderRelationshipGraph}=await import('/apps/relationships/graph.js');
+      const people=Array.from({length:32},(_,i)=>({id:'p'+i,name:'人物'+i,kind:'npc'}));
+      const edges=people.slice(1).map((p,i)=>({id:'e'+i,fromId:'p0',toId:p.id,type:'长关系说明'.repeat(15)+i}));
+      const result=renderRelationshipGraph(document,people,edges);
+      pane('relationships').querySelector('.amin-relationships').replaceChildren(result.element);
+      const picker=result.element.querySelector('select');picker.value='3';picker.dispatchEvent(new Event('change'));
+      if(!result.element.querySelector('[data-selected="true"]'))throw Error('selection not highlighted');
+    })()`);
+    await layoutsAt('relationships','relationship-dense-graph');
+    checks.push('mobile list first; dense graph scrolls without overflow and selected relation detail wraps');
     assert.deepEqual(errors,[]); assert.deepEqual(consoleErrors,[]);
     assert.deepEqual(layoutIssues,[]);
     fs.writeFileSync(path.join(artifacts,'report.json'),JSON.stringify({passed:true,checks,layouts,layoutIssues,runtimeErrors:errors,consoleErrors},null,2));

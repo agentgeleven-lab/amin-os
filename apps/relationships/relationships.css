@@ -19,3 +19,11 @@
 .amin-relationships .amin-relationship-editor {scroll-margin-block:12px}
 .amin-relationships pre {max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto}
 .amin-relationships .amin-form-grid>* {min-width:0}
+
+.amin-relationships-graph-scroll {max-height:65vh;touch-action:pan-x pan-y}
+.amin-relationship-edge {cursor:pointer}
+.amin-relationship-edge>path.amin-relationship-hit {stroke:transparent;stroke-width:18;pointer-events:stroke}
+.amin-relationship-edge[data-selected=false]>path:not(.amin-relationship-hit) {opacity:.12}
+.amin-relationship-edge[data-selected=true]>path:not(.amin-relationship-hit) {opacity:1;stroke-width:4}
+.amin-relationships select {min-width:0;max-width:100%;min-height:44px}
+.amin-relationships .amin-relationship-notes {overflow-wrap:anywhere}
