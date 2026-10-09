@@ -140,7 +140,38 @@ function validateSnapshot(module, value) {
     const all = Object.fromEntries(Object.keys(MODULE_LABELS).map(key => [key, null]));
     all[module] = value;
     validateModules(all);
+    // The validators also supply the defaults and normalized records used by
+    // app readers. Comparing their raw input would never settle after restore.
+    if (module === 'characters') return Characters.validateState(value);
+    if (module === 'inventory') return Inventory.validateState(value);
+    if (module === 'relationships') return Relationships.validateState(value);
+    if (module === 'scene') return Scene.validateState(value);
+    if (module === 'effects') return Effects.validateEffectsSnapshot(value);
+    if (module === 'information') return { ...clone(value), records: value.records.map(Information.validateRecord) };
+    if (module === 'map') return validateDocument(value);
     return clone(value);
+}
+
+function sameStoryValue(left, right) {
+    if (left === right) return true;
+    if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
+        && left.length === right.length && left.every((value, index) => sameStoryValue(value, right[index]));
+    if (!plain(left) || !plain(right)) return false;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every(key => own(right, key) && sameStoryValue(left[key], right[key]));
+}
+
+function effectiveJournalTarget(ctx, target) {
+    // Restore on a fresh module store to reuse journal defaults and its existing
+    // stale-source safety rules, without cloning chat/native history or comparing
+    // generated event IDs and wall-clock times.
+    const shadow = { ...ctx, chatMetadata: { ...ctx.chatMetadata } };
+    delete shadow.chatMetadata[Journal.KEY];
+    let id = 0;
+    const store = Journal.restoreJournal(shadow, target, {
+        at: '1970-01-01T00:00:00.000Z', makeId: () => `state2-view-${id++}`,
+    });
+    return Journal.snapshotJournal(store, ctx.chat);
 }
 function canonicalSnapshots(ctx, current = materialize(ctx)) {
     const output = {};
@@ -347,8 +378,9 @@ export function projectState2(ctx) {
     const current = materialize(ctx), canonical = canonicalSnapshots(ctx, current), desired = new Map();
     for (const module of ORDER) {
         const latest = current[module] ?? emptySnapshot(module, current[module]);
-        const target = withLocalSettings(module, canonical[module], latest);
-        if (!same(storySnapshot(module, latest), storySnapshot(module, target))
+        const source = withLocalSettings(module, canonical[module], latest);
+        const target = module === 'journal' ? effectiveJournalTarget(ctx, source) : source;
+        if (!sameStoryValue(storySnapshot(module, latest), storySnapshot(module, target))
             || (compact && accumulatedProjection(ctx, module, target))) desired.set(module, target);
     }
     // History navigation calls this repeatedly. Nothing changed: avoid cloning
