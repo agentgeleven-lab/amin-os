@@ -1,6 +1,7 @@
 import { ROOTS, nativeState2Status } from '../state2/storage.js';
 import { timingStatus } from '../effects/timing.js';
 import { sameMessageRevision, messageRevision } from '../shared/message-revision.js';
+import { isIndependent, readModule } from '../story-state/access.js';
 
 export const LINKED_SOURCES = Object.freeze([
     { id: 'characters', label: '人物卡与外观' },
@@ -31,7 +32,8 @@ function digest(value) {
 
 function readRoot(ctx, module, warnings) {
     const root = module === 'status' ? '状态栏' : ROOTS[module];
-    const raw = ctx?.chatMetadata?.variables?.[root];
+    const snapshot = isIndependent(ctx) ? readModule(ctx, module) : undefined;
+    const raw = isIndependent(ctx) ? snapshot == null ? undefined : JSON.stringify(snapshot) : ctx?.chatMetadata?.variables?.[root];
     if (raw == null || raw === '') return null;
     if (typeof raw !== 'string' || raw.length > MAX_ROOT_CHARS) {
         warnings.push(`${root} 格式或长度不适合回复选项读取，已跳过。`);
@@ -207,7 +209,7 @@ function sourceMatches(source, chat) {
     });
 }
 
-/** Read-only candidate context from the restored native State2 variables of this chat. */
+/** Read-only candidate context from the current Amin state, with legacy snapshot support. */
 export function collectLinkedContext(ctx, settings = {}) {
     const warnings = [];
     const empty = () => ({ records: [], selected: [], warnings, stamp: '' });
@@ -217,14 +219,16 @@ export function collectLinkedContext(ctx, settings = {}) {
         return empty();
     }
     if (ctx?.replyState2Ready !== true) {
-        warnings.push('当前分支的变量尚未恢复完成，关联资料暂不读取。');
+        warnings.push(isIndependent(ctx) ? '当前 Amin 剧情资料尚未就绪，关联资料暂不读取。' : '当前分支的变量尚未恢复完成，关联资料暂不读取。');
         return empty();
     }
-    let status;
-    try { status = nativeState2Status(ctx); } catch { /* Invalid ownership is displayed as unavailable. */ }
-    if (!status?.enabled || !status?.migrated || !status?.owned) {
-        warnings.push('当前聊天的 Amin 剧情资料尚未接入可读取的小白变量 2.0。');
-        return empty();
+    if (!isIndependent(ctx)) {
+        let status;
+        try { status = nativeState2Status(ctx); } catch { /* Invalid ownership is displayed as unavailable. */ }
+        if (!status?.enabled || !status?.migrated || !status?.owned) {
+            warnings.push('当前聊天的 Amin 剧情资料尚未接入可读取的小白变量 2.0。');
+            return empty();
+        }
     }
     const known = new Set(LINKED_SOURCES.map(source => source.id));
     const requested = Array.isArray(settings?.linkedSources) ? settings.linkedSources : DEFAULT_LINKED_SOURCES;
@@ -237,7 +241,8 @@ export function collectLinkedContext(ctx, settings = {}) {
     for (const module of loaded) {
         const root = module === 'status' ? '状态栏' : ROOTS[module];
         if (!root) continue;
-        const raw = ctx.chatMetadata.variables?.[root];
+        const current = isIndependent(ctx) ? readModule(ctx, module) : undefined;
+        const raw = isIndependent(ctx) ? current == null ? undefined : JSON.stringify(current) : ctx.chatMetadata.variables?.[root];
         signatures.push([module, typeof raw === 'string' ? raw.length <= MAX_ROOT_CHARS ? `${raw.length}:${digest(raw)}` : `oversize:${raw.length}` : 'absent']);
         snapshots[module] = readRoot(ctx, module, warnings);
     }

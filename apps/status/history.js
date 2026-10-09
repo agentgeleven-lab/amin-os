@@ -2,6 +2,7 @@ import { uuid } from '../../uuid.js';
 import { acquireMetadataWrite, chatIdentity, createOperationService, metadataWriteStatus } from '../shared/operations.js';
 import { isChatReady } from '../shared/chat-lifecycle.js';
 import { markChatIdsDirty, saveChatMetadata } from '../shared/chat-save.js';
+import { isIndependent, STATE_KEY } from '../story-state/access.js';
 // History lives in chat metadata, never in the model-facing variable namespace.
 export const HISTORY_KEY = 'world_status_hud_history_v1';
 const copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
@@ -16,9 +17,10 @@ export function createHistory({ context, read, write, changed = () => {}, before
   const saveGate = createOperationService(context);
   const offSaveGate = saveGate.subscribe(flushSave);
   const emit = () => { changed(); for (const fn of listeners) fn(); };
-  const currentOnly = c => c?.chatMetadata?.amin_os_current_story_v1?.version === 1;
+  const currentOnly = c => isIndependent(c) || c?.chatMetadata?.amin_os_current_story_v1?.version === 1;
   const external = c => currentOnly(c) || c?.chatMetadata?.amin_os_story_storage_v2?.version === 2;
-  const externalRevision = c => currentOnly(c) ? JSON.stringify(c.chatMetadata.amin_os_current_story_v1)
+  const externalRevision = c => isIndependent(c) ? JSON.stringify(c.chatMetadata[STATE_KEY]?.revision)
+    : currentOnly(c) ? JSON.stringify(c.chatMetadata.amin_os_current_story_v1)
     : c?.chatMetadata?.amin_os_story_storage_v2?.indexId;
   function syncExternal(c) {
     const switched = metadata !== c.chatMetadata || chatId !== c.getCurrentChatId();
@@ -185,6 +187,7 @@ export function createHistory({ context, read, write, changed = () => {}, before
   async function readFloor(index) {
     const c = context();
     if (!Number.isInteger(index) || index < 0 || index >= (c?.chat?.length ?? 0)) throw Error('楼层不存在。');
+    if (isIndependent(c) && index !== c.chat.length-1) throw Error('独立剧情存储只保留当前资料，旧楼层没有单独状态快照。');
     const identity = chatIdentity(c), metadataAtStart = c.chatMetadata, message = c.chat[index], variant = String(message.swipe_id ?? 0), reference = referenceSnapshot(message), content = message.mes;
     const indexId = externalRevision(c);
     if (external(c)) {

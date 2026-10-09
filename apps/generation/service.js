@@ -6,6 +6,9 @@ import { chatIdentity, chatPath } from '../shared/operations.js';
 import { collectGenerationSources } from './sources.js';
 import { bindings } from '../characters/model.js';
 import { currentDrafts, readStore as readJournalStore } from '../journal/model.js';
+import { isIndependent, toLegacyContext } from '../story-state/access.js';
+import { allocateUpdateEntityIds } from '../linkage/entity-ids.js';
+import { buildReferenceIndex } from '../linkage/references.js';
 
 export const GENERATION_MODULES = ['characters', 'inventory', 'relationships', 'scene', 'journal'];
 const labels = { characters:'人物卡', inventory:'背包与账本', relationships:'人物关系', scene:'场景与时间', journal:'剧情档案', linkage:'联合初始化' };
@@ -58,8 +61,10 @@ export function createGenerationService(getContext, { ai = getAI, collectSources
     function validate(changes) {
         if (!current) throw Error('请先生成资料草稿。');
         const ctx = check(current.basis), parsed = parseUpdate({version:1,changes}).changes;
-        const sandbox = {...ctx,chatMetadata:clone(ctx.chatMetadata)}, indices = current.provenance.chat?.indices ?? [];
-        for (const [index,change] of parsed.entries()) {
+        const independent = isIndependent(ctx), indices = current.provenance.chat?.indices ?? [];
+        // Source constraints are normalized on the editable draft. IDs remain
+        // temporary aliases until the reviewed transaction issues final UUIDs.
+        for (const change of parsed) {
             if (!current.modules.includes(change.module) || !actions[change.module]?.includes(change.action)) throw Error('资料建议包含未选择的模块或不允许的操作。');
             if (change.module === 'journal') {
                 if (!indices.length) throw Error('剧情档案需要已选择的真实聊天楼层，不能凭空建立来源。');
@@ -70,6 +75,12 @@ export function createGenerationService(getContext, { ai = getAI, collectSources
                 change.data.sources ??= [];
                 if (!Array.isArray(change.data.sources) || change.data.sources.some(n=>!indices.includes(n))) throw Error('关系来源超出所选聊天楼层。');
             }
+        }
+        const existingIds = independent ? [...buildReferenceIndex(current.basis.data).entities.map(entity=>entity.id),
+            ...(current.basis.data.relationships?.thresholdRules??[]).map(rule=>`relationships:${rule.id}`)] : [];
+        const checked = independent ? allocateUpdateEntityIds({version:1,changes:parsed},{existingIds}).update.changes : parsed;
+        const sandbox = independent ? toLegacyContext(ctx) : {...ctx,chatMetadata:clone(ctx.chatMetadata)};
+        for (const [index,change] of checked.entries()) {
             const adapter = adapters.find(item=>item.id===change.module), before = record(read(adapter,sandbox),change);
             if(change.action==='create-character' && read(adapter,sandbox).characters.some(person=>person.kind===(change.data.kind??'npc')&&person.name.trim().normalize('NFKC').toLowerCase()===String(change.data.name).trim().normalize('NFKC').toLowerCase()))throw Error('已有同名同类型人物，请复用现有稳定 ID。');
             if (current.mode === 'create' && before != null) throw Error('从零建立仅允许新增记录，不能修改现有资料。');
@@ -105,7 +116,9 @@ export function createGenerationService(getContext, { ai = getAI, collectSources
                 const references={characters:basis.data.characters.characters.map(({id,name})=>({id,name})),bindings:effective.includes('characters')?bindings(ctx).map(({binding,component,label})=>({binding,component,label})):[],locations:effective.includes('scene')?Object.values(basis.data.map.maps).flatMap(map=>Object.values(map.nodes).map(({id,name})=>({mapId:map.id,nodeId:id,name}))):[]};
                 if(effective.includes('journal'))Object.assign(references,{scenes:Object.values(basis.data.scene.scenes).map(({id,name})=>({id,name})),items:basis.data.inventory.items.map(({id,name})=>({id,name})),tasks:basis.data.journal.entries.filter(e=>e.kind==='task').map(({id,title})=>({id,title}))});
                 const prompt=JSON.stringify({mode,modules:effective,existing:Object.fromEntries(effective.map(id=>[id,basis.data[id]])),references,sources:sourceResult.text,provenance:sourceResult.provenance,instruction});
-                const systemPrompt=`根据用户选定来源整理资料，不续写剧情。只输出 JSON {"version":1,"changes":[{"module":"characters","action":"create-character","target":"safe_id","data":{},"reason":"来源依据"}]}。最多64项。仅处理指定模块。先人物后物品、关系、场景，先事实后记忆，先任务后关联线索；任务奖励仅为说明，不自动发放；使用稳定ID，不重复建立已有实体。create仅新增；supplement仅填空，不覆盖已有内容（0和false也是已有值）；update允许有依据的资料修订。不得删除、消费、转账、结算、调整配置、掷骰或凭空生成属性数值。档案必须提供所选真实sourceStart/sourceEnd；关系sources仅可用所选楼层，非聊天来源填[]并在reason说明。无适用内容输出空changes。下列协议中只允许每个模块列出的操作：\n`+effective.map(id=>`${id}: 允许 ${actions[id].join(',')}\n${adapters.find(a=>a.id===id).contract}`).join('\n');
+                const independent=isIndependent(ctx), newTarget=independent?'@new:person':'safe_id';
+                const identityRules=independent?'新增实体 target 必须使用 @new:alias 临时别名，由插件分配最终UUID，不允许自行指定新人物或其他实体的持久ID。别名以英文字母开头，最多60个字母、数字、下划线、连字符。同批引用新人物/物品/场景/事实/任务时，在明确引用字段中使用相同临时别名；新属性stats[].id等嵌套实体也使用别名。已有实体保留 references 中稳定ID。备注、姓名、正文等自然语言不可用别名代替。以下协议中的新ID均指临时别名。':'';
+                const systemPrompt=`根据用户选定来源整理资料，不续写剧情。只输出 JSON {"version":1,"changes":[{"module":"characters","action":"create-character","target":"${newTarget}","data":{},"reason":"来源依据"}]}。最多64项。仅处理指定模块。先人物后物品、关系、场景，先事实后记忆，先任务后关联线索；任务奖励仅为说明，不自动发放；使用稳定ID，不重复建立已有实体。create仅新增；supplement仅填空，不覆盖已有内容（0和false也是已有值）；update允许有依据的资料修订。不得删除、消费、转账、结算、调整配置、掷骰或凭空生成属性数值。档案必须提供所选真实sourceStart/sourceEnd；关系sources仅可用所选楼层，非聊天来源填[]并在reason说明。无适用内容输出空changes。${identityRules}下列协议中只允许每个模块列出的操作：\n`+effective.map(id=>`${id}: 允许 ${actions[id].join(',')}\n${adapters.find(a=>a.id===id).contract}`).join('\n');
                 const raw=await provider.generate(`${labels[route]} · 资料生成`,{...ctx,chat:clone(ctx.chat),chatMetadata:clone(ctx.chatMetadata)},{systemPrompt:systemPrompt+'\n人物数值属性只可绑定 references.bindings 中已有字段；没有可用字段时 stats=[]，来源数值可记在 notes 供用户以后配置。',prompt},{signal:activeController.signal,snapshot,data:{request:prompt},includeEffects:false,includeJournal:false,includeScene:false,includeLinkage:false}); assertCurrent();
                 const parsed=parseUpdate(typeof raw==='string'?raw.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i,'$1'):raw);
                 current={modules:effective,mode,sources:clone(sources),provenance:clone(sourceResult.provenance),sourceText:sourceResult.text,warnings,basis,changes:parsed.changes};

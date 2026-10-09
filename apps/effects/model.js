@@ -1,5 +1,6 @@
 import { EFFECT_CONTINUITY_RULES } from './prompt-rules.js';
 import { uuid } from '../../uuid.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 import {LIBRARY_KEY,mergeLibrary} from './library.js';
 import {readCurrentScene} from '../scene/model.js';
@@ -8,7 +9,7 @@ import {createPeriodic,periodicConfig,periodicStatus,pausePeriodic,requireSettle
 import {managesModule} from '../linkage/policy.js';
 export const KEY='amin_os_effects_v1';
 export const empty=()=>({version:1,skills:[],events:[],enabled:true,limit:30000});
-export function readStore(ctx){const s=ctx?.chatMetadata?.[KEY];if(s!==undefined&&(!s||s.version!==1||!Array.isArray(s.skills)||!Array.isArray(s.events)))throw Error('持续效果数据版本或格式不兼容，原记录未改写');const result=structuredClone(s??empty());const library=mergeLibrary(ctx?.extensionSettings?.[LIBRARY_KEY],result.skills);result.skills=library.skills;result.trash=library.trash;result.groups=library.groups;return result;}
+export function readStore(ctx){const s=legacyModule(ctx,'effects',KEY);if(s!==undefined&&(!s||s.version!==1||!Array.isArray(s.skills)||!Array.isArray(s.events)))throw Error('持续效果数据版本或格式不兼容，原记录未改写');const result=structuredClone(s??empty());const library=mergeLibrary(ctx?.extensionSettings?.[LIBRARY_KEY],result.skills);result.skills=library.skills;result.trash=library.trash;result.groups=library.groups;return result;}
 // Exact prefix evidence also survives reloads and copied chat branches. No message mutations.
 export const anchor=chat=>chatRevisions(chat??[]);
 export const belongs=(event,now)=>pathBelongs(event?.anchor,now);
@@ -21,7 +22,16 @@ export function activeEffects(store,chat){
   if(e.op==='end'||e.op==='delete')effects.delete(e.id);
   if(e.op==='restore'){effects.clear();for(const effect of validateEffectsSnapshot(e.snapshot).effects)effects.set(effect.id,structuredClone(effect));}
  }
- return [...effects.values()];
+ return [...effects.values()].map(normalizeEffectTarget);
+}
+// Earlier imported/edited records could retain an explicit target while being
+// labelled direct. Keep that target and interpret the detached read as targeted;
+// never erase a confirmed object or rewrite the stored history during a read.
+function normalizeEffectTarget(effect){
+ if(effect?.targetMode==='direct'&&typeof effect.target==='string'&&effect.target!==''){
+  if(effect.target.trim())effect.targetMode='targeted';else effect.target='';
+ }
+ return effect;
 }
 export const directEffect=effect=>effect?.targetMode==='direct';
 export const effectTarget=effect=>directEffect(effect)?'直接发动（无指定对象）':effect.target;
@@ -117,7 +127,7 @@ export const contextExpiryPreview=(ctx,afterClock)=>expiryPreview(readStore(ctx)
 export function validateEffectsSnapshot(input){
  if(!input||input.version!==1||!Array.isArray(input.effects)||input.effects.length>2000||typeof input.enabled!=='boolean'||!Number.isInteger(input.limit)||input.limit<1||input.limit>200000)throw Error('持续效果快照格式或版本不兼容');
  const snapshot=structuredClone(input),ids=new Set();
- for(const effect of snapshot.effects){if(!effect||typeof effect.id!=='string'||!effect.id||ids.has(effect.id))throw Error('持续效果快照编号无效或重复');ids.add(effect.id);if(!effect.skill||typeof effect.skill.id!=='string'||typeof effect.skill.name!=='string'||typeof effect.skill.reminder!=='string')throw Error('持续效果快照缺少完整能力规则');for(const key of ['holder','target','scope','command','condition'])if(typeof effect[key]!=='string')throw Error('持续效果快照字段无效');if(!['targeted','direct'].includes(effect.targetMode??'targeted'))throw Error('持续效果快照发动方式无效');if(effect.targetMode==='direct'&&effect.target!=='')throw Error('直接发动记录不能带指定对象');if(effect.actionId!==undefined&&!validActionId(effect.actionId))throw Error('持续效果快照行动编号无效');if(effect.paused!==undefined&&typeof effect.paused!=='boolean')throw Error('持续效果快照暂停状态无效');if(effect.timing){validateTiming(effect.timing);if(!!effect.paused!==(effect.timing.segmentStartedAt===null))throw Error('持续效果快照计时与暂停状态不一致');}}
+ for(const effect of snapshot.effects){if(!effect||typeof effect.id!=='string'||!effect.id||ids.has(effect.id))throw Error('持续效果快照编号无效或重复');ids.add(effect.id);if(!effect.skill||typeof effect.skill.id!=='string'||typeof effect.skill.name!=='string'||typeof effect.skill.reminder!=='string')throw Error('持续效果快照缺少完整能力规则');for(const key of ['holder','target','scope','command','condition'])if(typeof effect[key]!=='string')throw Error('持续效果快照字段无效');if(!['targeted','direct'].includes(effect.targetMode??'targeted'))throw Error('持续效果快照发动方式无效');normalizeEffectTarget(effect);if(effect.actionId!==undefined&&!validActionId(effect.actionId))throw Error('持续效果快照行动编号无效');if(effect.paused!==undefined&&typeof effect.paused!=='boolean')throw Error('持续效果快照暂停状态无效');if(effect.timing){validateTiming(effect.timing);if(!!effect.paused!==(effect.timing.segmentStartedAt===null))throw Error('持续效果快照计时与暂停状态不一致');}}
  snapshot.consumedActionIds??=[];if(!Array.isArray(snapshot.consumedActionIds)||snapshot.consumedActionIds.length>10000||snapshot.consumedActionIds.some(value=>!validActionId(value)))throw Error('持续效果快照行动编号无效');
  for(const effect of snapshot.effects){if(effect.stacking)effect.stacking=validateStacking(effect.stacking);if(effect.periodic){effect.periodic=validatePeriodic(effect.periodic);if(!!effect.paused!==(effect.periodic.segmentStartedAt===null))throw Error('持续效果快照周期与暂停状态不一致');}}
  return snapshot;
@@ -137,3 +147,12 @@ export function compile(store,chat,clock=null){
  return text;
 }
 export function currentPrompt(ctx){return managesModule(ctx,'effects')?'':compile(readStore(ctx),ctx?.chat,readCurrentScene(ctx).clock);}
+
+registerModuleCodec('effects', {
+    toLegacy(ctx, snapshot) {
+        const target = validateEffectsSnapshot(snapshot ?? { version: 1, enabled: true, limit: 30000, effects: [], consumedActionIds: [] });
+        const importedSkills = structuredClone(ctx?.chatMetadata?.amin_os_imported_skills_v1 ?? []);
+        return { [KEY]: { version: 1, skills: importedSkills, enabled: target.enabled, limit: target.limit, events: [{ op: 'restore', operationId: 'independent_effects', at: '1970-01-01T00:00:00.000Z', floor: ctx?.chat?.length ?? 0, anchor: [], snapshot: target }] } };
+    },
+    fromLegacy(ctx) { return snapshotEffects(readStore(ctx), ctx?.chat); },
+});

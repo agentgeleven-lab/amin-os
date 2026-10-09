@@ -1,4 +1,6 @@
-import {KEY,read,path,compile,LIBRARY_KEY,library,archive} from './model.js';
+import { saveChatMetadata } from '../shared/chat-save.js';
+import {KEY,read,path,compile,LIBRARY_KEY,library,archive,snapshotInformation} from './model.js';
+import {isIndependent} from '../story-state/access.js';
 import {acquireMetadataWrite,captureContext,subscribeStateChanges,metadataWriteStatus} from '../shared/operations.js';
 import {managesModule} from '../linkage/policy.js';
 import {prepareState2ManualWrite} from '../state2/runtime.js';
@@ -6,7 +8,7 @@ export const PROMPT_KEY='amin-os-information-panel';
 export function createInformation(context){
  let busy=false,disposed=false,message='尚未注入剧情提醒';const listeners=new Set();const notify=()=>{for(const fn of listeners)try{fn();}catch{}};
  const identity=c=>JSON.stringify([c?.groupId??null,c?.characters?.[c.characterId]?.avatar??null,c?.getCurrentChatId?.()]);
- const basis=(c,key)=>JSON.stringify([Object.hasOwn(c.chatMetadata,key),c.chatMetadata[key]]);
+ const basis=(c,key)=>isIndependent(c)&&key===KEY?JSON.stringify([true,snapshotInformation(c)]):JSON.stringify([Object.hasOwn(c.chatMetadata,key),c.chatMetadata[key]]);
  function capture(){if(disposed)throw Error('信息面板服务已关闭');const c=context();if(!c?.chatMetadata||c.getCurrentChatId?.()==null)throw Error('请先打开一个聊天');return {meta:c.chatMetadata,identity:identity(c),path:JSON.stringify(path(c.chat)),revision:c.chatMetadata[KEY],basis:basis(c,KEY),libraryBasis:basis(c,LIBRARY_KEY)};}
  function check(t){if(disposed)throw Error('信息面板服务已关闭');const c=context();if(!t||t.meta!==c?.chatMetadata||t.identity!==identity(c)||t.path!==JSON.stringify(path(c.chat))||t.revision!==c.chatMetadata[KEY]||t.basis!==basis(c,KEY)||t.libraryBasis!==basis(c,LIBRARY_KEY))throw Error('聊天、楼层或面板记录已变化，请重新打开面板后操作');return c;}
  function clear(){context()?.setExtensionPrompt?.(PROMPT_KEY,'',1,0,false);}
@@ -14,10 +16,10 @@ export function createInformation(context){
   if(busy)throw Error('正在保存，请稍候');const c=check(token);if(typeof c.saveMetadata!=='function')throw Error('当前前端缺少聊天保存接口');
   const release=acquireMetadataWrite(context,captureContext(context,[[KEY],[LIBRARY_KEY]]));let changes=[],nativeRollback,saved=false;busy=true;
   try{
-   changes=prepare(c).map(([key,value])=>({key,value,old:c.chatMetadata[key],existed:Object.hasOwn(c.chatMetadata,key),applied:JSON.stringify([true,value])}));
+   changes=prepare(c).map(([key,value])=>({key,value,old:c.chatMetadata[key],existed:Object.hasOwn(c.chatMetadata,key),applied:basis({...c,chatMetadata:{...c.chatMetadata,[key]:value}},key)}));
    for(const change of changes)c.chatMetadata[change.key]=change.value;
    nativeRollback=prepareState2ManualWrite(c,changes.map(change=>[change.key]));
-   clear();await c.saveMetadata();saved=true;
+   clear();await saveChatMetadata(c);saved=true;
    const current=context(),expected=new Map([[KEY,token.basis],[LIBRARY_KEY,token.libraryBasis]]);for(const change of changes)expected.set(change.key,change.applied);
    if(current?.chatMetadata!==c.chatMetadata||identity(current)!==token.identity||JSON.stringify(path(current?.chat))!==token.path||[...expected].some(([key,value])=>basis(c,key)!==value))throw Error('保存期间聊天、楼层或面板资料已变化，请返回原聊天检查已保存资料');
    // The caller may continue the same generation/apply flow after archiving its
@@ -27,8 +29,14 @@ export function createInformation(context){
   }catch(e){
    if(!saved){
     const allOwned=changes.every(change=>basis(c,change.key)===change.applied);
-    for(const change of changes)if(basis(c,change.key)===change.applied){if(change.existed)c.chatMetadata[change.key]=change.old;else delete c.chatMetadata[change.key];}
-    if(allOwned)nativeRollback?.();
+    if(isIndependent(c)){
+     nativeRollback?.();
+     for(const change of changes)if(change.key!==KEY&&basis(c,change.key)===change.applied){if(change.existed)c.chatMetadata[change.key]=change.old;else delete c.chatMetadata[change.key];}
+    }
+    else {
+     for(const change of changes)if(basis(c,change.key)===change.applied){if(change.existed)c.chatMetadata[change.key]=change.old;else delete c.chatMetadata[change.key];}
+     if(allOwned)nativeRollback?.();
+    }
    }
    message=(saved?'保存已完成，但需要重新核对：':'保存失败：')+e.message;throw e;
   }finally{busy=false;release();notify();}

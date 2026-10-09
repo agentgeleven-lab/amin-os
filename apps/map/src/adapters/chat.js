@@ -2,8 +2,15 @@ import { createDemoDocument } from '../core/demo.js';
 import { validateDocument } from '../core/protocol.js';
 import { createOperationService, subscribeStateChanges, acquireMetadataWrite, chatIdentity as operationIdentity } from '../../../shared/operations.js';
 import { nativeState2Status, prepareState2ManualWrite } from '../../../state2/runtime.js';
+import { saveChatMetadata } from '../../../shared/chat-save.js';
+import { isIndependent, legacyModule, registerModuleCodec, STATE_KEY } from '../../../story-state/access.js';
 
 export const STORAGE_KEY = 'dynamicMapV1';
+
+registerModuleCodec('map', {
+    toLegacy(ctx, snapshot) { return snapshot == null ? {} : { [STORAGE_KEY]: { updatedAt: ctx.chatMetadata?.[STATE_KEY]?.revision ?? 0, document: structuredClone(validateDocument(snapshot)) } }; },
+    fromLegacy(ctx) { const raw = ctx.chatMetadata?.[STORAGE_KEY]; return raw == null ? null : structuredClone(validateDocument(raw.document)); },
+});
 export function chatIdentity(ctx) {
     const chat = ctx?.getCurrentChatId?.();
     if (chat === null || chat === undefined || chat === '') return null;
@@ -46,11 +53,11 @@ export function bindChatStore(store, { getContext, storage, namespace, report = 
         loading = true;
         try {
             if (binding) {
-                const saved = ctx.chatMetadata[STORAGE_KEY];
+                const saved = legacyModule(ctx, 'map', STORAGE_KEY);
                 let raw = null;
                 try { raw = storage.getItem(keyFor(id)); } catch { /* Metadata remains usable. */ }
                 binding.raw = { metadata: saved ?? null, localRaw: raw };
-                const native = nativeState2Status(ctx).migrated;
+                const native = isIndependent(ctx) || nativeState2Status(ctx).migrated;
                 const cached = !native && raw ? JSON.parse(raw) : null;
                 // A migrated State 2.0 root is authoritative after branch restore.
                 // A newer browser cache belongs to an earlier view of the chat.
@@ -98,7 +105,7 @@ export function bindChatStore(store, { getContext, storage, namespace, report = 
             // Call immediately with the current context, never from a delayed save queue.
             const ctx = getContext();
             if (typeof ctx.saveMetadata !== 'function') throw new Error('酒馆未提供保存接口');
-            await ctx.saveMetadata();
+            await saveChatMetadata(ctx);
             if (binding === target && target.revision === revision && chatIdentity(getContext()) === target.id && getContext().chatMetadata === target.metadata) {
                 try { storage.setItem(keyFor(target.id), JSON.stringify({ ...envelope, synced: true })); } catch { /* Keep server result. */ }
                 currentReport('已保存到当前聊天', target);
@@ -113,15 +120,19 @@ export function bindChatStore(store, { getContext, storage, namespace, report = 
     // Travel/restore already patched authoritative metadata. Replacing the live
     // view must not re-persist it or revive a newer unsynced local cache.
     function applyExternalMetadata(detail, eventMetadata) {
-        if (disposed || !detail.paths.some(path => path[0] === STORAGE_KEY)) return;
+        if (disposed || !detail.paths.some(path => path[0] === STORAGE_KEY || path[0] === STATE_KEY)) return;
         const ctx = getContext();
         if (!binding || binding.metadata !== ctx.chatMetadata || (eventMetadata && eventMetadata !== ctx.chatMetadata) || binding.id !== chatIdentity(ctx) || detail.identity !== operationIdentity(ctx)) return;
         if (!['applied', 'saved'].includes(detail.phase)) return;
-        const raw = ctx.chatMetadata[STORAGE_KEY];
+        const raw = legacyModule(ctx, 'map', STORAGE_KEY);
         let document;
         try {
             document = raw === undefined ? createDemoDocument() : structuredClone(validateDocument(raw.document));
         } catch (error) { binding.invalid = true; currentReport('外部地图资料无法载入，原记录保留：' + error.message); return; }
+        // Independent commits announce logical app paths together. A change in
+        // another app must not replace this map's unsaved editing session.
+        if (isIndependent(ctx) && detail.phase === 'applied' &&
+            (raw === undefined && binding.raw === undefined || JSON.stringify(raw?.document) === JSON.stringify(binding.raw?.document))) return;
         if (detail.phase === 'applied') {
             generation++; binding.revision++; binding.invalid = false; binding.raw = structuredClone(raw);
             loading = true;

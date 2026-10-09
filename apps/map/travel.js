@@ -4,6 +4,7 @@ import { KEY as SCENE_KEY, readStore, readCurrentScene, transition, appendEvent 
 import { contextExpiryPreview } from '../effects/model.js';
 import { validateDocument } from './src/core/protocol.js';
 import { assertMapReady } from './src/integrations/runtime.js';
+import { isIndependent, legacyModule } from '../story-state/access.js';
 
 const MAP_KEY = 'dynamicMapV1', HISTORY_KEY = 'dynamicMapPositionHistoryV1';
 const clone = value => structuredClone(value);
@@ -11,7 +12,7 @@ const object = value => value !== null && typeof value === 'object' && !Array.is
 const paths = () => [[MAP_KEY], [SCENE_KEY], [HISTORY_KEY], ['amin_os_effects_v1']];
 
 export function readTravelMap(ctx) {
-    const raw = ctx?.chatMetadata?.[MAP_KEY];
+    const raw = legacyModule(ctx, 'map', MAP_KEY);
     if (!object(raw) || !object(raw.document) || !Number.isFinite(raw.updatedAt)) throw Error('请先在地图应用保存当前聊天地图。');
     return { ...clone(raw), document: validateDocument(clone(raw.document)) };
 }
@@ -52,6 +53,7 @@ export function travelDestinations(ctx, methodId) {
 }
 
 function positionPatch(ctx, mapId, nodeId) {
+    if (isIndependent(ctx)) return null;
     const raw = ctx.chatMetadata[HISTORY_KEY];
     if (raw === undefined) return null;
     if (!object(raw) || !object(raw.records) || (raw.sequence !== undefined && !Array.isArray(raw.sequence))) throw Error('地图位置历史格式无效，原记录未修改。');

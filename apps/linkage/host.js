@@ -1,6 +1,7 @@
 import { chatIdentity } from '../shared/operations.js';
 import { managesModule, readLinkageSettings } from './policy.js';
 import { isUnifiedEntry, hasUnifiedPlaceholder, LINKAGE_PLACEHOLDER } from './lorebook.js';
+import { isIndependent } from '../story-state/access.js';
 
 const storyTypes = new Set(['normal', 'regenerate', 'swipe']);
 const buckets = ['chatLore', 'characterLore', 'globalLore', 'personaLore'];
@@ -8,6 +9,7 @@ const requiredEvents = ['GENERATION_AFTER_COMMANDS', 'WORLDINFO_ENTRIES_LOADED',
 const toolScopes = new WeakMap();
 let sequence = 0;
 export const LINKAGE_DATA_PROMPT_KEY = 'amin-os-linkage-data';
+export const LINKAGE_UPDATE_PROMPT_KEY = 'amin-os-linkage-update';
 
 const contextKey = ctx => ctx?.eventSource && typeof ctx.eventSource === 'object' ? ctx.eventSource : ctx?.chatMetadata;
 function inToolScope(ctx) {
@@ -50,13 +52,20 @@ function promptContext(ctx, active) {
 export function createLinkageHost(getContext, {
     captureGeneration, collectReply, buildPrompt, buildDataPrompt, beforeGeneration, cancelGeneration = () => {}, report = () => {},
     readSettings = readLinkageSettings, manages = managesModule,
+    independent = isIndependent,
 } = {}) {
     const initial = getContext(), events = initial?.eventTypes ?? initial?.event_types ?? {}, source = initial?.eventSource;
     const supported = !!source?.on && requiredEvents.every(key => events[key]) && typeof buildPrompt === 'function'
         && typeof captureGeneration === 'function' && typeof collectReply === 'function'
         && typeof buildDataPrompt === 'function' && typeof initial?.setExtensionPrompt === 'function';
+    const independentSupported = !!source?.on && requiredEvents.filter(key => key !== 'WORLD_INFO_ACTIVATED').every(key => events[key])
+        && typeof buildPrompt === 'function' && typeof captureGeneration === 'function' && typeof collectReply === 'function'
+        && typeof buildDataPrompt === 'function' && typeof initial?.setExtensionPrompt === 'function';
+    const hostReady = ctx => independent(ctx) ? independentSupported : supported;
     const subscriptions = [];
-    let run = null, timer = null, disposed = false, epoch = 0, message = supported ? '等待酒馆生成和统一世界书条目' : '当前酒馆缺少统一联动所需的生成或世界书事件；不会自动接收更新';
+    let run = null, timer = null, disposed = false, epoch = 0, message = hostReady(initial)
+        ? independent(initial) ? '等待酒馆生成与 Amin 更新协议' : '等待酒馆生成和统一世界书条目'
+        : '当前酒馆缺少统一联动所需的生成或世界书事件；不会自动接收更新';
     const say = value => { message = value; try { report(value); } catch { /* Status UI cannot interrupt host generation. */ } };
     const current = active => {
         const ctx = getContext();
@@ -64,6 +73,7 @@ export function createLinkageHost(getContext, {
     };
     function clearData() {
         initial?.setExtensionPrompt?.(LINKAGE_DATA_PROMPT_KEY, '', 1, 0, false, 0);
+        initial?.setExtensionPrompt?.(LINKAGE_UPDATE_PROMPT_KEY, '', 1, 0, false, 0);
     }
     function injectData(active) {
         const ctx = getContext();
@@ -86,6 +96,21 @@ export function createLinkageHost(getContext, {
             } catch { active.failed = true; clearData(); return false; }
         });
     }
+    function injectIndependentRules(active) {
+        if (!active.independent || !active.write || !current(active) || !readSettings(getContext()).enabled) return;
+        const value = buildPrompt(promptContext(getContext(), active), { purpose: active.purpose, write: true });
+        if (typeof value !== 'string') throw Error('独立剧情更新规则无效');
+        active.prompt = value;
+        getContext().setExtensionPrompt(LINKAGE_UPDATE_PROMPT_KEY, value, 1, 0, false, 0, () => {
+            try {
+                if (run !== active || !current(active) || !independent(getContext()) || !readSettings(getContext()).enabled) return false;
+                if (buildPrompt(promptContext(getContext(), active), { purpose: active.purpose, write: true }) !== active.prompt) {
+                    active.failed = true; clearData(); return false;
+                }
+                return true;
+            } catch { active.failed = true; clearData(); return false; }
+        });
+    }
     function cancel(reason = '') {
         epoch++;
         clearData();
@@ -98,8 +123,8 @@ export function createLinkageHost(getContext, {
         if (dryRun) return;
         cancel();
         if (disposed) return;
-        if (!supported) { say('当前宿主缺少联动生成接口或事件，本轮无法接收更新'); return; }
         const ctx = getContext();
+        if (!hostReady(ctx)) { say('当前宿主缺少联动生成接口或事件，本轮无法接收更新'); return; }
         if (!readSettings(ctx).enabled) { say('当前聊天未启用统一联动更新；请在此分支启用并保存设置'); return; }
         if (options?.signal?.aborted) { say('本轮生成已取消，未建立更新接收记录'); return; }
         if (!ctx?.chatMetadata) { say('当前聊天资料尚未就绪，未建立更新接收记录'); return; }
@@ -108,21 +133,27 @@ export function createLinkageHost(getContext, {
         type ||= 'normal';
         if (beforeGeneration) {
             const identity = chatIdentity(ctx), metadata = ctx.chatMetadata, started = epoch;
-            await beforeGeneration(type);
+            const ready = await beforeGeneration(type);
             if (disposed || epoch !== started || options?.signal?.aborted || getContext()?.chatMetadata !== metadata || chatIdentity(getContext()) !== identity) return;
+            if (ready === false) {
+                say('Amin 当前剧情资料尚未初始化；请在设置 → 剧情存储中导入旧资料或开始空白资料。正文可正常生成，本轮不注入更新规则。');
+                return;
+            }
         }
         run = {
             id: ++sequence, type, metadata: ctx.chatMetadata, identity: chatIdentity(ctx), signal: options?.signal,
+            independent: independent(ctx),
             purpose: type === 'quiet' ? 'tool' : 'story', write: storyTypes.has(type),
             before: messageSnapshot(ctx), selected: null, prompt: '', data: '', captured: false,
             excludedReply: ['regenerate', 'swipe'].includes(type) && !ctx.chat?.at(-1)?.is_user && !ctx.chat?.at(-1)?.is_system ? ctx.chat?.at(-1) : null,
             candidate: null, ended: false, failed: false,
         };
-        say(run.write ? '已收到当前聊天的生成事件，等待加载统一更新规则' : '本轮为续写或工具生成，仅提供资料，不接收自动更新');
+        say(run.write ? run.independent ? '已收到当前聊天的生成事件，等待组装 Amin 更新规则' : '已收到当前聊天的生成事件，等待加载统一更新规则' : '本轮为续写或工具生成，仅提供资料，不接收自动更新');
         injectData(run);
+        injectIndependentRules(run);
         options?.signal?.addEventListener?.('abort', () => { if (run?.signal === options.signal) cancel('生成已停止，未接收本轮统一更新'); }, { once: true });
     }
-    function loaded(payload) {
+    async function loaded(payload) {
         const ctx = getContext(), entries = [];
         if (!payload || typeof payload !== 'object') return;
         for (const bucket of buckets) if (Array.isArray(payload[bucket])) {
@@ -137,11 +168,28 @@ export function createLinkageHost(getContext, {
         const owned = entries.filter(row => isUnifiedEntry(row.entry));
         for (const row of owned) row.list[row.index] = disabledCopy(row.entry);
         const active = run;
-        if (!supported || !current(active) || !readSettings(ctx).enabled || active.type === 'quiet' && inToolScope(ctx)) { clearData(); return; }
+        if (!hostReady(ctx) || !current(active) || !readSettings(ctx).enabled || active.type === 'quiet' && inToolScope(ctx)) { clearData(); return; }
         // Refresh after the host appends input/removes a regenerated candidate,
         // before it snapshots extension prompts. This also works without a bound book.
         injectData(active);
         if (!active.write) return;
+        if (active.independent) {
+            try {
+                injectIndependentRules(active);
+                if (!active.prompt.trim()) { say('没有允许更新的模块；本轮仅提供剧情资料'); return; }
+                // This event runs after the host appended user input or removed
+                // the regenerated reply. No worldbook activation is required.
+                if (!active.captured) {
+                    active.before = messageSnapshot(ctx);
+                    const accepted = await captureGeneration(active.type, { excludedReply: active.excludedReply });
+                    if (accepted === false) throw Error('当前不能建立独立剧情更新基线，请完成待保存操作后重试');
+                    if (!current(active) || run !== active) return;
+                    active.captured = true;
+                }
+                say('已注入独立剧情更新规则，等待新的完整角色回复');
+            } catch (error) { active.failed = true; clearData(); say('本轮独立更新基线未建立：' + error.message); }
+            return;
+        }
         // Keep exactly one applicable owned entry across overlapping book bindings.
         const selected = owned.find(({ entry }) => !entry.disable && hasUnifiedPlaceholder(entry.content)
             && (!Array.isArray(entry.triggers) || !entry.triggers.length || entry.triggers.includes(active.type)));
@@ -162,6 +210,7 @@ export function createLinkageHost(getContext, {
     }
     async function activated(entries) {
         const active = run;
+        if (active?.independent) return;
         if (!current(active) || active.failed || !active.write || active.captured || !Array.isArray(entries)) return;
         if (!entries.some(entry => isUnifiedEntry(entry) && entry.amin_os_linkage_run === active.id && entryKey(entry) === active.selected)) return;
         try {
@@ -198,7 +247,8 @@ export function createLinkageHost(getContext, {
         if (!run) return;
         if (!run.write) { cancel(); return; }
         if (!run.captured) {
-            if (run.selected && !run.failed) say('本轮规则已展开，但未确认统一条目实际激活，未接收更新；请检查世界书预算与预设');
+            if (run.independent && !run.failed) say('本轮未建立 Amin 更新基线；正文可正常生成，未修改当前资料');
+            else if (run.selected && !run.failed) say('本轮规则已展开，但未确认统一条目实际激活，未接收更新；请检查世界书预算与预设');
             else if (!run.selected && message === '已收到当前聊天的生成事件，等待加载统一更新规则') say('本轮未确认世界书加载和统一更新规则激活；此提示不代表变量恢复结果或小白执行结果，请另看“剧情变量 · 小白变量 2.0”的恢复状态');
             cancel(); return;
         }
@@ -222,7 +272,7 @@ export function createLinkageHost(getContext, {
         GENERATION_AFTER_COMMANDS: start, WORLDINFO_ENTRIES_LOADED: loaded, WORLD_INFO_ACTIVATED: activated,
         MESSAGE_RECEIVED: received, GENERATION_ENDED: ended,
         GENERATION_STOPPED: () => cancel('生成已停止，未接收本轮统一更新'),
-        CHAT_CHANGED: () => cancel('聊天已切换，等待当前聊天的统一条目'),
+        CHAT_CHANGED: () => cancel(independent(getContext()) ? '聊天已切换，等待当前聊天的 Amin 更新协议' : '聊天已切换，等待当前聊天的统一条目'),
     };
     if (source?.on) for (const [key, handler] of Object.entries(handlers)) if (events[key]) {
         const guarded = (...args) => {
@@ -232,7 +282,7 @@ export function createLinkageHost(getContext, {
         source.on(events[key], guarded); subscriptions.push([events[key], guarded]);
     }
     return {
-        status: () => ({ supported, message, active: !!run, captured: !!run?.captured }),
+        status: () => ({ supported: hostReady(getContext()), message, active: !!run, captured: !!run?.captured }),
         reset: () => cancel(),
         destroy() {
             disposed = true; cancel();

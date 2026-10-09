@@ -11,6 +11,7 @@ import { validateTemplate } from '../status/state-tools.js';
 import { validateDocument } from '../map/src/core/protocol.js';
 import { normalizeConfig } from '../dice/engine.js';
 import { uuid } from '../../uuid.js';
+import { STATE_KEY, isIndependent, readModule, readStoryRoot } from '../story-state/access.js';
 
 const clone = value => structuredClone(value);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -37,8 +38,18 @@ function validateDice(input) {
     }return clone(input);
 }
 function validateInformation(input) {
-    version(input,['version','enabled','limit','records'],'信息面板'); if(typeof input.enabled!=='boolean')throw Error('信息面板开关无效。');bounded(input.limit,1,10000000,'信息提醒上限');list(input.records,1000,'信息面板');unique(input.records,'信息面板');
-    for(const record of input.records)Information.validateRecord(record);return clone(input);
+    version(input,['version','enabled','limit','records','modificationHistory'],'信息面板'); if(typeof input.enabled!=='boolean')throw Error('信息面板开关无效。');bounded(input.limit,1,10000000,'信息提醒上限');list(input.records,1000,'信息面板');unique(input.records,'信息面板');
+    for(const record of input.records)Information.validateRecord(record);
+    if(input.modificationHistory!==undefined){
+        list(input.modificationHistory,2000,'信息修改记录');unique(input.modificationHistory,'信息修改记录');
+        for(const entry of input.modificationHistory){
+            rootShape(entry,['id','recordId','at','reason','before','snapshot','changes','action'],'信息修改记录');
+            if(typeof entry.id!=='string'||!entry.id||typeof entry.recordId!=='string'||entry.recordId!==entry.snapshot?.id||typeof entry.at!=='string')throw Error('信息修改记录依据无效。');
+            Information.validateRecord(entry.before);Information.validateRecord(entry.snapshot);
+            if(entry.changes!==undefined&&!Array.isArray(entry.changes))throw Error('信息修改记录差异无效。');
+        }
+    }
+    return clone(input);
 }
 function validateOrganizations(input) {
     version(input,['version','doc','locks','assessment'],'势力快照');Organizations.validate(input.doc);list(input.locks,10000,'势力锁定字段');if(input.locks.some(p=>typeof p!=='string'))throw Error('势力锁定字段无效。');
@@ -65,7 +76,7 @@ export function validateModules(modules) {
     }return clone(modules);
 }
 export function materialize(ctx) {
-    const meta=ctx.chatMetadata, result=Object.fromEntries(Object.keys(MODULE_LABELS).map(k=>[k,null]));
+    const meta=ctx.chatMetadata, result=Object.fromEntries(Object.keys(MODULE_LABELS).map(k=>[k,isIndependent(ctx)?readModule(ctx,k)??null:null]));
     // Legacy readers sometimes coalesce null/false into an empty store. An
     // explicit malformed root must never be treated as an absent module here.
     for(const [name,key]of Object.entries(keys))if(own(meta,key)){
@@ -80,9 +91,11 @@ export function materialize(ctx) {
     if(own(meta,Linkage.KEY))result.linkage=Linkage.readLinkageState(ctx);
     if(own(meta,keys.dice))result.dice=validateDice(readRaw(ctx,keys.dice));
     if(own(meta,keys.map)){const envelope=readRaw(ctx,keys.map);rootShape(envelope,['updatedAt','document'],'地图存储');if(!Number.isFinite(envelope.updatedAt))throw Error('地图版本时间无效。');result.map=validateDocument(envelope.document);}
-    if(own(meta.variables??{},'状态栏')){const raw=meta.variables.状态栏;result.status=typeof raw==='string'?JSON.parse(raw):clone(raw);}
-    if(own(meta.variables??{},Organizations.ROOT)){const extra=meta.amin_os_organizations_v1??{};result.organizations={version:1,doc:Organizations.read(meta.variables[Organizations.ROOT]),locks:clone(extra.locks??[]),assessment:clone(extra.assessment??null)};}
-    if(own(meta,Information.KEY)){const store=Information.read(ctx);result.information={version:1,enabled:store.enabled,limit:store.limit,records:Information.current(store,ctx.chat)};}
+    const rawStatus=readStoryRoot(ctx,'状态栏');
+    if(rawStatus!==undefined)result.status=typeof rawStatus==='string'?JSON.parse(rawStatus):clone(rawStatus);
+    const rawOrganizations=readStoryRoot(ctx,Organizations.ROOT);
+    if(rawOrganizations!==undefined){const extra=meta.amin_os_organizations_v1??result.organizations??{};result.organizations={version:1,doc:Organizations.read(rawOrganizations),locks:clone(extra.locks??[]),assessment:clone(extra.assessment??null)};}
+    if(own(meta,Information.KEY))result.information=Information.snapshotInformation(ctx);
     if(own(meta,Information.LIBRARY_KEY))result.informationLibrary=Information.library(ctx);
     return validateModules(result);
 }
@@ -105,6 +118,33 @@ function positionHistory(ctx, document) {
 }
 export function restorePatches(ctx, modules, {at=new Date().toISOString(),makeId=uuid}={}) {
     validateModules(modules);materialize(ctx); // Refuse corrupt/newer existing data before creating any replacement.
+    if(isIndependent(ctx)){
+        // A null snapshot means no current facts. Replacing the entire typed
+        // state is essential: no persisted legacy root exists to remove here.
+        const target=Object.fromEntries(Object.keys(MODULE_LABELS).map(name=>[name,clone(modules[name]??null)])),warnings=[];
+        target.informationLibrary=null;target.linkage=null;
+        if(target.journal!==null){
+            const restored=Journal.restoreJournal(ctx,target.journal,{at,makeId,warnings});
+            target.journal=Journal.snapshotJournal(restored,ctx.chat);
+        }
+        if(target.dice!==null){
+            const appended=target.dice.rolls.some(roll=>roll.status==='appended');
+            for(const roll of target.dice.rolls){if(roll.status==='appended')roll.status='rolled';delete roll.pending;}
+            if(appended)warnings.push('已追加草稿的骰点恢复为固定未追加状态；聊天输入框不会改写。');
+        }
+        const patches=[{path:[STATE_KEY],value:{version:1,revision:ctx.chatMetadata[STATE_KEY].revision,updatedAt:at,modules:target}}];
+        // These existing configurations are outside the current story state.
+        // An absent setting in a snapshot cannot silently clear a live library.
+        if(modules.informationLibrary!==null)patches.push({path:[Information.LIBRARY_KEY],value:clone(modules.informationLibrary)});
+        if(modules.linkage!=null){
+            const current=Linkage.readLinkageState(ctx),next=clone(modules.linkage);
+            const records=new Map(next.applied.map(record=>[record.id,{...record,archived:true}]));
+            for(const record of current.applied)records.set(record.id,record);
+            next.applied=[...records.values()];Linkage.validateLinkageState(next);patches.push({path:[Linkage.KEY],value:next});
+            if(modules.linkage.applied.length)warnings.push('存档中的联动记录作为归档历史保留；当前已执行记录的去重凭据不会回滚。');
+        }
+        return {patches,warnings:[...new Set(warnings)]};
+    }
     const patches=[],warnings=[],put=(path,value)=>patches.push({path,value}),remove=path=>patches.push({path,remove:true});
     for(const[name,builder,empty]of [['characters',Characters.buildRestore,Characters.emptyState],['inventory',Inventory.buildRestoreStore,Inventory.emptyState],['relationships',Relationships.buildRestore,Relationships.emptyState]]){
         if(modules[name]!==null||own(ctx.chatMetadata,keys[name]))put([keys[name]],builder(ctx,modules[name]??empty(),{id:makeId(),at,reason:'存档恢复到当前楼层'}));

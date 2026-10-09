@@ -3,10 +3,13 @@ import { uuid } from '../../uuid.js';
 import { createOperationService, subscribeStateChanges, chatIdentity, chatPath } from '../shared/operations.js';
 import { checkpointState } from '../status/state-checkpoint.js';
 import { adapters as allAdapters } from './registry.js';
-import { KEY, MODULES, SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate, readLinkageState, readLinkageSettings, validateLinkageState, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
+import { KEY, MODULES, SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate, readLinkageState, readLinkageSettings, validateLinkageState, compactLinkageReceipts, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
 import { parseUpdate, hasUpdate } from './protocol.js';
 import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules, buildDataPromptReport } from './prompt.js';
 import { buildReferenceIndex } from './references.js';
+import { isIndependent, STATE_KEY, toLegacyContext } from '../story-state/access.js';
+import { sha256HexSync } from '../tts/source-hash.js';
+import { allocateUpdateEntityIds } from './entity-ids.js';
 
 const clone = value => structuredClone(value), same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -36,7 +39,12 @@ function pathModule(path) {
     return Object.keys(MODULES).find(id => MODULES[id][1] === path[0]) ?? null;
 }
 const sourceFor = (ctx, index = (ctx.chat?.length ?? 0) - 1) => ({ identity: chatIdentity(ctx), path: chatPath(ctx.chat), index, swipe: ctx.chat?.[index]?.swipe_id ?? 0, text: ctx.chat?.[index]?.mes ?? '' });
-const sourceEqual = (a,b) => a.identity === b.identity && a.index === b.index && a.swipe === b.swipe && a.text === b.text && same(a.path,b.path);
+const hash = value => 'sha256:' + sha256HexSync(typeof value === 'string' ? value : JSON.stringify(value));
+const compactSource = source => ({ identity: source.identity, index: source.index, swipe: source.swipe ?? 0,
+    textHash: source.textHash ?? hash(source.text), pathHash: source.pathHash ?? hash(source.path) });
+const sourceEqual = (a,b) => a.identity === b.identity && a.index === b.index && (a.swipe ?? 0) === (b.swipe ?? 0)
+    && (a.textHash ?? hash(a.text)) === (b.textHash ?? hash(b.text)) && (a.pathHash ?? hash(a.path)) === (b.pathHash ?? hash(b.path));
+const changesEqual = (record, changes) => record.changesHash ? record.changesHash === hash(changes) : same(record.changes, changes);
 
 export function createLinkageService(getContext = () => globalThis.SillyTavern?.getContext?.(), { adapters = allAdapters, createId = uuid, now = () => new Date().toISOString(), buildPrompt = buildUnifiedPrompt, manualModules = null } = {}) {
     if (manualModules !== null && (!Array.isArray(manualModules) || !manualModules.length || manualModules.some(id => !['characters','inventory','relationships','scene','journal'].includes(id)) || new Set(manualModules).size !== manualModules.length)) throw Error('手动生成范围无效。');
@@ -48,7 +56,10 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     let pending = null, generation = null, message = '', hostMessage = '', disposed = false, templateBusy = false;
     const notify = () => { for (const callback of [...listeners]) { try { callback(); } catch { /* A view cannot interrupt a commit. */ } } };
     const context = () => { if (disposed) throw Error('联动更新服务已关闭。'); const ctx = getContext(); if (!ctx?.chatMetadata || (ctx.getCurrentChatId?.() ?? ctx.chatId) == null) throw Error('请先打开聊天。'); return ctx; };
-    const rawData = ctx => Object.fromEntries(adapters.map(a => [a.id, a.read(ctx)]));
+    const rawData = ctx => {
+        const readable = isIndependent(ctx) ? toLegacyContext(ctx) : ctx;
+        return Object.fromEntries(adapters.map(a => [a.id, a.read(readable)]));
+    };
     function allowedPatch(ctx, patch) {
         const id = pathModule(patch.path);
         if (!id || !canWrite(ctx,id)) throw Error(`本次操作没有修改 ${id ? MODULES[id][0] : patch.path.join('.')} 的权限。`);
@@ -65,12 +76,17 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         const ctx = options.candidate ? ensureGeneration(options.candidate) : context();
         const settings = readLinkageState(ctx);
         if (!settings.enabled && !manualScope) throw Error('请先启用统一联动更新。');
-        const parsed = parseUpdate(raw);
+        const input = parseUpdate(raw), independent = isIndependent(ctx);
+        const currentData = independent ? rawData(ctx) : null;
+        const existingIds = independent ? [...buildReferenceIndex(currentData).entities.map(entity => entity.id),
+            ...(currentData.relationships?.thresholdRules ?? []).map(rule => `relationships:${rule.id}`)] : [];
+        const allocated = independent ? allocateUpdateEntityIds(input, { createId, existingIds }) : null;
+        const parsed = allocated?.update ?? input;
         if (!parsed.changes.length) throw Error('本次没有需要更新的内容。');
         const source = options.candidate?.source ?? sourceFor(ctx);
-        if (settings.applied.some(record => !record.archived && sourceEqual(record.source, source) && (options.candidate || same(record.changes, parsed.changes)))) throw Error('这次来源的更新已经应用，不会重复执行。');
-        let token = operation.capture(paths);
-        const operationId = createId(), at = now(), sandbox = { ...ctx, chatMetadata: clone(ctx.chatMetadata) };
+        if (settings.applied.some(record => !record.archived && sourceEqual(record.source, source) && (options.candidate || changesEqual(record, input.changes)))) throw Error('这次来源的更新已经应用，不会重复执行。');
+        let token = operation.capture(independent ? [...paths, [STATE_KEY]] : paths);
+        const operationId = createId(), at = now(), sandbox = independent ? toLegacyContext(ctx) : { ...ctx, chatMetadata: clone(ctx.chatMetadata) };
         const touched = [], descriptions = [], changes = [], beforeData = rawData(sandbox);
         for (const [index, change] of parsed.changes.entries()) {
             if (!canWrite(ctx,change.module)) throw Error(`${MODULES[change.module][0]} 未在本次操作的更新范围内。`);
@@ -90,7 +106,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         const priorMissing = new Set(beforeRefs.unresolved.map(referenceKey));
         const newMissing = afterRefs.unresolved.filter(item => !priorMissing.has(referenceKey(item)));
         if (newMissing.length) throw Error('这批更新会产生新的无效引用：' + newMissing.map(item => `${item.from} → ${item.to}`).join('；'));
-        if (touched.some(path => path[0] === 'variables')) {
+        if (!independent && touched.some(path => path[0] === 'variables')) {
             const checkpointCtx = { ...sandbox, saveMetadataDebounced() {} };
             if (checkpointState(checkpointCtx)) {
                 touched.push(checkpointPath);
@@ -100,7 +116,10 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
             }
         }
         const nextSettings = clone(settings);
-        nextSettings.applied.push({ id: operationId, at, source: clone(source), changes: parsed.changes });
+        if (independent) {
+            nextSettings.applied = compactLinkageReceipts(nextSettings).applied.slice(-63);
+            nextSettings.applied.push({ id: operationId, at, source: compactSource(source), changes: [], changesHash: hash(input.changes) });
+        } else nextSettings.applied.push({ id: operationId, at, source: clone(source), changes: parsed.changes });
         sandbox.chatMetadata[KEY] = validateLinkageState(nextSettings); touched.push([KEY]);
         const minimal = [...new Map(touched.map(path => [JSON.stringify(path),path])).values()].filter((path, _, all) => !all.some(other => other.length < path.length && other.every((part,i) => part === path[i])));
         const patches = minimal.flatMap(path => {
@@ -108,7 +127,8 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
             return same(before,after) ? [] : [{ path, ...(after.exists ? { value: after.value } : { remove:true }) }];
         });
         operation.stage({ label:batchLabel, patches, summary:descriptions },token);
-        pending = { label:batchLabel, changes, summary:descriptions, warnings:afterRefs.unresolved.length ? ['已有未解析引用保持原样，请在关联目录检查。'] : [], operationId, candidateId:options.candidate?.id };
+        pending = { label:batchLabel, changes, summary:descriptions, warnings:afterRefs.unresolved.length ? ['已有未解析引用保持原样，请在关联目录检查。'] : [], operationId, candidateId:options.candidate?.id,
+            ...(allocated ? { entityIds: clone(allocated.mapping) } : {}) };
         message = '全部变更已校验；确认后作为同一次操作保存。'; notify(); return preview();
     }
     function preview() { if (!operation.preview()) return null; return clone(pending ?? { label:'保存联动设置', changes:[], summary:[], warnings:[] }); }
@@ -122,7 +142,8 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         if (templateBusy) throw Error('正在保存通用模板，请稍候。');
         if (manualScope) throw Error('手动资料生成不能修改统一联动设置。');
         const ctx = context(), token = operation.capture([[KEY]]), previous = readLinkageState(ctx);
-        const next = validateLinkageState({ ...clone(input), version:1, applied:previous.applied });
+        const requested = { ...clone(input), version:1, applied:previous.applied };
+        const next = isIndependent(ctx) ? compactLinkageReceipts(requested) : validateLinkageState(requested);
         operation.stage({ label:'保存联动设置', patches:[{path:[KEY],value:next}] },token); pending = null;
         try { const result = await operation.confirm(); message = '联动设置已保存。'; generation = null; candidates.clear(); return result; }
         finally { notify(); }

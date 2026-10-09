@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { collectLinkedContext, DEFAULT_LINKED_SOURCES, LINKED_SOURCES } from '../apps/reply/linked-context.js';
 import { ROOTS, OWNED_VARIABLE_ROOTS, MIGRATION_KEY, BACKUP_KEY, MIGRATION_OWNER } from '../apps/state2/storage.js';
+import { STATE_KEY } from '../apps/story-state/access.js';
+import { emptyState } from '../apps/story-state/schema.js';
 
 const json = value => JSON.stringify(value);
 function fixture() {
@@ -45,6 +47,24 @@ function fixture() {
     };
     return ctx;
 }
+
+test('independent linked context reads canonical records, respects exclusions, and ignores inert native roots', () => {
+    const ctx = fixture(), state = emptyState();
+    state.modules.characters = { version: 1, characters: [{ id: 'alice', name: 'Alice', kind: 'pc', notes: 'CURRENT_CANONICAL_NOTE', stats: [] }] };
+    ctx.chatMetadata[STATE_KEY] = state;
+    delete ctx.extensionSettings.LittleWhiteBox;
+    const before = structuredClone(ctx.chatMetadata);
+    const result = collectLinkedContext(ctx, { linkedSources: ['characters'] });
+    assert.match(result.selected.map(record => record.text).join('\n'), /CURRENT_CANONICAL_NOTE/);
+    assert.doesNotMatch(result.records.map(record => record.text).join('\n'), /SECRET_BOB_PLAN|Keep a promise/);
+    const omitted = collectLinkedContext(ctx, { linkedSources: ['characters'], excludedLinkedRecords: ['characters:alice'] });
+    assert.equal(omitted.records.length, 1);
+    assert.equal(omitted.selected.length, 0);
+    ctx.chatMetadata.variables[ROOTS.characters] = 'old native data changed';
+    assert.equal(collectLinkedContext(ctx, { linkedSources: ['characters'] }).stamp, result.stamp);
+    ctx.chatMetadata.variables = before.variables;
+    assert.deepEqual(ctx.chatMetadata, before);
+});
 
 test('linked context reads selected current State2 records without modifying metadata', () => {
     const ctx = fixture(), before = structuredClone(ctx.chatMetadata);

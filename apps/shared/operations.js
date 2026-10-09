@@ -16,7 +16,7 @@ export const PATCH_ROOTS = Object.freeze([
     'amin_os_saves_v1', 'amin_os_scene_v1', 'amin_os_effects_v1', 'amin_os_dice_v1',
     'amin_os_journal_v1', 'amin_os_information_v1', 'amin_os_information_library_v1', 'dynamicMapV1',
     'world_status_hud_history_v1', 'amin_os_organizations_history_v1', 'dynamicMapPositionHistoryV1',
-    'amin_os_linkage_v1', 'amin_os_state2_v1', 'amin_os_state2_backup_v1',
+    'amin_os_linkage_v1', 'amin_os_state2_v1', 'amin_os_state2_backup_v1', 'amin_os_state_v1', 'amin_os_imported_skills_v1', 'amin_os_legacy_source_v1',
 ]);
 const roots = new Set(PATCH_ROOTS), variableRoots = new Set(['状态栏', '势力资料', 'AminOS人物', 'AminOS背包', 'AminOS关系', 'AminOS场景', 'AminOS剧情', 'AminOS效果', 'AminOS地图', 'AminOS信息', 'AminOS骰子']);
 
@@ -42,9 +42,9 @@ function safePath(path) {
     }
     return [...path];
 }
-function writablePath(path) {
+function writablePath(path, organizationRemoval = false) {
     safePath(path);
-    const organizationField = path[0] === 'amin_os_organizations_v1' && path.length >= 2 && ['locks', 'assessment', 'backups'].includes(path[1]);
+    const organizationField = path[0] === 'amin_os_organizations_v1' && (path.length === 1 && organizationRemoval || path.length >= 2 && ['locks', 'assessment', 'backups'].includes(path[1]));
     const stateCheckpoint = path.length === 3 && path[0] === 'extensions' && path[1] === 'LittleWhiteBox' && ['stateCkptV2','stateLogV2'].includes(path[2]);
     const diceRule = path.length === 2 && path[0] === 'LWB_RULES_V2' && (path[1] === 'AminOS骰子' || path[1].startsWith('AminOS骰子.'));
     if (!(roots.has(path[0]) || organizationField || stateCheckpoint || diceRule || (path[0] === 'variables' && path.length >= 2 && variableRoots.has(path[1])))) {
@@ -211,7 +211,7 @@ function validatePatches(patches) {
     if (!Array.isArray(patches) || !patches.length || patches.length > 256) fail('INVALID_PATCH', '操作必须包含 1 至 256 项资料变更。');
     const output = patches.map(patch => {
         if (!plain(patch) || Object.keys(patch).some(key => !['path', 'value', 'remove'].includes(key))) fail('INVALID_PATCH', '操作变更格式无效。');
-        writablePath(patch.path);
+        writablePath(patch.path, patch.remove === true);
         if (own(patch, 'remove')) {
             if (patch.remove !== true || own(patch, 'value')) fail('INVALID_PATCH', '删除操作不能同时指定新值。');
             return { path: [...patch.path], remove: true };

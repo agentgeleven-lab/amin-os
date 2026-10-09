@@ -1,12 +1,14 @@
+import { saveChatMetadata } from '../shared/chat-save.js';
 import { chatRevision } from '../shared/chat-revision.js';
 import { KEY, readStore, readCurrentScene, visibleEvents, transition, appendEvent, mapReferences, characterReferences, assertReferences, scheduleForecast, absencePreview, floorGameTime, currentPrompt, createSceneId } from './model.js';
 import { acquireMetadataWrite, publishExternalMetadataChange, subscribeStateChanges } from '../shared/operations.js';
 import { prepareState2ManualWrite } from '../state2/runtime.js';
+import { isIndependent, legacyModule } from '../story-state/access.js';
 export const PROMPT_KEY = 'amin-os-scene-time';
 const clone = value => structuredClone(value);
 const identity = ctx => JSON.stringify([ctx?.groupId != null ? ['group', ctx.groupId] : ['character', ctx?.characters?.[ctx?.characterId]?.avatar ?? ctx?.characterId ?? null], ctx?.getCurrentChatId?.() ?? ctx?.chatId ?? null]);
 const loaded = ctx => ctx?.chatMetadata && typeof ctx.chatMetadata === 'object' && (ctx.getCurrentChatId?.() ?? ctx.chatId) != null && (ctx.getCurrentChatId?.() ?? ctx.chatId) !== '';
-const references = ctx => JSON.stringify([ctx?.chatMetadata?.amin_os_characters_v1 ?? null, ctx?.chatMetadata?.dynamicMapV1 ?? null]);
+const references = ctx => JSON.stringify([legacyModule(ctx,'characters','amin_os_characters_v1') ?? null, legacyModule(ctx,'map','dynamicMapV1') ?? null]);
 const needsReferences = op => ['save-scene', 'save-schedule', 'confirm-presence'].includes(op);
 export function createSceneService(getContext = () => globalThis.SillyTavern?.getContext?.(), { createId = createSceneId, now = () => new Date().toISOString(), poll = false } = {}) {
     const listeners = new Set(), dirty = new WeakSet(), removers = [];
@@ -17,7 +19,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
         const ctx = getContext();
         if (disposed) throw Error('场景服务已关闭。');
         if (!loaded(ctx)) throw Error('请先打开一个聊天。');
-        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx), epoch };
+        return { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(isIndependent(ctx)?readCurrentScene(ctx):ctx.chatMetadata[KEY] ?? null), references: references(ctx), epoch };
     }
     function check(token, { checkBasis = true, checkReferences = false } = {}) {
         const current = capture();
@@ -28,7 +30,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     }
     function sync() {
         if (disposed) return;
-        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
+        const ctx = getContext(), next = loaded(ctx) ? { identity: identity(ctx), metadata: ctx.chatMetadata, path: chatRevision(ctx.chat), basis: JSON.stringify(isIndependent(ctx)?readCurrentScene(ctx):ctx.chatMetadata[KEY] ?? null), references: references(ctx) } : null;
         const changed = next?.identity !== lastScope?.identity || next?.metadata !== lastScope?.metadata || next?.path !== lastScope?.path || next?.basis !== lastScope?.basis || next?.references !== lastScope?.references;
         if (!changed) return;
         clearPrompt();
@@ -39,10 +41,10 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
     }
     async function persist(ctx, token, value) {
         check(token, { checkBasis: false });
-        try { await ctx.saveMetadata(); }
+        try { await saveChatMetadata(ctx); }
         catch (error) { throw Error(`操作已记入当前聊天，但保存失败：${error?.message ?? '未知错误'}。请重试保存；不会再次推进时间。`); }
         check(token, { checkBasis: false });
-        if (ctx.chatMetadata[KEY] === value) dirty.delete(ctx.chatMetadata);
+        if (ctx.chatMetadata[KEY] === value || isIndependent(ctx)) dirty.delete(ctx.chatMetadata);
     }
     function stage(op, data, token = capture()) {
         if (busy) throw Error('正在保存，请稍候。');
@@ -75,7 +77,7 @@ export function createSceneService(getContext = () => globalThis.SillyTavern?.ge
                 throw error;
             }
             dirty.add(ctx.chatMetadata); clearPrompt();
-            lastScope = { ...operation.token, basis: JSON.stringify(value) };
+            lastScope = { ...operation.token, basis: JSON.stringify(isIndependent(ctx)?operation.state:value) };
             // Time-derived effects refresh immediately, including while disk persistence is pending.
             publishing = true;
             try { publishExternalMetadataChange(() => ctx, [[KEY]], { operationId: operation.eventId }); }

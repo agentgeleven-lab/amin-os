@@ -14,7 +14,11 @@ import { applyCurrentStoryState } from './current-native-bridge.js';
 import { registerCurrentCheckpointWrite } from '../status/state-checkpoint.js';
 import { registerChatSavePreparation, markChatIdsDirty, saveChatMetadata } from '../shared/chat-save.js';
 import { createOperationService, registerOperationPatchExpansion, metadataWriteStatus, acquireMetadataWrite, captureContext, publishExternalMetadataChange, subscribeStateChanges, chatIdentity, chatPath } from '../shared/operations.js';
+import { isIndependent, prepareIndependentManualWrite } from '../story-state/access.js';
+import { createStoryStateRuntime } from '../story-state/runtime.js';
 export function prepareState2ManualWrite(ctx, paths) {
+    if (isIndependent(ctx)) return prepareIndependentManualWrite(ctx,paths);
+    if (shared?.status().mode === 'independent') throw Error('请先在剧情存储中导入旧资料或开始空白资料。');
     if (shared && storageStatus(ctx).migrated && !shared.ready(ctx)) throw Error('正在恢复当前聊天的楼层变量，请等待恢复完成。');
     const before = ctx?.chatMetadata?.[CURRENT_STORY_KEY] === undefined ? null
         : JSON.stringify([ctx.chatMetadata.variables, ctx.chatMetadata.LWB_RULES_V2]);
@@ -26,6 +30,7 @@ export function prepareState2ManualWrite(ctx, paths) {
     return rollback;
 }
 export function state2HistoryMode(ctx) {
+    if (isIndependent(ctx)) return {managed:true,ready:true,currentOnly:true,historical:false,independent:true};
     if (ctx?.chatMetadata?.[CURRENT_STORY_KEY] !== undefined) return { managed: true, ready: !!shared?.ready(ctx), currentOnly: true, historical: false };
     if (!ctx?.chatMetadata?.[MIGRATION_KEY]) return { managed: false, ready: true };
     const managed = storageStatus(ctx).migrated;
@@ -37,6 +42,7 @@ const pathKey = path => JSON.stringify(path);
 const context = () => globalThis.SillyTavern?.getContext?.();
 let shared;
 export function nativeState2Status(ctx = context()) {
+    if (isIndependent(ctx)) return {available:true,migrated:true,message:'Amin 独立剧情资料已启用；不依赖小白变量。'};
     const available = ctx?.extensionSettings?.LittleWhiteBox?.variablesMode === '2.0' && typeof globalThis.LWB_StateV2?.applyText === 'function';
     const migrated = storageStatus(ctx).migrated;
     return { available, migrated, message: !available ? '请启用小白 X 的变量管理 2.0；Amin 不会代替小白执行变量更新。' : migrated ? '剧情数据已接入小白变量 2.0；回复中的 <state> 由小白自动执行。' : '小白变量 2.0 已就绪，尚未迁移当前聊天的应用资料。' };
@@ -691,5 +697,5 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         destroy(){disposed=true;library.dispose();epoch++;clearUpdates();clearInterval(timer);clearTimeout(eventTimer);clearTimeout(currentCompactionTimer);removeSavePreparation();removeExpansion();removeCurrentWriteSubscription();removeCurrentCheckpointWrite();operation.dispose();for(const [event,fn]of subscriptions)(source.removeListener??source.off)?.call(source,event,fn);if(typeof jq==='function'&&document)jq(document).off(nativeEvent,nativeChanged);},
     };
 }
-export function initializeState2(getContext = context, options = {}) { return shared ??= createState2Runtime(getContext,options); }
+export function initializeState2(getContext = context, options = {}) { return shared ??= createStoryStateRuntime(getContext,options); }
 export function getState2Runtime(){return shared;}

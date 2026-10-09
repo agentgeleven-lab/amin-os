@@ -8,6 +8,7 @@ import { checkpointState } from '../status/state-checkpoint.js';
 import { adapter as statusAdapter } from '../linkage/adapters/status.js';
 import { adapter as inventoryAdapter } from '../linkage/adapters/inventory.js';
 import { periodicStatus, validatePeriodicConfig } from './rules.js';
+import { isIndependent, toLegacyContext } from '../story-state/access.js';
 
 export const SETTLEMENT_PATHS = [[KEY], [SCENE_KEY], [CHARACTERS_KEY], [INVENTORY_KEY], [...STATUS_PATH], [HISTORY_KEY]];
 export const MANUAL_SETTLEMENT_PATHS = [...SETTLEMENT_PATHS, ['variables'], ['LWB_RULES_V2'], ['extensions', 'LittleWhiteBox']];
@@ -68,7 +69,7 @@ export function buildSettlement(ctx, { effectIds, operationId, now = new Date().
     if (effectIds?.some(id => !effects.some(effect => effect.id === id))) throw Error('所选效果已不在当前剧情分支。');
     if (store.events.some(event => event.operationId === operationId && event.op === 'settle')) throw Error('此周期结算已提交，不能重复执行。');
     const selected = effects.filter(effect => effect.periodic && (!effectIds || effectIds.includes(effect.id)));
-    const working = { ...ctx, chatMetadata: structuredClone(ctx.chatMetadata) }, patches = new Map(), rows = [];
+    const working = toLegacyContext(ctx), patches = new Map(), rows = [];
     let sequence = 0;
     for (const effect of selected) {
         const status = periodicStatus(effect, clock);
@@ -101,7 +102,7 @@ export function buildSettlement(ctx, { effectIds, operationId, now = new Date().
         rows.push({ effectId: effect.id, name: effect.skill.name, target: effect.target || effect.holder, ticks: status.pendingTicks, stacks, changes });
     }
     if (!rows.length) throw Error('当前没有到期且尚未结算的周期。');
-    if (includeCheckpoint && [...patches.values()].some(patch => patch.path[0] === 'variables') && checkpointState({ ...working, saveMetadataDebounced() {} })) {
+    if (includeCheckpoint && !isIndependent(ctx) && [...patches.values()].some(patch => patch.path[0] === 'variables') && checkpointState({ ...working, saveMetadataDebounced() {} })) {
         const path = ['extensions', 'LittleWhiteBox', 'stateCkptV2'];
         patches.set(JSON.stringify(path), { path, value: structuredClone(working.chatMetadata.extensions.LittleWhiteBox.stateCkptV2) });
     }

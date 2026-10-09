@@ -1,6 +1,8 @@
 import { LIMITS, normalizeConfig, rollBatch, formatRoll } from './engine.js';
 import { chatIdentity, subscribeStateChanges, createOperationService, acquireMetadataWrite, metadataWriteStatus } from '../shared/operations.js';
 import { prepareState2ManualWrite } from '../state2/runtime.js';
+import { saveChatMetadata } from '../shared/chat-save.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 export const SETTINGS_KEY = 'amin_os_dice_presets_v1';
 export const HISTORY_KEY = 'amin_os_dice_v1';
 const clone = value => structuredClone(value);
@@ -32,9 +34,13 @@ function assertWritableStore(raw, listKey, validate, label) {
     if (!object(raw) || raw.version !== undefined && raw.version !== 1) throw Error(label + '版本不兼容，原始数据已保留，未写入。');
     if (!Array.isArray(raw[listKey]) || !raw[listKey].every(validate) || new Set(raw[listKey].map(r => r.id)).size !== raw[listKey].length) throw Error(label + '包含无法识别或损坏的记录，原始数据已保留，未写入。');
 }
-const assertHistoryWritable = ctx => assertWritableStore(ctx?.chatMetadata?.[HISTORY_KEY], 'rolls', compatibleHistoryRecord, '骰点历史');
+const assertHistoryWritable = ctx => assertWritableStore(legacyModule(ctx, 'dice', HISTORY_KEY), 'rolls', compatibleHistoryRecord, '骰点历史');
 const assertPresetsWritable = ctx => assertWritableStore(ctx?.extensionSettings?.[SETTINGS_KEY], 'presets', compatiblePreset, '骰子预设');
-export function readHistory(ctx) { return (Array.isArray(ctx?.chatMetadata?.[HISTORY_KEY]?.rolls) ? ctx.chatMetadata[HISTORY_KEY].rolls : []).filter(validRecord).map(clone); }
+registerModuleCodec('dice', {
+    toLegacy(_ctx, snapshot) { return snapshot == null ? {} : { [HISTORY_KEY]: clone(snapshot) }; },
+    fromLegacy(ctx) { const raw = ctx.chatMetadata?.[HISTORY_KEY]; if (raw == null) return null; assertWritableStore(raw, 'rolls', compatibleHistoryRecord, '骰点历史'); return { version: 1, rolls: clone(raw.rolls) }; },
+});
+export function readHistory(ctx) { const raw = legacyModule(ctx, 'dice', HISTORY_KEY); return (Array.isArray(raw?.rolls) ? raw.rolls : []).filter(validRecord).map(clone); }
 export function readPresets(ctx) {
     const result = [];
     for (const p of Array.isArray(ctx?.extensionSettings?.[SETTINGS_KEY]?.presets) ? ctx.extensionSettings[SETTINGS_KEY].presets : []) {
@@ -85,7 +91,7 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
     }
     function write(ctx, records) {
         assertHistoryWritable(ctx);
-        const metadata = ctx.chatMetadata, existed = Object.hasOwn(metadata, HISTORY_KEY), before = metadata[HISTORY_KEY];
+        const metadata = ctx.chatMetadata, existed = Object.hasOwn(metadata, HISTORY_KEY), before = legacyModule(ctx, 'dice', HISTORY_KEY);
         const next = { ...before, version: 1, rolls: records };
         metadata[HISTORY_KEY] = next;
         try { prepareState2ManualWrite(ctx, [[HISTORY_KEY]]); }
@@ -101,7 +107,7 @@ export function createDiceService(getContext = () => globalThis.SillyTavern?.get
         check(token); assertHistoryWritable(ctx);
         if (typeof ctx.saveMetadata !== 'function') throw Error('当前酒馆缺少聊天保存接口；骰点仍保留在本聊天内存中。');
         const value = ctx.chatMetadata[HISTORY_KEY];
-        try { await ctx.saveMetadata(); check(token); if (ctx.chatMetadata[HISTORY_KEY] === value) dirty.delete(ctx.chatMetadata); }
+        try { await saveChatMetadata(ctx); check(token); if (ctx.chatMetadata[HISTORY_KEY] === value) dirty.delete(ctx.chatMetadata); }
         catch (e) { throw Error(`骰点已固定，但聊天保存失败：${e?.message || '未知错误'}。请重试保存。`); }
     }
     async function roll(input, rerollOf = null) {

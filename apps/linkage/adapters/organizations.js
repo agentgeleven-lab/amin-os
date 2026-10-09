@@ -1,17 +1,20 @@
 import { ROOT, GROUPS, FIELDS, LINKS, entity, read, validate, enforceLocks, diff } from '../../organizations/model.js';
+import '../../organizations/story-state.js';
+import { isIndependent, readStoryRoot, storyRootPath, legacyModule } from '../../story-state/access.js';
 
 const META = 'amin_os_organizations_v1', HISTORY = 'amin_os_organizations_history_v1';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const clone = value => structuredClone(value);
 function source(ctx) {
-    const doc = read(ctx?.chatMetadata?.variables?.[ROOT]);
-    const raw = ctx?.chatMetadata?.[META];
+    const doc = read(readStoryRoot(ctx, ROOT));
+    const raw = legacyModule(ctx, 'organizations', META);
     if (raw !== undefined && (!object(raw) || raw.locks !== undefined && (!Array.isArray(raw.locks) || raw.locks.some(path => typeof path !== 'string')) || raw.backups !== undefined && !Array.isArray(raw.backups))) throw Error('势力元数据格式无效，原始资料未改写。');
     const extra = clone(raw ?? {}), locks = extra.locks ?? [];
     enforceLocks(doc, doc, locks);
     return { doc, extra, locks };
 }
 function historyPatch(ctx, doc, assessment, timestamp) {
+    if (isIndependent(ctx) || ctx.aminIndependentDraft) return [];
     const raw = ctx?.chatMetadata?.[HISTORY];
     if (raw !== undefined && (!object(raw) || !object(raw.records))) throw Error('势力楼层历史格式无效，未写入。');
     const tail = ctx?.chat?.at(-1), id = tail?.extra?.amin_org_message_id;
@@ -49,7 +52,8 @@ export const adapter = {
         const timestamp = typeof now === 'number' ? now : Date.parse(now);
         if (!Number.isFinite(timestamp)) throw Error('联动更新时间无效。');
         const backups = [...(extra.backups ?? []), { doc: clone(before), at: timestamp }].slice(-5);
-        const patches = [{ path: ['variables', ROOT], value: JSON.stringify(next) }, { path: [META, 'backups'], value: backups }, ...historyPatch(ctx, next, extra.assessment, timestamp)];
+        const patches = [{ path: storyRootPath(ctx, ROOT), value: JSON.stringify(next) },
+          ...(isIndependent(ctx) || ctx.aminIndependentDraft ? [] : [{ path: [META, 'backups'], value: backups }]), ...historyPatch(ctx, next, extra.assessment, timestamp)];
         return { patches, summary: `势力资料 ${next[data.group][change.target].name}：${diff(before, next).length} 项变化` };
     },
 };

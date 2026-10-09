@@ -6,6 +6,7 @@ import { readInventory } from '../inventory/model.js';
 import { operationReference } from '../effects/settlement.js';
 import { adapter as scene } from '../linkage/adapters/scene.js';
 import { readHistory } from '../dice/service.js';
+import { toLegacyContext } from '../story-state/access.js';
 
 export function actionResources(ctx) {
     const stats = readCharacters(ctx).characters.flatMap(character => character.stats.map(stat => {
@@ -27,7 +28,7 @@ export function buildActionSettlement(ctx, input, { operationId, now = new Date(
     if (!input.cost && !input.target && !minutes && !input.task) throw Error('至少设置一项消耗、目标变化或耗时。');
     const roll = input.rollId ? readHistory(ctx).find(roll => roll.id === input.rollId) : null;
     if (input.rollId && !roll) throw Error('所选骰点已不存在，请重新选择。');
-    const working = { ...ctx, chatMetadata: structuredClone(ctx.chatMetadata) }, patches = new Map(), rows = [];
+    const working = toLegacyContext(ctx), patches = new Map(), rows = [];
     const accept = values => {
         for (const patch of values) {
             let parent = working.chatMetadata;

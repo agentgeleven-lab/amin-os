@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 
 export const KEY = 'amin_os_inventory_v1';
@@ -106,7 +107,7 @@ export function validateStore(store) {
     }
     return clone(store);
 }
-export function readStore(ctx) { const raw = ctx?.chatMetadata?.[KEY]; return raw === undefined ? emptyStore() : validateStore(raw); }
+export function readStore(ctx) { const raw = legacyModule(ctx, 'inventory', KEY); return raw === undefined ? emptyStore() : validateStore(raw); }
 export function currentState(store, chat) {
     const validated = validateStore(store), path = chatPath(chat);
     for (let index = validated.events.length - 1; index >= 0; index--) if (belongs(validated.events[index], path)) return clone(validated.events[index].state);
@@ -226,3 +227,10 @@ export function buildRestoreStore(ctx, snapshot, options = {}) {
     // including a valid ledger already at capacity; restoration is not a trade.
     return appendEvent(readStore(ctx), ctx?.chat, { id: eventId, at, op: 'restore', summary, state });
 }
+
+registerModuleCodec('inventory', {
+    toLegacy(ctx, snapshot) {
+        return { [KEY]: { version: 1, events: [{ id: 'independent_inventory', at: '1970-01-01T00:00:00.000Z', path: [], op: 'restore', summary: '当前背包与账本', state: validateState(snapshot ?? emptyState()) }] } };
+    },
+    fromLegacy(ctx) { return readInventory(ctx); },
+});

@@ -1,8 +1,9 @@
 import { uuid } from '../../uuid.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 export const KEY='amin_os_information_v1';
 export const empty=()=>({version:1,history:[],enabled:true,limit:40000});
-export function read(ctx){const s=ctx?.chatMetadata?.[KEY];if(s&&s.version!==1)throw Error('信息面板数据版本不兼容');return structuredClone(s??empty());}
+export function read(ctx){const s=legacyModule(ctx,'information',KEY);if(s&&s.version!==1)throw Error('信息面板数据版本不兼容');return structuredClone(s??empty());}
 export const path=chat=>chatRevisions(chat??[]);
 export const matches=(event,prefix)=>pathBelongs(event?.path,prefix);
 export function current(store,chat){const records=new Map(),prefix=path(chat);for(const e of store.history){if(!matches(e,prefix))continue;if(e.snapshot)records.set(e.recordId,structuredClone(e.snapshot));else records.delete(e.recordId);}return [...records.values()];}
@@ -55,3 +56,20 @@ export function archive(entries,record,search=null){
  return [...entries.filter(e=>e.record.id!==value.id),entry];
 }
 export function groupRecords(records){const groups=new Map();for(const r of records){const key=JSON.stringify([r.kind,r.name.trim()]);if(!groups.has(key))groups.set(key,{name:r.name,kind:r.kind,records:[]});groups.get(key).records.push(r);}return [...groups.values()];}
+
+/** Business modification records survive; message paths only exist in this temporary adapter. */
+export function snapshotInformation(ctx) {
+    const store = read(ctx);
+    return { version: 1, enabled: store.enabled, limit: store.limit, records: current(store, ctx?.chat),
+        modificationHistory: modificationHistory(store, ctx?.chat).map(({ path, ...event }) => structuredClone(event)) };
+}
+registerModuleCodec('information', {
+    toLegacy(ctx, snapshot) {
+        const target = snapshot ?? { version: 1, enabled: true, limit: 40000, records: [] }, currentPath = [];
+        const history = (target.modificationHistory ?? []).map(event => ({ ...structuredClone(event), path: currentPath }));
+        // Same before/after keeps the baseline out of the model-facing modification history.
+        for (const [index, record] of target.records.entries()) history.push({ id: 'independent_information_' + index, recordId: record.id, path: currentPath, at: '1970-01-01T00:00:00.000Z', before: structuredClone(record), snapshot: structuredClone(record), changes: [] });
+        return { [KEY]: { version: 1, enabled: target.enabled, limit: target.limit, history } };
+    },
+    fromLegacy(ctx) { return snapshotInformation(ctx); },
+});

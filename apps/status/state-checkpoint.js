@@ -1,6 +1,8 @@
 // LittleWhiteBox State 2.0 restores owned roots from checkpoints, then replays WAL.
 // A /setvar alone is not part of that replay. Save an exact current-floor baseline
 // on explicit front-end writes only (never on polling or history browsing).
+import { isIndependent } from '../story-state/access.js';
+
 const currentWriteListeners = new Set();
 
 /** Explicit front-end writes can release navigation protection without a checkpoint. */
@@ -11,6 +13,7 @@ export function registerCurrentCheckpointWrite(callback) {
 }
 
 export function checkpointState(ctx) {
+  if (isIndependent(ctx) || ctx.aminIndependentDraft) return false;
   const meta = ctx.chatMetadata;
   // Current-only storage writes its single bounded native baseline during the
   // save transaction. The legacy full checkpoint would duplicate unrelated

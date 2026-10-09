@@ -6,6 +6,7 @@ import { generateStatus } from '../apps/status/generator.js';
 import { createCurrentStoryStorage } from '../apps/state2/current-story-storage.js';
 import { registerChatSavePreparation, saveChatMetadata } from '../apps/shared/chat-save.js';
 import * as backups from '../apps/status/story-backups.js';
+import { isIndependent, readStoryRoot, writeStoryRoot, STATE_KEY, prepareIndependentManualWrite, registerStoryManualPreparation } from '../apps/story-state/access.js';
 
 const state = value => ({ 版本: 1, 项目: { 玩家: { 身份: value } } });
 const oldKey = '状态栏_生成前备份_手动';
@@ -74,7 +75,7 @@ class Element {
   querySelectorAll() { return []; }
 }
 const walk = root => [root, ...root.children.flatMap(walk)];
-async function application(f, runtime = { archiveStory: () => f.service.capture() }) {
+async function application(f, runtime = { archiveStory: () => f.service.capture() }, loadVariables = async () => ({setLocalVariable:f.setLocalVariable})) {
   const document = { created: [], createElement(tag) { const element = new Element(tag); this.created.push(element); return element; } };
   const messages = [], opened = [], target = new Element('main');
   const history = { sync() {}, adoptExternal() {}, list() { throw Error('current backup picker must not load floor histories'); } };
@@ -94,21 +95,35 @@ async function application(f, runtime = { archiveStory: () => f.service.capture(
     installUpdateEntry() {}, boundWorldbook: () => 'book', createHistory: () => history,
     historyView: () => ({ element: new Element('section') }), installFloorButtons: () => ({ refresh() {} }),
     ...backups, createTemplatesPage: options => { templateWrite = options.write; return new Element('section'); },
-    copyPrompt() {}, buildUpdatePrompt() {}, generateStatus() {}, setLocalVariable: f.setLocalVariable,
+    copyPrompt() {}, buildUpdatePrompt() {}, generateStatus() {}, hostSetLocalVariable: f.setLocalVariable,
+    isIndependent, readStoryRoot, writeStoryRoot, STATE_KEY, prepareIndependentManualWrite,
     mountLinkage: () => ({ open() {}, dispose() {} }), getLinkageService: () => ({ subscribe: () => () => {} }),
     managesModule: () => false, getState2Runtime: () => runtime, state2HistoryMode: () => ({ managed: true }),
   };
   const source = readFileSync(new URL('../apps/status/index.js', import.meta.url), 'utf8')
-    .replace(/^import .*;\r?\n/gmu, '').replace('export function initialize', 'function initialize')
+    .replace(/^import .*;\r?\n/gmu, '').replace('export async function initialize', 'async function initialize')
     .replaceAll('import.meta.url', JSON.stringify(new URL('../apps/status/index.js', import.meta.url).href));
   vm.runInNewContext(source + '\nglobalThis.api = { initialize };', sandbox);
-  const app = sandbox.api.initialize({ mount: target });
+  const app = await sandbox.api.initialize({ mount: target, loadVariables });
   const find = label => {
     const node = document.created.find(element => element.tagName === 'BUTTON' && element.textContent === label);
     assert.ok(node, `missing action ${label}`); return node;
   };
   return { app, find, document, messages, opened, target, get templateWrite() { return templateWrite; } };
 }
+
+test('independent status application starts and applies a template without importing a host variables module', async () => {
+  const f=fixture();let imports=0;
+  f.ctx.chatMetadata[STATE_KEY]={version:1,revision:1,modules:{status:state('canonical')}};
+  // Initialization must skip the loader entirely in independent mode.
+  const b=await application(f,{},async()=>{imports++;throw Error('host variables unavailable');});
+  await b.app.open('templates');assert.equal(imports,0);
+  let commits=0;const off=registerStoryManualPreparation(()=>{commits++;});
+  try{await b.templateWrite(state('new-template'));}finally{off();}
+  assert.equal(commits,1);
+  assert.equal(JSON.parse(readStoryRoot(f.ctx,'状态栏')).项目.玩家.身份,'new-template');assert.deepEqual(f.writes,[]);
+  assert.equal(f.ctx.chatMetadata.extensions?.LittleWhiteBox,undefined);
+});
 
 test('current-only manual status save archives current record and saves metadata without duplicate roots', async () => {
   const f = fixture(); await f.service.enable();

@@ -1,4 +1,5 @@
 import { uuid } from '../../../../uuid.js';
+import { legacyModule, isIndependent } from '../../../story-state/access.js';
 import {mountWorldbookSources} from '../../../worldbook-source-ui.js';
 import {sourceSettings,saveSourceSettings} from '../../../worldbook-sources.js';
 import {getAI} from '../../../../ai/service.js';
@@ -116,8 +117,8 @@ export function createPanel(store,persistence,preferences,options={}){
         if(tab==='ai')renderAI(map);
         if(tab==='templates')renderTemplates();
         if(tab!=='settings'){
-            const status=draft.status();savebar.append(el('span',status.conflict?'已保存地图发生变化，请放弃草稿后重试':status.dirty?('未保存：'+(status.changedMaps.join('、')||'角色位置')):globalThis.SillyTavern?.getContext?.()?.chatMetadata?.dynamicMapV1?'✓ 已保存':'初始地图尚未保存'));savebar.classList.toggle('dm-unsaved',status.dirty);
-            const saveButton=button('保存全部地图调整',()=>run(()=>{draft.save();notice='地图已保存，查看地图与变量接口现已使用新地图。';render();}));saveButton.disabled=status.conflict||(!status.dirty&&!!globalThis.SillyTavern?.getContext?.()?.chatMetadata?.dynamicMapV1);savebar.append(saveButton,button('放弃草稿',()=>{draft.discard();notice='已放弃未保存调整';camera=null;render();}));
+            const status=draft.status();savebar.append(el('span',status.conflict?'已保存地图发生变化，请放弃草稿后重试':status.dirty?('未保存：'+(status.changedMaps.join('、')||'角色位置')):legacyModule(globalThis.SillyTavern?.getContext?.(),'map','dynamicMapV1')?'✓ 已保存':'初始地图尚未保存'));savebar.classList.toggle('dm-unsaved',status.dirty);
+            const saveButton=button('保存全部地图调整',()=>run(()=>{draft.save();notice='地图已保存，查看地图与变量接口现已使用新地图。';render();}));saveButton.disabled=status.conflict||(!status.dirty&&!!legacyModule(globalThis.SillyTavern?.getContext?.(),'map','dynamicMapV1'));savebar.append(saveButton,button('放弃草稿',()=>{draft.discard();notice='已放弃未保存调整';camera=null;render();}));
             if(status.dirty&&tab!=='view')renderChanges(saved,draft.snapshot());
         }
         for(const text of [...page.querySelectorAll('.dm-help')])if(text.textContent.length>180){const fold=el('details',undefined,'dm-help-fold');fold.append(el('summary','使用说明'));text.replaceWith(fold);fold.append(text);}
@@ -248,7 +249,8 @@ export function createPanel(store,persistence,preferences,options={}){
         form.append(el('p','消息末尾的“🗺 地图”按钮在该消息下方展开完整地图窗口。界面设置立即生效，不修改地图和变量。','dm-help'));
         if(options.integration){
             form=sections.get('integration');const bridge=options.integration,state=bridge.status();form.append(el('h3','小白X与状态栏联动'));
-            for(const [key,label] of [['variables','同步地图摘要到聊天变量'],['hud','在状态栏显示地图位置'],['allowMoves','允许小白X提交位置更新']]){const toggle=field(form,label,input('','checkbox'));toggle.checked=state[key];toggle.onchange=()=>run(()=>bridge.configure({[key]:toggle.checked}));}
+            const controls=isIndependent(globalThis.SillyTavern?.getContext?.())?[['hud','在状态栏显示地图位置']]:[['variables','同步地图摘要到聊天变量'],['hud','在状态栏显示地图位置'],['allowMoves','允许小白X提交位置更新']];
+            for(const [key,label] of controls){const toggle=field(form,label,input('','checkbox'));toggle.checked=state[key];toggle.onchange=()=>run(()=>bridge.configure({[key]:toggle.checked}));}
             form.append(el('p',(state.littleWhiteBox?'已检测到小白X 2.0':'未检测到小白X 2.0；聊天变量仍可供其他插件读取')+' · 状态栏：'+(state.statusHud?'已检测到':'未检测到')+' · '+state.message,'dm-integration-status'),button('重试地图变量同步',()=>void bridge.sync()));
             const help=field(form,'联动提示词（复制到你的世界书）',el('textarea'));help.readOnly=true;help.value='当前地图摘要（只读，不修改“地图”变量）：\n{{xbgetvar_yaml::地图}}\n只有剧情明确发生移动时，才在 <state> 中完整写入：\n地图移动请求: {"请求ID":"本次唯一编号","地图版本":摘要中的地图版本数字,"地图ID":"目标地图ID","地点ID":"目标地点ID"}\n</state>\n不得虚构 ID；未开启位置更新时请求不执行。位置更新仅记录叙事位置，不自动寻路或推进时间。';
         }

@@ -1,5 +1,7 @@
 import { validateTemplate, valueType, mergeUpdates } from '../../status/state-tools.js';
 import { bindingParts } from '../../characters/model.js';
+import '../../status/story-state.js';
+import { isIndependent, readStoryRoot, storyRootPath } from '../../story-state/access.js';
 
 const ROOT = '状态栏', HISTORY = 'world_status_hud_history_v1';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -12,7 +14,7 @@ const numeric = value => {
     return value;
 };
 function state(ctx) {
-    const raw = ctx?.chatMetadata?.variables?.[ROOT];
+    const raw = readStoryRoot(ctx, ROOT);
     if (raw === undefined || raw === null || raw === '') return { 版本: 1, 项目: {} };
     let value;
     try { value = typeof raw === 'string' ? JSON.parse(raw) : clone(raw); }
@@ -21,6 +23,7 @@ function state(ctx) {
     return clone(validateTemplate(value));
 }
 function historyPatch(ctx, value, now) {
+    if (isIndependent(ctx) || ctx.aminIndependentDraft) return [];
     const original = ctx?.chatMetadata?.[HISTORY];
     if (original !== undefined && (!object(original) || !object(original.records))) throw Error('世界状态楼层历史格式无效，未写入。');
     const tail = ctx?.chat?.at(-1), id = tail?.extra?.wsh_message_id;
@@ -63,7 +66,7 @@ export const adapter = {
         }
         if (valueType(value) === '不支持' || valueType(value) !== valueType(before)) throw Error('不允许改变状态字段类型或写入越界进度。');
         const result = mergeUpdates(current, current, { 项目: { [project]: { [field]: value } } });
-        const patches = [{ path: ['variables', ROOT], value: JSON.stringify(result.state) }, ...historyPatch(ctx, result.state, now)];
+        const patches = [{ path: storyRootPath(ctx, ROOT), value: JSON.stringify(result.state) }, ...historyPatch(ctx, result.state, now)];
         return { patches, summary: `世界状态 ${change.target}${component === 'value' ? '' : component === 'current' ? ' · 当前' : ' · 最大'}：${JSON.stringify(before)} → ${JSON.stringify(value)}` };
     },
 };

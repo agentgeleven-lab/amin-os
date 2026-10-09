@@ -1,4 +1,5 @@
 import { chatIdentity } from './chat.js';
+import { saveChatMetadata } from '../../../shared/chat-save.js';
 export const TOOL_PROMPT='剧情涉及位置、地点或道路变化时，先调用 dynamic_map_query 查询对应地图，再调用 dynamic_map_update 提交已确定的变化。复用已有 ID 和类型；不要编造距离、名称或新地点。需要新增地点时使用新的唯一 ID。仅在剧情明确到达后提交 move。一次提交相关变化，成功后不要重复调用；结果 applied=false 代表尚待用户保存，不要说已生效。不要同时使用地图移动请求变量重复移动。';
 export const PROMPT_OWNER='dynamic-map/tool-calling-v1';
 const clone=v=>structuredClone(v);
@@ -37,7 +38,7 @@ export async function syncToolPrompt({getContext,remove=false,prompt=TOOL_PROMPT
   const prepared=preparePromptBook(original,name,wi.createWorldInfoEntry,remove,prompt);
   if(!prepared.changed)return {name,message:remove?'没有本插件写入的提示词，无需删除':'提示词已是最新，无需重复写入'};
   // Back up the owned entry before updates/deletion, never copy unrelated book entries.
-  if(prepared.previous){if(typeof ctx.saveMetadata!=='function')throw Error('无法备份原提示词，未修改世界书');const history=metadata.dynamicMapPromptBackups??=[];history.push({name,entry:prepared.previous,at:Date.now()});if(history.length>10)history.splice(0,history.length-10);await ctx.saveMetadata();guard();}
+  if(prepared.previous){if(typeof ctx.saveMetadata!=='function')throw Error('无法备份原提示词，未修改世界书');const history=metadata.dynamicMapPromptBackups??=[];history.push({name,entry:prepared.previous,at:Date.now()});if(history.length>10)history.splice(0,history.length-10);await saveChatMetadata(ctx);guard();}
   const latest=await request('get',{name});guard();const currentCache=wi.worldInfoCache?.get(name);
   if(!same(latest,original)||currentCache&&!same(currentCache,original))throw Error('世界书刚被其他操作修改，请重试');
   try{await request('edit',{name,data:prepared.book});}catch(e){throw Error('保存结果未确认，请检查世界书后重试：'+e.message);}

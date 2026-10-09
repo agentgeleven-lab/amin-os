@@ -4,6 +4,8 @@ import {checkpointState} from '../status/state-checkpoint.js';
 import {createHistory} from '../status/history.js';
 import {subscribeStateChanges,chatIdentity as operationIdentity,acquireMetadataWrite} from '../shared/operations.js';
 import {getState2Runtime,state2HistoryMode} from '../state2/runtime.js';
+import './story-state.js';
+import { isIndependent, readStoryRoot, writeStoryRoot, legacyModule, STATE_KEY, prepareIndependentManualWrite } from '../story-state/access.js';
 export const META='amin_os_organizations_v1',SETTINGS='amin_os_organizations_settings_v1';
 export const defaults=()=>({includeCharacter:true,includeChat:true,readWorldbooks:true,selectedBooks:null,books:'',detail:'标准',scope:'',allowInference:false,allowNew:false,groups:['organizations','alliances','regions'],generationRules:'',updateRules:'',assessmentRules:'',generationEnabled:true,updateEnabled:true,assessmentEnabled:true,follow:false});
 export function roleIdentity(ctx){const group=ctx?.groupId;return group!=null&&group!==''?'group:'+String(group):'character:'+String(ctx?.characters?.[ctx?.characterId]?.avatar??'');}
@@ -15,16 +17,16 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
  let disposed=false,busy=false,epoch=0,pending=null,lastError='',lastIdentity='',lastMetadata=null,accepted=null,lastLocks=[],controller=null,requestToken=null;
  const listeners=new Set();
  const notify=()=>{for(const fn of listeners)fn();};
- const meta=()=>{const c=context();chatIdentity(c);return c.chatMetadata[META]??={locks:[],assessment:null,backups:[]};};
- const readDoc=()=>read(context().chatMetadata?.variables?.[ROOT]);
+ const meta=()=>{const c=context();chatIdentity(c);return c.chatMetadata[META]??=legacyModule(c,'organizations',META)??{locks:[],assessment:null,backups:[]};};
+ const readDoc=()=>read(readStoryRoot(context(),ROOT));
  const floor=c=>JSON.stringify((c.chat??[]).map(m=>[m.extra?.amin_org_message_id??null,m.swipe_id??0,m.mes??'']));
  const scope=()=>{const c=context();return {identity:chatIdentity(c),metadata:c.chatMetadata,floor:floor(c),epoch};};
  const checkScope=t=>{const s=scope();if(disposed||s.identity!==t.identity||s.metadata!==t.metadata||s.floor!==t.floor||t.epoch!==epoch)throw Error('聊天或楼层已变化，操作已取消');};
  const invalidate=()=>{epoch++;pending=null;controller?.abort();controller=null;requestToken=null;};
  const requireReady=()=>{const native=nativeState();if(native?.managed&&!native.ready)throw Error('正在恢复当前聊天的楼层变量，请等待恢复完成。');return native;};
- function compatible(){const c=context(),l=c.chatMetadata?.extensions?.LittleWhiteBox;if(c.extensionSettings?.LittleWhiteBox?.variablesMode==='1.0')return;for(const k of ['stateCkptV2','stateLogV2'])if(l?.[k]&&(l[k].version??1)!==1)throw Error('小白X记录格式不兼容，未写入');}
+ function compatible(){const c=context(),l=c.chatMetadata?.extensions?.LittleWhiteBox;if(isIndependent(c)||c.extensionSettings?.LittleWhiteBox?.variablesMode==='1.0')return;for(const k of ['stateCkptV2','stateLogV2'])if(l?.[k]&&(l[k].version??1)!==1)throw Error('小白X记录格式不兼容，未写入');}
  function writeDoc(doc,{checkpoint=true}={}){
-  const c=context();requireReady();compatible();const value=validate(doc);setVariable(ROOT,JSON.stringify(value));
+  const c=context();requireReady();compatible();const value=validate(doc);if(isIndependent(c))writeStoryRoot(c,ROOT,JSON.stringify(value));else setVariable(ROOT,JSON.stringify(value));
   if(!equal(readDoc(),value))throw Error('变量写入后校验失败');
   if(checkpoint)checkpointState(c);accepted=clone(value);
  }
@@ -33,6 +35,7 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
   externalRead:async index=>{
    const runtime=getState2Runtime();
    if(typeof runtime?.readStoryFloor!=='function')throw Error('外置楼层读取尚未就绪。');
+   if(isIndependent(context()))return {doc:readDoc(),assessment:clone(meta().assessment)};
    const snapshot=await runtime.readStoryFloor(index);
    return {doc:read(snapshot.variables?.[ROOT]),assessment:null};
   },
@@ -50,14 +53,14 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
    // Legacy history restores earlier values; native history only records replayed variables.
    history.sync();
    const next=readDoc(),locks=meta().locks??[];
-   if(!native?.managed&&accepted){try{enforceLocks(accepted,next,lastLocks);}catch(e){writeDoc(accepted);lastError='外部变量修改触及锁定字段，已恢复：'+e.message;history.sync();notify();return;}}
+   if(!native?.managed&&!isIndependent(context())&&accepted){try{enforceLocks(accepted,next,lastLocks);}catch(e){writeDoc(accepted);lastError='外部变量修改触及锁定字段，已恢复：'+e.message;history.sync();notify();return;}}
    if(!equal(accepted,next)){accepted=clone(next);notify();}
    lastLocks=clone(locks);
   }catch(e){if(lastError!==e.message){lastError=e.message;notify();}}
  }
  function capture(){sync();requireReady();const t={...scope(),doc:readDoc(),locks:clone(meta().locks??[])};return t;}
  function check(t){requireReady();checkScope(t);if(!equal(t.doc,readDoc())||!equal(t.locks,meta().locks??[]))throw Error('资料或锁定设置已变化，请重新生成/预览');}
- async function persist(c){try{await saveMetadata(c);}catch{throw Error('已写入内存，但聊天保存失败；请保持本聊天并重试保存，不要重复应用');}}
+ async function persist(c){try{if(isIndependent(c)){writeStoryRoot(c,ROOT,JSON.stringify(readDoc()));prepareIndependentManualWrite(c,[['variables',ROOT],[META]]);}await saveMetadata(c);}catch{throw Error('已写入内存，但聊天保存失败；请保持本聊天并重试保存，不要重复应用');}}
  const api={
   context,read:readDoc,history:()=>history.list(),readHistory:index=>history.readFloor(index),error:()=>lastError,clearError:()=>{lastError='';},
   subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},sync,capture,check,
@@ -93,7 +96,7 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
  const c=context(),source=c?.eventSource,events=c?.eventTypes??c?.event_types??{},subscriptions=[];
  for(const name of ['CHAT_CHANGED','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_DELETED','MESSAGE_SWIPED','GENERATION_ENDED'])if(events[name]&&source?.on){const fn=()=>{if(name==='CHAT_CHANGED'){invalidate();accepted=null;}sync();};subscriptions.push([events[name],fn]);source.on(events[name],fn);}
  const offExternal=subscribeStateChanges((change,metadata)=>{
-  if(disposed||change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==operationIdentity(context())||!change.paths.some(path=>path[0]===META||path[0]==='variables'&&path[1]===ROOT))return;
+  if(disposed||change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==operationIdentity(context())||!change.paths.some(path=>path[0]===STATE_KEY||path[0]===META||path[0]==='variables'&&path[1]===ROOT))return;
   const native=nativeState();
   if(native?.managed&&!native.ready){invalidate();accepted=null;lastLocks=[];notify();return;}
   invalidate();accepted=clone(readDoc());lastLocks=clone(meta().locks??[]);
@@ -105,7 +108,8 @@ export function createStore({context,setVariable,saveMetadata=ctx=>saveChatMetad
 let shared;
 export async function getStore(){
  if(shared)return shared;
- const vars=await import('/scripts/variables.js');
+ const ctx=globalThis.SillyTavern?.getContext?.();
+ const vars=isIndependent(ctx)?{setLocalVariable:(key,value)=>writeStoryRoot(globalThis.SillyTavern.getContext(),key,value)}:await import('/scripts/variables.js');
  if(typeof vars.setLocalVariable!=='function')throw Error('宿主缺少聊天变量写入接口');
  return shared??=createStore({context:()=>globalThis.SillyTavern?.getContext?.(),setVariable:vars.setLocalVariable,poll:true});
 }

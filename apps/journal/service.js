@@ -1,5 +1,7 @@
+import { saveChatMetadata } from '../shared/chat-save.js';
 import { uuid } from '../../uuid.js';
-import { KEY, readStore, path, compile, sourceFromRange, autoSettings, dueRanges, currentDrafts, putAutoDraft } from './model.js';
+import { KEY, readStore, path, compile, sourceFromRange, autoSettings, dueRanges, currentDrafts, putAutoDraft, snapshotJournal } from './model.js';
+import { isIndependent } from '../story-state/access.js';
 import { draftChronicle } from './draft.js';
 import { getAI } from '../../ai/service.js';
 import { acquireMetadataWrite, chatIdentity, subscribeStateChanges } from '../shared/operations.js';
@@ -12,7 +14,7 @@ export function createJournal(getContext, { ai = getAI } = {}) {
     const listeners = new Set(), pending = new Set(), saved = new WeakMap();
     let busy = false, disposed = false, epoch = 0, autoRunning = false, normalGeneration = false, message = '引用默认关闭；只有已保存且明确启用的条目会附加到后续生成。';
     const identity = ctx => JSON.stringify([ctx?.groupId ?? null, ctx?.characterId ?? null, ctx?.getCurrentChatId?.() ?? null]);
-    const stamp = ctx => JSON.stringify(readStore(ctx));
+    const stamp = ctx => JSON.stringify(isIndependent(ctx) ? snapshotJournal(readStore(ctx), ctx.chat) : readStore(ctx));
     const notify = event => { for (const callback of listeners) { try { callback(event); } catch { /* A view must not interrupt persistence. */ } } };
     const clear = () => getContext()?.setExtensionPrompt?.(PROMPT_KEY, '', 1, 0, false);
 
@@ -42,10 +44,10 @@ export function createJournal(getContext, { ai = getAI } = {}) {
         try {
             next = update(readStore(ctx), ctx);
             if (!next || next.version !== 1 || !Array.isArray(next.events)) throw Error('待保存档案格式无效');
-            const after = { ...token, baseline: JSON.stringify(next) };
+            const after = { ...token, baseline: JSON.stringify(isIndependent(ctx) ? snapshotJournal(next, ctx.chat) : next) };
             metadata[KEY] = next;
             nativeRollback = prepareState2ManualWrite(ctx, [[KEY]]);
-            await ctx.saveMetadata();
+            await saveChatMetadata(ctx);
             persisted = true;
             check(after);
             saved.set(token, { value: structuredClone(next), token: after });
@@ -53,9 +55,12 @@ export function createJournal(getContext, { ai = getAI } = {}) {
             return structuredClone(next);
         } catch (error) {
             failed = true;
-            if (!persisted && next !== undefined && metadata[KEY] === next) {
-                if (before === undefined) delete metadata[KEY]; else metadata[KEY] = before;
-                nativeRollback?.();
+            if (!persisted && next !== undefined) {
+                if (isIndependent(ctx)) nativeRollback?.();
+                else if (metadata[KEY] === next) {
+                    if (before === undefined) delete metadata[KEY]; else metadata[KEY] = before;
+                    nativeRollback?.();
+                }
             }
             message = persisted ? '档案已保存到原聊天，但聊天或来源已变化，请重新打开档案。' : '保存失败：' + error.message;
             throw error;

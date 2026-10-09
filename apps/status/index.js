@@ -15,7 +15,8 @@ import { captureStoryBackup, recordStoryBackup, storyBackups, usesStoryStorage, 
 import { createTemplatesPage, copyPrompt } from './templates.js';
 import { buildUpdatePrompt } from './state-tools.js';
 import { generateStatus } from './generator.js';
-import { setLocalVariable } from '/scripts/variables.js';
+import './story-state.js';
+import { isIndependent, readStoryRoot, writeStoryRoot, STATE_KEY, prepareIndependentManualWrite } from '../story-state/access.js';
 import { mount as mountLinkage } from '../linkage/view.js';
 import { getSharedService as getLinkageService } from '../linkage/service.js';
 import { managesModule } from '../linkage/policy.js';
@@ -23,8 +24,16 @@ import { getState2Runtime, state2HistoryMode } from '../state2/runtime.js';
 
 const KEY = 'world_status_hud_v1';
 const context = () => SillyTavern.getContext();
+let hostSetLocalVariable;
+const setLocalVariable = (key, value) => isIndependent(context()) ? writeStoryRoot(context(), key, value) : hostSetLocalVariable(key, value);
 let embeddedMount, activeIdentity;
-export function initialize({mount: target} = {}) { embeddedMount=target; mount(); return {open: openEmbedded}; }
+export async function initialize({mount: target, loadVariables = () => import('/scripts/variables.js')} = {}) {
+  if (!isIndependent(context())) {
+    hostSetLocalVariable = (await loadVariables()).setLocalVariable;
+    if (typeof hostSetLocalVariable !== 'function') throw Error('当前酒馆缺少变量写入接口。');
+  }
+  embeddedMount=target; mount(); return {open: openEmbedded};
+}
 async function openEmbedded(page = selectedPage){
   identity();
   if (!embeddedMount) { notify('世界状态应用窗口尚未就绪，请重新打开 Amin OS。'); return; }
@@ -69,20 +78,28 @@ function parseState(raw) {
   if (!d || Array.isArray(d) || typeof d.项目 !== 'object' || !d.项目 || Array.isArray(d.项目)) throw Error('状态栏结构不兼容。');
   return d;
 }
-const history = createHistory({ context, read: () => parseState(context().chatMetadata.variables?.状态栏),
+const history = createHistory({ context, read: () => parseState(readStoryRoot(context(), '状态栏')),
   externalRead: async index => {
+    if (isIndependent(context())) return parseState(readStoryRoot(context(),'状态栏'));
     const runtime = getState2Runtime();
     if (typeof runtime?.readStoryFloor !== 'function') throw Error('外置楼层读取尚未就绪。');
     return parseState((await runtime.readStoryFloor(index)).variables?.状态栏);
   },
-  write: value => { if (value === null) { delete context().chatMetadata.variables?.状态栏; } else setLocalVariable('状态栏', JSON.stringify(value)); },
+  write: value => { if (value === null) { if (isIndependent(context())) writeStoryRoot(context(), '状态栏', null); else delete context().chatMetadata.variables?.状态栏; } else setLocalVariable('状态栏', JSON.stringify(value)); },
   beforeRestore: () => { running?.abort(); closeHud(); }, warn: message => notify(message, true),
   nativeState: () => state2HistoryMode(context()) });
 const floorButtons = installFloorButtons({ history, node, context, enabled: () => getSettings().floorButtons,
   openWorkbench:(target,{page,onClose,validate})=>showHud(page,{target,onClose,validate}) });
 async function persistStatusChange(write) {
   const token=captureContext(context),ctx=assertContext(context,token),release=acquireMetadataWrite(context,token);
-  try { write();history.adoptExternal();await saveChatMetadata(ctx);assertContext(context,token); }
+  try {
+    write();
+    if(isIndependent(ctx)){writeStoryRoot(ctx,'状态栏',readStoryRoot(ctx,'状态栏'));prepareIndependentManualWrite(ctx,[['variables','状态栏']]);}
+    const savedToken=captureContext(context);
+    history.adoptExternal();
+    await saveChatMetadata(ctx,{finalCheck:()=>assertContext(context,savedToken)});
+    assertContext(context,savedToken);
+  }
   finally { release(); }
 }
 function syncHistory() {
@@ -94,7 +111,9 @@ function createDisplaySettings() {
   const page = node('section', undefined, 'wsh-generation-page');
   const label = node('label', '在楼层工具栏显示世界状态入口'); const input = node('input'); input.type = 'checkbox'; input.checked = getSettings().floorButtons;
   input.onchange = () => { context().extensionSettings[KEY] = { ...context().extensionSettings[KEY], floorButtons: input.checked }; context().saveSettingsDebounced(); floorButtons.refresh(); };
-  const historyNote = usesCurrentStoryStorage(context())
+  const historyNote = isIndependent(context())
+    ? '所有应用共用当前剧情资料；切换旧楼层或 Swipe 不回退资料。'
+    : usesCurrentStoryStorage(context())
     ? '简洁存储保留当前变量和最近五份备份；切换旧楼层或 Swipe 不回退变量。'
     : usesStoryStorage(context())
     ? '小白 X 变量 2.0 负责当前剧情变量；旧楼层状态按消息引用从外置状态图读取。查看历史不会改写当前变量。'
@@ -175,15 +194,15 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   generationPage.setAttribute('aria-labelledby', generateTab.id);
   if (generationForm) generationPage.append(generationForm);
   refreshSourceControls();
-  const readCurrent = () => { checkIdentity(id); validate(); return parseState(id.metadata.variables?.状态栏); };
+  const readCurrent = () => { checkIdentity(id); validate(); return parseState(readStoryRoot(context(), '状态栏')); };
   const templatePage = createTemplatesPage({ context, settingsKey: KEY, read: readCurrent,
     write: async value => {
       checkIdentity(id); validate(); if (running) throw Error('模型任务运行中，请稍后应用模板。');
-      const old = id.metadata.variables?.状态栏;
+      const old = readStoryRoot(context(), '状态栏');
       const external = usesStoryStorage(context());
       const backup = external && old !== undefined ? await captureStoryBackup(context(), {label:'应用状态模板前'}) : null;
       checkIdentity(id); validate();
-      if (id.metadata.variables?.状态栏 !== old) throw Error('建立恢复点期间状态栏已变化，请重新应用模板。');
+      if (readStoryRoot(context(), '状态栏') !== old) throw Error('建立恢复点期间状态栏已变化，请重新应用模板。');
       await persistStatusChange(()=>{
         if (!external && !usesCurrentStoryStorage(context()) && old !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), old);
         if (backup) recordStoryBackup(context(),backup);
@@ -260,11 +279,11 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
       checkIdentity(id);
       validate();
       let value;
-      if (command === '/getvar 状态栏') value = parseState(id.metadata.variables?.状态栏);
+      if (command === '/getvar 状态栏') value = parseState(readStoryRoot(context(), '状态栏'));
       else if (typeof command === 'string' && command.startsWith('/amin-status-relocate ')) {
         if (running) throw Error('状态栏生成中，请完成后再编辑。');
         const operation = JSON.parse(command.slice('/amin-status-relocate '.length));
-        let result = relocateStatus(parseState(id.metadata.variables?.状态栏), id.metadata.LWB_RULES_V2, operation);
+        let result = relocateStatus(parseState(readStoryRoot(context(), '状态栏')), isIndependent(context()) ? {} : id.metadata.LWB_RULES_V2, operation);
         let reloadRules;
         if (result.rulesChanged) {
           reloadRules = window.LWB_StateV2?.loadRulesFromMeta;
@@ -276,15 +295,15 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
         }
         checkIdentity(id); validate();
         if (running) throw Error('状态栏生成中，请完成后再编辑。');
-        result = relocateStatus(parseState(id.metadata.variables?.状态栏), id.metadata.LWB_RULES_V2, operation);
+        result = relocateStatus(parseState(readStoryRoot(context(), '状态栏')), isIndependent(context()) ? {} : id.metadata.LWB_RULES_V2, operation);
         if (result.rulesChanged && !reloadRules) throw Error('变量规则已改变，请重试。');
         await persistStatusChange(() => {
-          const oldState = id.metadata.variables.状态栏, oldRules = id.metadata.LWB_RULES_V2;
+          const oldState = readStoryRoot(context(), '状态栏'), oldRules = id.metadata.LWB_RULES_V2;
           try {
             setLocalVariable('状态栏', JSON.stringify(result.state));
             if (result.rulesChanged) { id.metadata.LWB_RULES_V2 = result.rules; reloadRules(); }
           } catch (error) {
-            id.metadata.variables.状态栏 = oldState;
+            writeStoryRoot(context(), '状态栏', oldState);
             if (oldRules === undefined) delete id.metadata.LWB_RULES_V2;
             else id.metadata.LWB_RULES_V2 = oldRules;
             if (reloadRules) reloadRules();
@@ -383,12 +402,12 @@ async function restoreBackup() {
       } else restored = parseState(choice);
       checkIdentity(id);
       if (!restored) throw Error('备份为空。');
-      const current = id.metadata.variables?.状态栏;
+      const current = readStoryRoot(context(), '状态栏');
       if (JSON.stringify(parseState(current)) === JSON.stringify(restored)) { result.textContent = '所选状态与当前状态相同，无需恢复。'; return; }
       const external = usesStoryStorage(context());
       const backup = external && current !== undefined ? await captureStoryBackup(context(), {label:'恢复状态前'}) : null;
       checkIdentity(id);
-      if (id.metadata.variables?.状态栏 !== current) throw Error('建立恢复点期间状态栏已变化，请重新选择恢复项。');
+      if (readStoryRoot(context(), '状态栏') !== current) throw Error('建立恢复点期间状态栏已变化，请重新选择恢复项。');
       await persistStatusChange(()=>{
         if (!external && !usesCurrentStoryStorage(context()) && current !== undefined) setLocalVariable('状态栏_生成前备份_' + Date.now(), current);
         if (backup) recordStoryBackup(context(),backup);
@@ -472,20 +491,26 @@ function mount() {
   action('查看状态栏', () => selectHudPage ? selectHudPage('state') : openEmbedded('state'));
   action('手动另存状态', async () => {
     if (running) throw Error('模型任务运行中，请稍后另存。');
-    const id = identity(), current = id.metadata.variables?.状态栏;
+    const id = identity(), current = readStoryRoot(context(), '状态栏');
     if (!parseState(current)) throw Error('当前没有可另存的状态栏。');
-    if (usesCurrentStoryStorage(context())) {
+    if (isIndependent(context())) {
+      const runtime = getState2Runtime();
+      if (typeof runtime?.saveBackup !== 'function') throw Error('当前剧情备份服务尚未就绪。');
+      await runtime.saveBackup('手动另存状态');
+      checkIdentity(id);
+      report.textContent = '已保存当前剧情备份，可在设置 → 剧情存储中恢复。';
+    } else if (usesCurrentStoryStorage(context())) {
       const runtime = getState2Runtime();
       if (typeof runtime?.archiveStory !== 'function') throw Error('当前剧情存储尚未就绪，无法保存当前状态。');
       await runtime.archiveStory();
       checkIdentity(id);
-      if (!usesCurrentStoryStorage(context()) || id.metadata.variables?.状态栏 !== current) throw Error('另存期间状态栏或存储模式已变化，请重试。');
+      if (!usesCurrentStoryStorage(context()) || readStoryRoot(context(), '状态栏') !== current) throw Error('另存期间状态栏或存储模式已变化，请重试。');
       await persistStatusChange(() => {});
       report.textContent = '当前状态已随保存留存；可在设置 → 剧情存储导出或恢复最近备份。';
     } else if (usesStoryStorage(context())) {
       const backup = await captureStoryBackup(context(), {label:'手动另存状态'});
       checkIdentity(id);
-      if (id.metadata.variables?.状态栏 !== current) throw Error('另存期间状态栏已变化，请重试。');
+      if (readStoryRoot(context(), '状态栏') !== current) throw Error('另存期间状态栏已变化，请重试。');
       await persistStatusChange(() => recordStoryBackup(context(),backup));
       report.textContent = '已另存外置恢复点；可在“恢复备份”中选择。';
     } else {
@@ -494,15 +519,15 @@ function mount() {
     }
   });
   action('恢复备份', restoreBackup);
-  const legacyWorldbook=action('写入世界书更新提示词', async () => { report.textContent = await writeUpdateWorldbook(); });legacyWorldbook.dataset.legacyUpdateEntry='true';
+  const legacyWorldbook=action('写入世界书更新提示词', async () => { report.textContent = await writeUpdateWorldbook(); });legacyWorldbook.dataset.legacyUpdateEntry='true';legacyWorldbook.hidden=isIndependent(context());
   const linkageOwnership=node('p','','wsh-note');linkageOwnership.dataset.linkageOwnership='true';generationForm.append(linkageOwnership);
-  generationForm.append(actions, report, node('p', '独立接口使用 Chat Completions 格式，需要允许浏览器跨域。生成与编辑共用聊天变量“状态栏”。', 'wsh-note'));
+  generationForm.append(actions, report, node('p', '独立接口使用 Chat Completions 格式，需要允许浏览器跨域。生成与编辑共用当前聊天的状态栏资料。', 'wsh-note'));
   formHome.append(generationForm);
 
   syncHistory();
   const ctx = context(); const events = ctx.eventTypes || ctx.event_types || {};
   subscribeStateChanges((change,metadata) => {
-    if(change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==chatIdentity(context())||!change.paths.some(path=>path[0]==='variables'&&path[1]==='状态栏'))return;
+    if(change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==chatIdentity(context())||!change.paths.some(path=>path[0]===STATE_KEY||path[0]==='variables'&&path[1]==='状态栏'))return;
     running?.abort();if(hudPanel&&selectedPage==='linkage')invalidateStatusFrame?.();else closeHud();
     history.adoptExternal();floorButtons.refresh();
   });

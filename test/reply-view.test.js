@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mount} from '../apps/reply/index.js';
 import {ROOTS,MIGRATION_KEY,BACKUP_KEY,MIGRATION_OWNER,OWNED_VARIABLE_ROOTS,OWNERSHIP_FLOOR} from '../apps/state2/storage.js';
 import {initializeState2} from '../apps/state2/runtime.js';
+import {STATE_KEY} from '../apps/story-state/access.js';
+import {emptyState} from '../apps/story-state/schema.js';
 
 class FakeNode {
     constructor(tag) {
@@ -100,7 +102,7 @@ test('whole-batch redraw replaces all candidates and keeps the draft intact on f
  await click(f.root,'生成 / 换一批');assert.deepEqual(cardText(f.root),['甲','乙','丙']);assert.equal(f.input.value,'原草稿');
 });
 
-test('previewed native story records can be excluded from a later request',async t=>{
+test('previewed independent story records can be excluded without reading inert native variables',async t=>{
     const f=fixture(['["候选一","候选二","候选三"]','["新候选一","新候选二","新候选三"]']);t.after(()=>f.dispose());
     f.ctx.extensionSettings.LittleWhiteBox={variablesMode:'2.0'};
     f.ctx.chatMetadata={
@@ -109,23 +111,24 @@ test('previewed native story records can be excluded from a later request',async
         [BACKUP_KEY]:{version:1,roots:{},source:{}},
         extensions:{LittleWhiteBox:{stateLogV2:{version:1,floors:{[OWNERSHIP_FLOOR]:{signature:MIGRATION_OWNER,roots:[...OWNED_VARIABLE_ROOTS]}}}}},
     };
-    let completeRestore;
-    const restoration=new Promise(resolve=>{completeRestore=resolve;});
-    const runtime=initializeState2(()=>f.ctx,{interval:0,host:{LWB_StateV2:{applyText(){}}},document:null,
-        restoreNative:async floor=>{assert.equal(floor,0);await restoration;return {restored:true};}});
+    const runtime=initializeState2(()=>f.ctx,{interval:0});
     t.after(()=>runtime.destroy());
-    const pending=runtime.restoreChat();await wait();
+    await runtime.restoreChat();
     await click(f.root,'刷新参考资料');
     assert.equal(findLabel(f.root,'引用资料：人物 · 玩家'),undefined,'unrestored branch data stays hidden');
-    completeRestore();await pending;
+    const state=emptyState();
+    state.modules.characters={version:1,characters:[{id:'pc',name:'玩家',kind:'pc',stats:[],notes:'',appearance:{description:'蓝色斗篷'}}]};
+    f.ctx.chatMetadata[STATE_KEY]=state;
+    await runtime.restoreChat();
     assert.equal(runtime.ready(f.ctx),true);
     await click(f.root,'刷新参考资料');
     const record=findLabel(f.root,'引用资料：人物 · 玩家');assert.ok(record);
     await click(f.root,'生成选项');
-    assert.match(f.requests[0].prompt,/红色斗篷/);
+    assert.match(f.requests[0].prompt,/蓝色斗篷/);
+    assert.doesNotMatch(f.requests[0].prompt,/红色斗篷/);
     record.checked=false;fire(record,'change');
     await click(f.root,'生成 \/ 换一批');
-    assert.doesNotMatch(f.requests[1].prompt,/红色斗篷/);
+    assert.doesNotMatch(f.requests[1].prompt,/蓝色斗篷/);
     assert.equal(f.ctx.chatMetadata.variables[ROOTS.characters].includes('红色斗篷'),true,'preview never rewrites State2');
 });
 

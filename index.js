@@ -46,15 +46,15 @@ export function initialize() {
     const linkage = getLinkageService();
     const state2 = initializeState2(() => globalThis.SillyTavern?.getContext?.(), { report: linkage.reportHost });
     globalThis.AminOSStoryGenerationGuard = async (_chat, _size, abort) => {
-        if (globalThis.SillyTavern?.getContext?.()?.chatMetadata?.amin_os_story_storage_v2
+        if (state2.status().mode !== 'independent' && globalThis.SillyTavern?.getContext?.()?.chatMetadata?.amin_os_story_storage_v2
             && (!state2.storyStatus().enabled || !state2.ready())) {
             abort(true);
             globalThis.toastr?.error?.('外置剧情状态尚未恢复，请查看 Amin OS 剧情存储或联动更新中的错误。');
         }
     };
     const linkageHost = createLinkageHost(() => globalThis.SillyTavern?.getContext?.(), {
-        buildPrompt: buildUpdateRules, buildDataPrompt, beforeGeneration: type => state2.storyStatus().enabled ? undefined : state2.prepareGeneration(type), captureGeneration: () => true,
-        collectReply: state2.collectReply, cancelGeneration: linkage.cancelGeneration,
+        buildPrompt: buildUpdateRules, buildDataPrompt, beforeGeneration: type => state2.prepareGeneration(type), captureGeneration: linkage.captureGeneration,
+        collectReply: linkage.collectReply, cancelGeneration: linkage.cancelGeneration,
         report: linkage.reportHost,
     });
     linkage.reportHost(linkageHost.status().message);
@@ -94,7 +94,7 @@ export function initialize() {
     for(const id of ['characters','inventory','relationships','saves','dice','scene','journal','organizations','effects','information','worldbooks','tts'])installExtraFloorButtons(id);
     const ev=ctx.eventTypes??ctx.event_types??{};
     if(ev.CHAT_CHANGED)ctx.eventSource?.on(ev.CHAT_CHANGED,()=>queueMicrotask(()=>shell.refreshActive()));
-    globalThis.AminOS=Object.freeze({version:'0.17.5',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
+    globalThis.AminOS=Object.freeze({version:'0.18.0',open:()=>shell.open(),openApp:id=>shell.showApp(id),close:()=>shell.close()});
     return shell;
 }
 

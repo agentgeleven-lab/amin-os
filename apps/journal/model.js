@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 import { readCharacters, validId } from '../characters/model.js';
 import { chatRevisions, messageRevision, pathBelongs, sameMessageRevision } from '../shared/message-revision.js';
 export const KEY = 'amin_os_journal_v1';
@@ -15,7 +16,7 @@ export const path = chat => chatRevisions(chat ?? []);
 export const belongs = (event, current) => pathBelongs(event?.path, current);
 
 export function readStore(ctx) {
-    const store = ctx?.chatMetadata?.[KEY];
+    const store = legacyModule(ctx, 'journal', KEY);
     if (store && (store.version !== 1 || !Array.isArray(store.events))) throw Error('剧情档案数据版本不兼容');
     if (store?.draftEvents !== undefined && !Array.isArray(store.draftEvents)) throw Error('自动编年史草稿历史格式无效');
     if (store?.autoChronicle !== undefined) autoSettings(store);
@@ -397,3 +398,17 @@ export function restoreJournal(ctx, snapshot, { at = new Date().toISOString(), m
     }
     return next;
 }
+
+registerModuleCodec('journal', {
+    toLegacy(ctx, snapshot) {
+        const target = validateJournalSnapshot(snapshot ?? { version: 1, limit: 40000, entries: [] }), current = [];
+        const events = target.entries.map((record, index) => ({ id: 'independent_journal_' + index, op: 'update', recordId: record.id, at: '1970-01-01T00:00:00.000Z', path: current, record: structuredClone(record) }));
+        const draftEvents = (target.drafts ?? []).flatMap((draft, index) => {
+            const { status, recordId, at, ...value } = draft;
+            const base = { id: 'independent_draft_' + index, op: 'draft', draftId: draft.id, path: current, at, draft: value };
+            return status === 'ready' ? [base] : [base, { id: 'independent_draft_status_' + index, op: status === 'accepted' ? 'accept' : 'dismiss', draftId: draft.id, path: current, at, recordId }];
+        });
+        return { [KEY]: { version: 1, limit: target.limit, events, ...(target.autoChronicle ? { autoChronicle: structuredClone(target.autoChronicle) } : {}), ...(target.drafts ? { draftEvents } : {}) } };
+    },
+    fromLegacy(ctx) { return snapshotJournal(readStore(ctx), ctx?.chat); },
+});

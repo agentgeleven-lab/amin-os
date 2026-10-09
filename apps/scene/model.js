@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
 import { validateGameClock, advanceGameClock, gameTimeMinutes, clockWeekday, calendarKey } from './calendar.js';
 import { readCharacters } from '../characters/model.js';
@@ -28,7 +29,7 @@ const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(v
 export const chatPath = chat => chatRevisions(chat ?? []);
 export const belongs = (event, path) => pathBelongs(event?.path, path);
 export function readStore(ctx) {
-    const store = ctx?.chatMetadata?.[KEY];
+    const store = legacyModule(ctx, 'scene', KEY);
     if (store === undefined) return emptyStore();
     if (!object(store) || store.version !== 1 || !Array.isArray(store.events) || store.events.length > LIMITS.events) throw Error('场景与时间数据格式或版本不兼容，原记录未改写。');
     return copy(store);
@@ -264,7 +265,7 @@ export function appendEvent(store, chat, change, { eventId, at }) {
     return next;
 }
 export function mapReferences(ctx) {
-    const raw = ctx?.chatMetadata?.dynamicMapV1;
+    const raw = legacyModule(ctx, 'map', 'dynamicMapV1');
     let doc; try { const saved = typeof raw === 'string' ? JSON.parse(raw) : raw; doc = saved?.document ?? saved; } catch { return []; }
     if (!object(doc?.maps)) return [];
     return Object.entries(doc.maps).flatMap(([mapId, map]) => object(map?.nodes) ? Object.entries(map.nodes).filter(([, node]) => node?.discovered === true).map(([nodeId, node]) => ({ mapId, nodeId, mapName: String(map.name ?? mapId), nodeName: String(node.name ?? nodeId), current: doc.activeMap === mapId && map.currentLocation === nodeId })) : []);
@@ -289,3 +290,10 @@ export function currentPrompt(ctx) {
     if (prompt.length > LIMITS.prompt) throw Error('场景资料超过提示词上限，请精简后再启用读取。');
     return prompt;
 }
+
+registerModuleCodec('scene', {
+    toLegacy(ctx, snapshot) {
+        return { [KEY]: { version: 1, events: [{ id: 'independent_scene', at: '1970-01-01T00:00:00.000Z', path: [], op: 'restore', snapshot: validateState(snapshot ?? emptyState()) }] } };
+    },
+    fromLegacy(ctx) { return readCurrentScene(ctx); },
+});

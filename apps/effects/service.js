@@ -1,3 +1,5 @@
+import { saveChatMetadata } from '../shared/chat-save.js';
+import { isIndependent, legacyModule } from '../story-state/access.js';
 import {actionResources,buildActionSettlement} from '../shared/action-settlement.js';
 import {KEY,readStore,anchor,compile,change,splitEffect,timedEffects,contextExpiryPreview,currentPrompt} from './model.js';
 import {LIBRARY_KEY,mergeLibrary,libraryStamp} from './library.js';
@@ -23,7 +25,7 @@ export function createEffects(getContext){
  function forMetadata(next,c){if(c.extensionSettings?.[LIBRARY_KEY])next.skills=structuredClone(c.chatMetadata[KEY]?.skills??[]);delete next.trash;delete next.groups;return next;}
  function migrate(c){
   if(!c?.extensionSettings||typeof c.saveSettingsDebounced!=='function')return;
-  const before=c.extensionSettings[LIBRARY_KEY],next=mergeLibrary(before,c.chatMetadata?.[KEY]?.skills??[]);
+  const before=c.extensionSettings[LIBRARY_KEY],next=mergeLibrary(before,legacyModule(c,'effects',KEY)?.skills??[]);
   if(JSON.stringify(before)===JSON.stringify(next))return;
   c.extensionSettings[LIBRARY_KEY]=next;
   try{const pending=c.saveSettingsDebounced();pending?.catch?.(e=>{if(c.extensionSettings[LIBRARY_KEY]===next)c.extensionSettings[LIBRARY_KEY]=before;message='旧能力迁移保存失败：'+e.message;notify({error:true});});}catch(e){c.extensionSettings[LIBRARY_KEY]=before;throw e;}
@@ -44,8 +46,8 @@ export function createEffects(getContext){
  async function save(token,update){
   ensureAvailable();const c=check(token);if(typeof c.saveMetadata!=='function')throw Error('当前酒馆缺少聊天保存接口');
   migrate(c);const meta=c.chatMetadata,before=meta[KEY],existed=Object.hasOwn(meta,KEY),next=forMetadata(update(readStore(c)),c),release=acquireMetadataWrite(getContext,token.operation);let saved=false,nativeRollback;busy=true;
-  try{meta[KEY]=next;nativeRollback=prepareState2ManualWrite(c,[[KEY]]);await c.saveMetadata();saved=true;const current=getContext();if(current?.chatMetadata!==meta||identity(current)!==token.id||JSON.stringify(anchor(current.chat))!==token.path)throw Error('记录已保存到原聊天，但聊天或楼层已变化，请刷新当前页面');clear();message='已保存，下次生成时使用当前记录';}
-  catch(e){if(!saved&&meta[KEY]===next){if(existed)meta[KEY]=before;else delete meta[KEY];nativeRollback?.();}message=saved?e.message:'保存失败：'+e.message;throw e;}
+  try{meta[KEY]=next;nativeRollback=prepareState2ManualWrite(c,[[KEY]]);await saveChatMetadata(c);saved=true;const current=getContext();if(current?.chatMetadata!==meta||identity(current)!==token.id||JSON.stringify(anchor(current.chat))!==token.path)throw Error('记录已保存到原聊天，但聊天或楼层已变化，请刷新当前页面');clear();message='已保存，下次生成时使用当前记录';}
+  catch(e){if(!saved){if(isIndependent(c))nativeRollback?.();else if(meta[KEY]===next){if(existed)meta[KEY]=before;else delete meta[KEY];nativeRollback?.();}}message=saved?e.message:'保存失败：'+e.message;throw e;}
   finally{busy=false;release();notify({error:message.includes('失败')||message.includes('已变化')});}
  }
  async function commit(token,label,update){

@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {generateOptions,normalizeSettings} from '../apps/reply/generator.js';
 import {initializeAI} from '../ai/service.js';
+import {collectLinkedContext} from '../apps/reply/linked-context.js';
+import {STATE_KEY} from '../apps/story-state/access.js';
+import {emptyState} from '../apps/story-state/schema.js';
 
 const context=generateRaw=>({
     chat:[{name:'角色',mes:'门外传来脚步声。',is_system:false}],
@@ -97,6 +100,14 @@ test('shared route carries selected context and does not append unrelated defaul
         assert.match(seen[2].prompt,/正在下雨/);
         assert.match(seen[3].data.request,/正在下雨/);
         for(const key of ['includeEffects','includeJournal','includeScene','includeLinkage']) assert.equal(seen[3][key],false);
+        const state=emptyState();state.modules.characters={version:1,characters:[{id:'pc',name:'玩家',kind:'pc',stats:[],notes:'CURRENT_CANONICAL_CLOAK'}]};
+        const independent={...context(()=>{throw Error('shared route expected');}),replyState2Ready:true,chatMetadata:{[STATE_KEY]:state,variables:{AminOS人物:'OLD_NATIVE_SECRET'}},extensionSettings:{},getCurrentChatId:()=> 'independent'};
+        const linked=collectLinkedContext(independent,{linkedSources:['characters']});
+        await generateOptions(independent,{count:3},{world:[],directions:['观察'],linkedContext:linked});
+        assert.match(seen[2].prompt,/CURRENT_CANONICAL_CLOAK/);
+        assert.match(seen[3].data.request,/CURRENT_CANONICAL_CLOAK/);
+        assert.equal(seen[3].data.linkedContext[0].id,'characters:pc');
+        assert.doesNotMatch(seen[3].data.request,/OLD_NATIVE_SECRET/);
         ai.settings.save({...ai.settings.snapshot(),requestBody:'{"messages":[{"role":"user","content":"覆写"}]}'});
         await assert.rejects(generateOptions(context(()=>{}),{count:3},{world:[],directions:['观察']}),/覆盖了 messages/);
     } finally {ai.generate=originalGenerate;}

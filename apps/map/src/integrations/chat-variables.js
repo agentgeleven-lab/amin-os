@@ -1,6 +1,8 @@
 import { uuid } from '../../../../uuid.js';
 import { isChatReady } from '../../../shared/chat-lifecycle.js';
 import { managesModule } from '../../../linkage/policy.js';
+import { isIndependent, legacyModule } from '../../../story-state/access.js';
+import { saveChatMetadata } from '../../../shared/chat-save.js';
 import { chatIdentity, STORAGE_KEY } from '../adapters/chat.js';
 import { mapPath } from '../core/hierarchy.js';
 import { connectionDetails, prepareDocument } from '../core/spatial.js';
@@ -21,10 +23,11 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
  let stopped=false,busy=false,metadata=null,previous=[],lastRequest='',message='等待聊天地图',movement='',writer=null;
  const listeners=new Set();const report=text=>{message=text;for(const fn of listeners)fn(status());};
  const settings=()=>({variables:true,hud:true,allowMoves:false,...getContext()?.extensionSettings?.[BRIDGE_KEY]});
- const bound=()=>{(persistence.ensureReadable??persistence.ensureActive)();const ctx=getContext();if(!chatIdentity(ctx)||!ctx.chatMetadata?.[STORAGE_KEY]?.document)return null;return ctx;};
- const currentSummary=()=>{try{const ctx=bound();return ctx?integrationSummary(store.snapshot(),ctx.chatMetadata[STORAGE_KEY].updatedAt):null;}catch{return null;}};
+ const bound=()=>{(persistence.ensureReadable??persistence.ensureActive)();const ctx=getContext();if(!chatIdentity(ctx)||!legacyModule(ctx,'map',STORAGE_KEY)?.document)return null;return ctx;};
+ const currentSummary=()=>{try{const ctx=bound();return ctx?integrationSummary(store.snapshot(),legacyModule(ctx,'map',STORAGE_KEY).updatedAt):null;}catch{return null;}};
  function status(){return {message:[message,movement].filter(Boolean).join(' · '),littleWhiteBox:!!getLwb()?.applyText,statusHud:globalThis.WorldStatusHudMapBridge?.version===1,...settings()};}
  function requestMove(request){
+  if(isIndependent(getContext()))throw new Error('独立剧情存储使用地图操作更新位置，不读取小白移动请求。');
   if(managesModule(getContext(),'map'))throw Error('地图已由统一联动管理，旧移动请求不会重复执行');
   if(!settings().allowMoves)throw new Error('未开启 AI 位置更新');const ctx=bound();if(!ctx)throw new Error('请先保存当前聊天地图');
   if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).some(k=>!['请求ID','地图版本','地图ID','地点ID'].includes(k))||typeof request.请求ID!=='string'||!request.请求ID.trim()||request.请求ID.length>160||typeof request.地图ID!=='string'||typeof request.地点ID!=='string')throw new Error('移动请求格式无效');
@@ -33,10 +36,11 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
   store.applyUpdate([{type:'setActiveMap',mapId:request.地图ID},{type:'setCurrentLocation',mapId:request.地图ID,nodeId:request.地点ID}]);movement='位置更新已应用';return currentSummary();
  }
  async function positionHistory(ctx){
+  if(isIndependent(ctx))return;
   if(!Array.isArray(ctx.chat))return;
   if(!ctx.chat.length){
    if(previous.length){previous=[];store.applyUpdate([{type:'setCurrentLocation',nodeId:null}]);lastRequest=JSON.stringify(ctx.chatMetadata.variables?.地图移动请求);return;}
-   if(ctx.chatMetadata[HISTORY_KEY]?.sequence?.length){const release=acquireMetadataWrite(getContext);try{ctx.chatMetadata[HISTORY_KEY]={...ctx.chatMetadata[HISTORY_KEY],sequence:[]};await ctx.saveMetadata();}finally{release();}}return;
+   if(ctx.chatMetadata[HISTORY_KEY]?.sequence?.length){const release=acquireMetadataWrite(getContext);try{ctx.chatMetadata[HISTORY_KEY]={...ctx.chatMetadata[HISTORY_KEY],sequence:[]};await saveChatMetadata(ctx);}finally{release();}}return;
   }
   const history=structuredClone(ctx.chatMetadata[HISTORY_KEY]??{records:{}}),now=[],assigned=[];
   for(const m of ctx.chat){const id=m.extra?.dynamic_map_message_id??uuid();if(!m.extra?.dynamic_map_message_id)assigned.push([m,id]);now.push(id+':'+String(m.swipe_id??0));}
@@ -54,7 +58,7 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
   if(changed){
    const token=captureContext(getContext),release=acquireMetadataWrite(getContext,token);
    try{for(const [message,id]of assigned){message.extra??={};message.extra.dynamic_map_message_id=id;}history.records[key]=value;history.sequence=now;ctx.chatMetadata[HISTORY_KEY]=history;
-    if(assigned.length&&ctx.saveChat)await ctx.saveChat();assertContext(getContext,token);await ctx.saveMetadata();
+    if(assigned.length&&ctx.saveChat)await ctx.saveChat();assertContext(getContext,token);await saveChatMetadata(ctx);
    }finally{release();}
   }
  }
@@ -62,6 +66,7 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
   if(stopped||busy||!isChatReady(getContext())||persistence.suspended?.())return;busy=true;
   try{
    const ctx=bound();if(!ctx){report('尚未保存聊天地图，不发布示例数据');return;}
+   if(isIndependent(ctx)){metadata=ctx.chatMetadata;previous=[];report('独立剧情存储直接使用地图资料，不写入小白变量或楼层位置历史');return;}
    if(metadata!==ctx.chatMetadata){metadata=ctx.chatMetadata;previous=metadata[HISTORY_KEY]?.sequence??[];movement='';lastRequest=JSON.stringify(metadata.variables?.地图移动请求);}
    await positionHistory(ctx);if(stopped||persistence.suspended?.()||getContext().chatMetadata!==ctx.chatMetadata)return;
    const cfg=settings(),raw=JSON.stringify(metadata.variables?.地图移动请求);
@@ -76,7 +81,7 @@ export function createVariableBridge({store,persistence,getContext,loadVariables
    persistence.ensureActive();const release=acquireMetadataWrite(getContext);
    try{writer.setLocalVariable('地图',JSON.stringify(summary));
     const actual=parse(getContext().chatMetadata.variables?.地图);if(JSON.stringify(actual)!==JSON.stringify(summary))throw new Error('变量写入被宿主或变量规则拒绝');
-    await getContext().saveMetadata();if(getContext().chatMetadata===target)report('地图摘要已同步到聊天变量');
+    await saveChatMetadata(getContext());if(getContext().chatMetadata===target)report('地图摘要已同步到聊天变量');
    }finally{release();}
   }catch(e){report('联动未同步：'+e.message);}finally{busy=false;}
  }

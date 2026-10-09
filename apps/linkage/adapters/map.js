@@ -1,6 +1,7 @@
 import { validateDocument } from '../../map/src/core/protocol.js';
 import { prepareDocument } from '../../map/src/core/spatial.js';
 import { compileMapUpdate } from '../../map/src/integrations/tool-calling.js';
+import { legacyModule, isIndependent } from '../../story-state/access.js';
 
 const KEY = 'dynamicMapV1', HISTORY = 'dynamicMapPositionHistoryV1';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -12,12 +13,13 @@ const fields = {
     update_edge: ['mapId', 'name', 'type', 'direction', 'distance', 'bidirectional'], move: ['mapId'],
 };
 function document(ctx) {
-    const raw = ctx?.chatMetadata?.[KEY];
+    const raw = legacyModule(ctx,'map',KEY);
     if (raw === undefined) return null;
     if (!object(raw) || !Number.isFinite(raw.updatedAt) || !object(raw.document)) throw Error('地图存储格式无效，原始资料未改写。');
     return clone(validateDocument(raw.document));
 }
 function positionPatch(ctx, doc) {
+    if (isIndependent(ctx) || ctx.aminIndependentDraft) return [];
     const raw = ctx?.chatMetadata?.[HISTORY];
     if (raw !== undefined && (!object(raw) || !object(raw.records) || raw.sequence !== undefined && (!Array.isArray(raw.sequence) || raw.sequence.some(value => typeof value !== 'string')))) throw Error('地图位置历史格式无效，未写入。');
     const sequence = (ctx?.chat ?? []).map(message => {

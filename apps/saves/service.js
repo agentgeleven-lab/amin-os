@@ -5,6 +5,7 @@ import { branchAvailability, assertOpenedBranch, loadBranchHost as defaultLoadBr
 import { uuid } from '../../uuid.js';
 import { assertMapReady } from '../map/src/integrations/runtime.js';
 import { STORY_STORAGE_KEY } from '../state2/storage.js';
+import { isIndependent, readModule } from '../story-state/access.js';
 
 const clone = value => structuredClone(value);
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -47,7 +48,7 @@ export function createSavesService(getContext = () => globalThis.SillyTavern?.ge
         return stageStore('建立当前剧情存档', store, { kind: 'save', name: saved.name, snapshot: { id: saved.id, name: saved.name, createdAt: saved.createdAt, source: saved.source }, moduleNames: names(saved), changes: [], warnings: [] }, token);
     }
     function prepareRestore(ctx, saved) {
-        if (saved.modules.map !== null || ctx.chatMetadata.dynamicMapV1 !== undefined) assertMapReady(ctx, { allowEmpty: true });
+        if (saved.modules.map !== null || (isIndependent(ctx) ? readModule(ctx,'map') !== null : ctx.chatMetadata.dynamicMapV1 !== undefined)) assertMapReady(ctx, { allowEmpty: true });
         const before = materialize(ctx), result = restorePatches(ctx, saved.modules, { at: now(), makeId: createId });
         const projected = { ...ctx, chatMetadata: clone(ctx.chatMetadata) };
         for (const patch of result.patches) {

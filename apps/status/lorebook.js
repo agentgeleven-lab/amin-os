@@ -1,4 +1,5 @@
 import { RELATION_UPDATE_RULES } from './state-tools.js';
+import { saveChatMetadata } from '../shared/chat-save.js';
 export const ENTRY_MARKER = 'world-status-hud/variable-update-v1';
 export const UPDATE_ENTRY_TITLE = '世界状态栏 · 变量更新规则';
 export const UPDATE_ENTRY_PROMPT = `你与状态栏前端共同使用当前聊天的本地变量“状态栏”。
@@ -86,7 +87,7 @@ export async function installUpdateEntry({ context, check, extraPrompt = '', fet
     const backups = ctx.chatMetadata[entryOptions.backupKey || 'world_status_hud_lorebook_backups'] ||= [];
     backups.push({ name, entry: prepared.previous, savedAt: Date.now() });
     if (backups.length > 10) backups.splice(0, backups.length - 10);
-    await ctx.saveMetadata(); guard();
+    await saveChatMetadata(ctx); guard();
   }
   const latest = await (await request('get', { name })).json(); guard();
   const currentCache = wi.worldInfoCache?.get(name);

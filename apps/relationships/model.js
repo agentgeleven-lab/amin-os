@@ -1,4 +1,5 @@
 import { uuid } from '../../uuid.js';
+import { legacyModule, registerModuleCodec } from '../story-state/access.js';
 import { readCharacters } from '../characters/model.js';
 import { chatRevisions, pathBelongs, sameMessageRevision, validMessageRevision } from '../shared/message-revision.js';
 
@@ -148,7 +149,7 @@ export function validateStore(input) {
     if (JSON.stringify(result).length > LIMITS.storeChars) throw Error('人物关系记录已超过容量限制，请先导出存档保留记录。');
     return result;
 }
-export function readStore(ctx) { return ctx?.chatMetadata?.[KEY] === undefined ? emptyStore() : validateStore(ctx.chatMetadata[KEY]); }
+export function readStore(ctx) { const raw = legacyModule(ctx, 'relationships', KEY); return raw === undefined ? emptyStore() : validateStore(raw); }
 export function currentState(store, chat) {
     const value = validateStore(store), path = chatPath(chat);
     for (let index = value.events.length - 1; index >= 0; index--) if (belongs(value.events[index], path)) return clone(value.events[index].snapshot);
@@ -220,3 +221,10 @@ export function currentPrompt(ctx) {
     if (prompt.length > LIMITS.prompt) throw Error(`人物关系提示超过 ${LIMITS.prompt} 字符，本轮未附加；请缩短关系说明或关闭读取。`);
     return prompt;
 }
+
+registerModuleCodec('relationships', {
+    toLegacy(ctx, snapshot) {
+        return { [KEY]: { version: 1, events: [{ id: 'independent_relationships', at: '1970-01-01T00:00:00.000Z', path: [], op: 'restore', snapshot: validateState(snapshot ?? emptyState()) }] } };
+    },
+    fromLegacy(ctx) { return readRelationships(ctx); },
+});

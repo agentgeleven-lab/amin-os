@@ -1,3 +1,6 @@
+import { isIndependent } from '../story-state/access.js';
+import { sha256HexSync } from '../tts/source-hash.js';
+
 export const KEY = 'amin_os_linkage_v1';
 export const ROOT = KEY;
 export const SCOPE_TEMPLATE_KEY = 'amin_os_linkage_scope_template_v1';
@@ -55,7 +58,14 @@ export function validateLinkageState(raw) {
     for (const record of raw.applied) {
         if (record.archived !== undefined && typeof record.archived !== 'boolean') throw Error('联动历史归档标记无效。');
         if (!plain(record) || typeof record.id !== 'string' || !record.id || typeof record.at !== 'string' || !plain(record.source) || !Array.isArray(record.changes)) throw Error('联动更新来源记录无效。');
-        if (typeof record.source.identity !== 'string' || !Array.isArray(record.source.path) || record.source.path.some(v => typeof v !== 'string') || !Number.isInteger(record.source.index) || typeof record.source.text !== 'string') throw Error('联动更新来源不完整。');
+        const compact = record.source.textHash !== undefined || record.source.pathHash !== undefined;
+        const hash = value => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/u.test(value);
+        if (typeof record.source.identity !== 'string' || !Number.isInteger(record.source.index)
+            || (compact ? !hash(record.source.textHash) || !hash(record.source.pathHash)
+                || !Number.isInteger(record.source.swipe) || record.source.swipe < 0
+                || Object.keys(record.source).some(key => !['identity', 'index', 'swipe', 'textHash', 'pathHash'].includes(key))
+                : !Array.isArray(record.source.path) || record.source.path.some(v => typeof v !== 'string') || typeof record.source.text !== 'string')) throw Error('联动更新来源不完整。');
+        if (record.changesHash !== undefined && !hash(record.changesHash)) throw Error('联动更新变更收据无效。');
     }
     if (new Set(raw.applied.map(r => r.id)).size !== raw.applied.length) throw Error('联动操作编号重复。');
     return { ...structuredClone(raw), links: structuredClone(raw.links ?? []) };
@@ -63,6 +73,17 @@ export function validateLinkageState(raw) {
 export function readLinkageState(ctx) {
     const raw = ctx?.chatMetadata?.[KEY];
     return raw === undefined ? { ...emptyLinkageState(), ...readScopeTemplate(ctx) } : validateLinkageState(raw);
+}
+/** Compact idempotency receipts only; business data and permissions are kept. */
+export function compactLinkageReceipts(input) {
+    const state = validateLinkageState(input);
+    const hash = value => 'sha256:' + sha256HexSync(typeof value === 'string' ? value : JSON.stringify(value));
+    state.applied = state.applied.slice(-64).map(record => ({ id: record.id, at: record.at,
+        ...(record.archived !== undefined ? {archived:record.archived} : {}),
+        source: {identity:record.source.identity,index:record.source.index,swipe:record.source.swipe ?? 0,
+            textHash:record.source.textHash ?? hash(record.source.text),pathHash:record.source.pathHash ?? hash(record.source.path)},
+        changes:[],changesHash:record.changesHash ?? hash(record.changes) }));
+    return validateLinkageState(state);
 }
 // A template carries permissions only, never chat data, rules, IDs or history.
 export function scopeTemplate(input) {
@@ -78,6 +99,9 @@ export function readScopeTemplate(ctx) {
 }
 export function moduleAvailable(ctx, id) {
     if (!own(MODULES, id)) return false;
+    // Application availability is independent of whether its current document
+    // has records. A cleared/new story must be able to create its first entity.
+    if (isIndependent(ctx)) return true;
     const key = MODULES[id][1], meta = ctx?.chatMetadata ?? {};
     return id === 'status' || id === 'organizations' ? own(meta.variables ?? {}, key) : own(meta, key);
 }

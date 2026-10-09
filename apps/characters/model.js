@@ -1,5 +1,6 @@
 import { uuid } from '../../uuid.js';
 import { chatRevisions, pathBelongs } from '../shared/message-revision.js';
+import { readStoryRoot, legacyModule, registerModuleCodec } from '../story-state/access.js';
 
 export const KEY = 'amin_os_characters_v1';
 export const STATUS_PATH = Object.freeze(['variables', '状态栏']);
@@ -66,7 +67,7 @@ export function validateStore(input) {
     return copy(input);
 }
 export function readStore(ctx) {
-    const value = ctx?.chatMetadata?.[KEY];
+    const value = legacyModule(ctx, 'characters', KEY);
     return value === undefined ? emptyStore() : validateStore(value);
 }
 export function currentState(store, chat) {
@@ -89,7 +90,7 @@ export function buildRestore(ctx, snapshot, options = {}) {
     return appendSnapshot(readStore(ctx), ctx?.chat, validateState(snapshot), { ...options, reason: options.reason ?? '恢复人物存档' });
 }
 export function readWorldStatus(ctx) {
-    const raw = ctx?.chatMetadata?.variables?.状态栏;
+    const raw = readStoryRoot(ctx, '状态栏');
     if (raw === undefined || raw === null || raw === '') throw Error('世界状态尚未建立，请先创建要绑定的数值字段。');
     let state;
     try { state = typeof raw === 'string' ? JSON.parse(raw) : copy(raw); } catch { throw Error('世界状态数据无法解析，原记录未改写。'); }
@@ -112,7 +113,7 @@ export function resolveStat(ctx, characterId, statId) {
     return { value: boundValue(readWorldStatus(ctx), stat.binding, stat.component), label: stat.label, character, stat };
 }
 export function bindings(ctx) {
-    const raw = ctx?.chatMetadata?.variables?.状态栏;
+    const raw = readStoryRoot(ctx, '状态栏');
     if (raw === undefined || raw === null || raw === '') return [];
     const state = readWorldStatus(ctx), result = [];
     for (const [project, fields] of Object.entries(state.项目)) {
@@ -139,3 +140,10 @@ export function withStatValue(ctx, characterId, statId, input) {
     }
     return { state, before: resolved.value, after: input, ...resolved, value: input };
 }
+
+registerModuleCodec('characters', {
+    toLegacy(ctx, snapshot) {
+        return { [KEY]: { version: 1, events: [{ id: 'independent_characters', at: '1970-01-01T00:00:00.000Z', reason: '当前人物资料', path: [], snapshot: validateState(snapshot ?? emptyState()) }] } };
+    },
+    fromLegacy(ctx) { return readCharacters(ctx); },
+});

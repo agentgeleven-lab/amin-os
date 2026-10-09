@@ -1,4 +1,6 @@
 import { saveChatMetadata } from '../shared/chat-save.js';
+import './story-state.js';
+import { isIndependent, readStoryRoot, writeStoryRoot, prepareIndependentManualWrite } from '../story-state/access.js';
 import {collectStatusSources,readStatusPersona,requireStatusPersona} from './sources.js';
 import {readStatusChat, requireStatusChat} from './chat-context.js';
 import {canChangeType} from './type-permission.js';
@@ -49,7 +51,8 @@ try {
   monitor = setInterval(() => { if (!isSameChat()||!isSamePersona()) controller.abort(); }, 300);
   timer = setTimeout(() => controller.abort(), CONFIG.api.timeoutMs);
 
-  const vars = await (sourceOptions.loadVariables ?? (()=>import('/scripts/variables.js')))();
+  const vars = isIndependent(ctx) ? { setLocalVariable: (key, value) => writeStoryRoot(ctx, key, value) }
+    : await (sourceOptions.loadVariables ?? (()=>import('/scripts/variables.js')))();
   guard();
   if (typeof vars.setLocalVariable !== 'function') throw Error('此酒馆版本缺少所需变量接口。');
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -60,7 +63,7 @@ try {
   const equal = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
   function readState() {
     // 与 /getvar 和 /setvar 读写同一个聊天变量存储；避免命令字符串转义。
-    const raw = metadata.variables?.['状态栏'];
+    const raw = readStoryRoot(ctx, '状态栏');
     if (raw === undefined || raw === null || raw === '') return null;
     let d;
     try { d = typeof raw === 'string' ? JSON.parse(raw) : clone(raw); }
@@ -233,7 +236,7 @@ try {
     ? '本地写入后校验失败，请检查变量面板及外置楼层状态。'
     : '本地写入后校验失败，请检查变量面板及生成前备份。');
   // setLocalVariable 本身会安排酒馆保存；此处主动等待当前聊天元数据保存。
-  try { await saveChatMetadata(ctx); }
+  try { if(isIndependent(ctx))prepareIndependentManualWrite(ctx,[['variables','状态栏']]);await saveChatMetadata(ctx); }
   catch { throw Error(currentStory
     ? '变量已写入内存，但聊天保存失败。请保持当前聊天并重试保存；当前状态文件的保存尚未确认。'
     : externalStory
