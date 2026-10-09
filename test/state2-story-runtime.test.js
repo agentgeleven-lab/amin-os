@@ -99,6 +99,51 @@ test('missing external node makes branch runtime unready and generation fails cl
     } finally { f.runtime.destroy(); }
 });
 
+for (const missing of ['state', 'index']) {
+    test(`story backup import repairs a missing ${missing} file while restoration remains explicit`, async () => {
+        const f = fixture();
+        try {
+            await f.runtime.migrate();
+            f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 7 } } });
+            await saveChatMetadata(f.ctx);
+            const originalVariables = clone((await f.runtime.readStoryFloor(0)).variables);
+            const bundle = await f.runtime.exportStory();
+            const originalChat = clone(f.ctx.chat);
+            const missingId = missing === 'index' ? bundle.marker.indexId
+                : (await reference(f, f.ctx.chat[0])).stateId;
+            assert.ok(bundle.graph.nodes[missingId]);
+            assert.equal(f.nodes.delete(missingId), true);
+
+            // Reopening must fail on the backing store, without trusting live variables.
+            f.ctx.chatMetadata = clone(f.ctx.chatMetadata);
+            f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 99 } } });
+            const unrestoredVariables = clone(f.ctx.chatMetadata.variables);
+            await f.runtime.restoreChat();
+            assert.equal(f.runtime.ready(), false);
+            assert.match(f.runtime.status().restoreError, /找不到/);
+            await assert.rejects(f.runtime.prepareGeneration(), /恢复失败|未恢复|找不到/);
+            assert.deepEqual(f.ctx.chatMetadata.variables, unrestoredVariables);
+
+            const beforeImport = clone(f.ctx.chatMetadata);
+            const result = await f.runtime.importStory(bundle);
+            assert.equal(result.imported, true);
+            assert.deepEqual(f.nodes.get(missingId), bundle.graph.nodes[missingId]);
+            assert.deepEqual(f.ctx.chatMetadata, beforeImport,
+                'file import must not overwrite current variables, marker, or native logs');
+            assert.deepEqual(f.ctx.chat, originalChat,
+                'file import must preserve message identities, candidate identities, and prose');
+            assert.equal(f.runtime.ready(), false, 'import must not mark an unrestored branch ready');
+            assert.match(f.runtime.status().restoreError, /找不到/);
+
+            await f.runtime.restoreChat();
+            assert.equal(f.runtime.ready(), true);
+            assert.equal(f.runtime.status().restoreError, '');
+            assert.deepEqual(f.ctx.chatMetadata.variables, originalVariables);
+            assert.deepEqual(f.ctx.chat, originalChat);
+        } finally { f.runtime.destroy(); }
+    });
+}
+
 test('new candidate starts from the preceding floor without rewriting the old candidate ref', async () => {
     const f = fixture();
     try {

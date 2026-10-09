@@ -371,7 +371,7 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         if (external() && ready() && !sameSignature(observedNative, signature(getContext()))) return archive();
     }
     if(interval>0){timer=setInterval(reconcile,interval);timer.unref?.();}
-    return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),ready:ready(),restoring:sameChat(getContext())&&restoring,restoreError:sameChat(getContext())?restoreError:'',message:lastMessage||nativeState2Status(getContext()).message}),
+    return { sync,reconcile,migrate,prepareGeneration,collectReply,restoreChat,ready,status:()=>({...nativeState2Status(getContext()),available:available(),ready:ready(),restoring:sameChat(getContext())&&restoring,generating:streaming(),restoreError:sameChat(getContext())?restoreError:'',message:lastMessage||nativeState2Status(getContext()).message}),
         updateDiagnostics:()=>updateOwner?.metadata===getContext()?.chatMetadata&&updateOwner.identity===chatIdentity(getContext())?updates.records():[],clearUpdateDiagnostics(){clearUpdates();report(lastMessage);},
         inspectStoryIndex:()=>story.inspectIndex(),
         scanStoryLibrary:options=>library.scan(options),

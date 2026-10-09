@@ -1,5 +1,6 @@
 import { getState2Runtime } from '../apps/state2/runtime.js';
-import { captureContext, assertContext, chatIdentity } from '../apps/shared/operations.js';
+import { captureContext, chatIdentity, chatPath, metadataWriteStatus } from '../apps/shared/operations.js';
+import { assertChatReady } from '../apps/shared/chat-lifecycle.js';
 import { mountPerformanceDiagnostics } from './performance-view.js';
 import { mountStoryLibrary } from './story-library-view.js';
 
@@ -16,6 +17,35 @@ function ensureSameChat(metadata, identity) {
   if (current?.chatMetadata !== metadata || chatIdentity(current) !== identity) {
     throw Error('聊天已切换；请在当前聊天重新操作剧情存储。');
   }
+}
+
+// File recovery must remain available when native variables cannot restore.
+// These view-only snapshots never authorize a metadata write or run the normal
+// operation preparation, but still reject host loading and changed candidates.
+function managementContext() {
+  const ctx = context();
+  assertChatReady(ctx);
+  const id = ctx?.getCurrentChatId?.() ?? ctx?.chatId;
+  if (!ctx?.chatMetadata || typeof ctx.chatMetadata !== 'object' || Array.isArray(ctx.chatMetadata)
+      || !Array.isArray(ctx.chat) || id == null || id === '') throw Error('请先打开一个聊天。');
+  return ctx;
+}
+function captureManagementContext() {
+  const ctx = managementContext();
+  return { metadata: ctx.chatMetadata, integrity: ctx.chatMetadata.integrity, identity: chatIdentity(ctx),
+    path: JSON.stringify(chatPath(ctx.chat)),
+    swipes: ctx.chat.map(message => Array.isArray(message.swipes) ? message.swipes.slice() : null) };
+}
+function assertManagementContext(token) {
+  const ctx = managementContext();
+  if (ctx.chatMetadata !== token.metadata || ctx.chatMetadata.integrity !== token.integrity
+      || chatIdentity(ctx) !== token.identity || JSON.stringify(chatPath(ctx.chat)) !== token.path
+      || ctx.chat.some((message, index) => {
+        const before = token.swipes[index], now = Array.isArray(message.swipes) ? message.swipes : null;
+        return (before === null) !== (now === null)
+          || now && (now.length !== before.length || now.some((text, swipe) => text !== before[swipe]));
+      })) throw Error('聊天或消息候选已变化，请在当前聊天重新操作剧情存储。');
+  return ctx;
 }
 
 function downloadStory(bundle) {
@@ -39,15 +69,18 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
   box.append(make('h3', '剧情文件存储', 'amin-section-heading'));
   const mode = make('p', '正在检查当前聊天…', 'amin-meta');
   const detail = make('p', null, 'amin-meta');
+  const recovery = make('p', null, 'amin-notice');
+  recovery.hidden = true;
   const stats = make('p', null, 'amin-meta');
   const indexView = make('section', null, 'amin-stack');
   let indexInspection = null, indexPage = 0;
   const controls = make('div', null, 'amin-toolbar');
-  const button = (label, action) => {
+  const recoveryControls = make('div', null, 'amin-toolbar');
+  const button = (label, action, target = controls) => {
     const node = make('button', label);
     node.type = 'button';
     node.onclick = action;
-    controls.append(node);
+    target.append(node);
     return node;
   };
   const enable = button('为当前聊天启用文件存储', () => void run(async runtime => {
@@ -58,9 +91,9 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     report(result?.message || '当前聊天已启用剧情文件存储；旧楼层数据仍保留。');
   }));
   const exportButton = button('导出当前聊天剧情备份', () => void run(async runtime => {
-    const token = captureContext(context);
+    const token = captureManagementContext();
     const bundle = await runtime.exportStory();
-    assertContext(context, token);
+    assertManagementContext(token);
     downloadStory(bundle);
     report('剧情备份已下载。迁移设备时还需同步对应聊天文件。');
   }));
@@ -70,50 +103,66 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
   fileInput.hidden = true;
   const importButton = button('导入剧情备份文件', () => {
     try {
-      importToken = captureContext(context);
+      importToken = captureManagementContext();
       fileInput.value = '';
       fileInput.click();
-    } catch (error) { report(error.message, 'error'); }
-  });
+    } catch (error) { importToken = null; report(error.message, 'error'); }
+  }, recoveryControls);
   fileInput.onchange = () => {
     const file = fileInput.files?.[0], token = importToken;
     importToken = null;
     if (!file || !token) return;
     void run(async runtime => {
       const raw = await file.text();
-      assertContext(context, token);
+      assertManagementContext(token);
       let bundle;
       try { bundle = JSON.parse(raw); }
       catch { throw Error('备份文件不是有效的 JSON。'); }
       const result = await runtime.importStory(bundle);
-      ensureSameChat(token.metadata, token.identity);
+      assertManagementContext(token);
       inspection = null;
-      report(result?.message || '剧情备份已校验并导入；当前小白变量未自动恢复。');
+      report(result?.message || '剧情备份已校验并导入；请点击「重试恢复当前分支」恢复楼层变量。');
     });
   };
   const inspect = button('统计当前聊天占用', () => void run(async runtime => {
-    const token = captureContext(context);
+    const token = captureManagementContext();
     const value = await runtime.inspectStoryStorage();
-    assertContext(context, token);
+    assertManagementContext(token);
     inspection = { metadata: token.metadata, identity: token.identity, value };
     report('当前聊天的剧情存储占用已统计。');
   }));
   const browse = button('检查楼层与 Swipe 存档', () => void run(async runtime => {
-    const token = captureContext(context);
+    const token = captureManagementContext();
     const value = await runtime.inspectStoryIndex();
-    assertContext(context, token);
+    assertManagementContext(token);
     indexInspection = { metadata: token.metadata, identity: token.identity, value };
     indexPage = 0;
     renderIndex();
     report(`已检查 ${value.rows.length} 条楼层与 Swipe 记录；${value.unreadableStates} 个状态不可读取。`);
   }));
+  const retry = button('重试恢复当前分支', () => void run(async runtime => {
+    const token = captureManagementContext(), status = runtime.status?.();
+    const ctx = assertManagementContext(token), lock = metadataWriteStatus(context);
+    if (status?.generating || ctx.streamingProcessor && !ctx.streamingProcessor.isFinished)
+      throw Error('请等待生成结束后再恢复当前分支。');
+    if (status?.restoring || lock.busy) throw Error('当前聊天正在恢复或保存，请稍后重试。');
+    if (lock.dirty) throw Error('当前聊天有尚未保存的操作，请先重试保存。');
+    await runtime.restoreChat();
+    assertManagementContext(token);
+    const restored = runtime.status?.();
+    if (!runtime.ready?.()) throw Error(restored?.restoreError || restored?.message || '当前聊天的楼层变量尚未恢复完成，请重试。');
+    inspection = null;
+    indexInspection = null; renderIndex();
+    report(restored?.message || '已恢复当前分支楼层变量。');
+  }), recoveryControls);
   const refresh = button('刷新状态', () => void loadStatus());
   controls.append(fileInput);
   box.append(
+    mode, detail, recovery, recoveryControls,
     make('p', 'Amin 新增的历史记录使用短引用，实际剧情快照写入 TauriTavern 扩展文件存储。小白变量 2.0 的当前变量与原生楼层日志仍保存在聊天元数据。新聊天首次迁移变量时会自动启用文件模式；也可用下方按钮手动启用。启用时聊天最多只能有一条消息。', 'amin-meta'),
-    mode, detail, stats, controls, indexView,
+    stats, controls, indexView,
     make('p', '跨设备同步时，必须同时同步聊天文件和 extensions.store 扩展存储。只同步聊天文件会使历史状态引用无法读取。', 'amin-meta'),
-    make('p', '导入会先验证备份并写入文件，不会自动覆盖当前小白变量。旧聊天记录与原有数据不会自动删除。', 'amin-meta'),
+    make('p', '导入会先验证备份并写入文件，不会自动覆盖当前小白变量。导入后点击「重试恢复当前分支」恢复楼层变量。旧聊天记录与原有数据不会自动删除。', 'amin-meta'),
   );
   target.append(box);
   const libraryView = mountStoryLibrary(target, { getRuntime, report });
@@ -181,8 +230,9 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
         indexInspection = null; renderIndex();
         mode.textContent = '聊天已切换，请刷新当前聊天的剧情存储状态。';
         detail.textContent = '';
+        recovery.textContent = ''; recovery.hidden = true;
         stats.textContent = '';
-        enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = true;
+        enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = true;
         refresh.disabled = false;
         return;
       }
@@ -192,6 +242,10 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       }
       mode.textContent = status?.enabled ? '当前聊天：剧情文件存储已启用。' : '当前聊天：尚未启用剧情文件存储。';
       detail.textContent = status?.message || (runtime ? '当前聊天的剧情存储状态尚不可用。' : '剧情存储尚未初始化，请刷新酒馆。');
+      const native = runtime?.status?.();
+      recovery.textContent = native?.restoreError ? `楼层变量恢复未完成：${native.restoreError}。可先导入剧情备份文件，再重试恢复。`
+        : native?.restoring ? '正在恢复当前分支楼层变量，请稍候。' : '';
+      recovery.hidden = !recovery.textContent;
       if (inspection?.metadata === metadata && inspection.identity === identity) showStats(inspection.value);
       else if (Number.isFinite(status?.bytes ?? status?.sizeBytes)) showStats({bytes:status.bytes ?? status.sizeBytes,records:status.records ?? status.recordCount});
       else stats.textContent = '点击「统计当前聊天占用」按需扫描剧情文件。';
@@ -200,13 +254,16 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       importButton.disabled = busy || !available;
       inspect.disabled = busy || !available || !status?.enabled;
       browse.disabled = busy || !available || !status?.enabled || typeof runtime?.inspectStoryIndex !== 'function';
+      retry.disabled = busy || !available || !status?.enabled || typeof runtime?.restoreChat !== 'function'
+        || !!native?.restoring || !!native?.generating;
       refresh.disabled = busy;
     } catch (error) {
       if (disposed || ticket !== revision) return;
       mode.textContent = '剧情文件存储状态读取失败。';
       detail.textContent = error.message;
       stats.textContent = '';
-      enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = true;
+      recovery.textContent = ''; recovery.hidden = true;
+      enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = true;
       refresh.disabled = false;
       report(error.message, 'error');
     }
@@ -217,7 +274,7 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     const runtime = getRuntime();
     if (!runtime) { report('剧情存储尚未初始化，请刷新酒馆。', 'error'); return; }
     busy = true;
-    enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = refresh.disabled = true;
+    enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = refresh.disabled = true;
     try { await work(runtime); }
     catch (error) { report(error.message, 'error'); }
     finally { busy = false; if (!disposed) await loadStatus(); }
