@@ -144,3 +144,33 @@ test('legacy pointers and a lazy first Swipe still migrate without mutating the 
     assert.equal(indexedState(rebuilt.index, rebuilt.copies[0]), null);
     assert.equal(legacy.swipe_info[0].extra[STORY_CANDIDATE_ID], undefined);
 });
+
+
+test('first index separates copied candidate IDs without inventing states or mutating live chat', () => {
+    const chat = [message(0, 3)];
+    for (const info of chat[0].swipe_info) info.extra[STORY_CANDIDATE_ID] = 'copied';
+    const before = JSON.stringify(chat);
+    const {index, copies} = buildIndex(chat, 'new');
+    assert.equal(JSON.stringify(chat), before);
+    const entries = Object.values(index.messages['m-0'].candidates);
+    assert.equal(entries.length, 3);
+    assert.ok(entries.every(e => e.stateId === null));
+    commitIdentities(chat, copies);
+    assert.equal(new Set(chat[0].swipe_info.map(info => info.extra[STORY_CANDIDATE_ID])).size, 3);
+    assert.deepEqual(buildIndex(chat, 'new', index).index, index);
+});
+
+test('first index retains only independently validated legacy pointers when labels repeat', () => {
+    const chat = [message(0, 2)];
+    for (let swipe = 0; swipe < 2; swipe++) {
+        const candidate = {...chat[0], mes:chat[0].swipes[swipe], swipe_id:swipe};
+        setReference(candidate, stateId(200 + swipe));
+        chat[0].swipe_info[swipe].extra[STORY_CANDIDATE_ID] = 'copied';
+    }
+    const {index} = buildIndex(chat, 'new');
+    assert.deepEqual(Object.values(index.messages['m-0'].candidates).map(e=>e.stateId),[stateId(200),stateId(201)]);
+    chat[0].swipe_info[1].extra[STORY_REFERENCE_KEY] = structuredClone(chat[0].swipe_info[0].extra[STORY_REFERENCE_KEY]);
+    const before=JSON.stringify(chat);
+    assert.throws(()=>buildIndex(chat,'new'),/引用格式无效/);
+    assert.equal(JSON.stringify(chat),before);
+});

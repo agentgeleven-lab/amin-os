@@ -111,7 +111,10 @@ export function buildIndex(chat, identity, previous = null, previousId = null) {
                 const lastSavedSwipe = Math.max(-1, ...Object.values(saved).map(entry => entry.swipe));
                 // TT may clone the current extra when appending generated swipes.
                 // Only an appended slot can receive a fresh identity this way.
-                if (swipe > lastSavedSwipe && previous) cid = undefined;
+                // With no index yet, identity labels cannot select a saved state.
+                // Give copied labels independent IDs; the migration below still
+                // validates each candidate's own legacy reference (including swipeId).
+                if (!previous || swipe > lastSavedSwipe) cid = undefined;
                 else fail('同一消息出现重复 Swipe 标识，不能确认对应存档。');
             }
             if (!cid) cid = extra[STORY_CANDIDATE_ID] = uuid();
