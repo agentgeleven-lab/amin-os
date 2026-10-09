@@ -377,6 +377,53 @@ export function createState2Runtime(getContext = context, { report = () => {}, i
         scanStoryLibrary:options=>library.scan(options),
         exportStoryLibraryCandidates:(report,options)=>library.exportCandidates(report,options),
         inspectStoryReferences: () => story.inspectReferences(),
+        inspectStoryIdentityRecovery: text => story.inspectIdentityRecovery(text),
+        async repairStoryIdentities(plan) {
+            if (streaming()) throw Error('请等待生成结束后再修复候选标识。');
+            if (restoring) throw Error('当前聊天正在恢复，请稍后重试。');
+            const ctx = getContext(), metadata = ctx?.chatMetadata, identity = chatIdentity(ctx);
+            let release = () => {};
+            // This explicit identity repair must work before variable recovery.
+            // Scope the preparation bypass to acquiring this runtime's write lease.
+            projecting = true;
+            try { release = acquireMetadataWrite(getContext, captureContext(getContext)); }
+            finally { projecting = false; }
+            restoring = true;
+            const ticket = ++epoch;
+            const ownsRepair = () => !disposed && ticket === epoch
+                && getContext()?.chatMetadata === metadata && chatIdentity(getContext()) === identity;
+            try {
+                const result = await story.repairIdentities(plan);
+                let persisted = false;
+                const check = () => {
+                    if (!ownsRepair()) throw Error('聊天或修复操作已变化，请返回原聊天重新校验。');
+                    result.check();
+                };
+                try {
+                    if (result.changed) { markChatIdsDirty(ctx); await saveChatMetadata(ctx, { finalCheck: check }); persisted = true; }
+                    check();
+                }
+                catch (error) {
+                    if (!persisted) {
+                        try { result.rollback(); }
+                        catch (rollbackError) {
+                            // Keep the original save error recognizable. A stale
+                            // rollback must not overwrite another candidate/chat.
+                            error.rollbackError = rollbackError;
+                            error.message += '；候选标识回滚未执行：' + rollbackError.message + ' 请返回原聊天重新校验。';
+                        }
+                    }
+                    throw error;
+                }
+                if (result.changed && ownsRepair() && sameChat(getContext())) {
+                    settled = false; restoreFailed = true; cached = null;
+                    restoreError = '候选标识已修复，请重试恢复当前分支。';
+                }
+                return { ...result, message: result.changed
+                    ? '已按原聊天修复候选标识；正文与变量未改写，请点击「重试恢复当前分支」。'
+                    : '候选标识与原聊天一致，无需修复。' };
+            } finally { if (ticket === epoch) restoring = false; release(); }
+        },
         async repairStoryReferences(plan) {
             if (streaming()) throw Error('请等待生成结束再修复引用。');
             const ctx = getContext(), release = acquireMetadataWrite(getContext, captureContext(getContext));

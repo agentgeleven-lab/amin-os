@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { markChatIdsDirty, saveChatMetadata } from '../apps/shared/chat-save.js';
+import { markChatIdsDirty, saveChatMetadata, registerChatSavePreparation } from '../apps/shared/chat-save.js';
 import { createHistory } from '../apps/status/history.js';
 
 const fixture = () => {
@@ -62,4 +62,53 @@ test('an external update persists history and its message IDs together across re
   assert.deepEqual(reloaded.list()[0].state, { hp: 17 });
   assert.equal(t.metadataSaves(), 0);
   history.dispose(); reloaded.dispose();
+});
+
+test('the final check blocks a stale candidate after preparations without dispatching either save', async () => {
+  for (const fullChat of [false, true]) {
+    const t = fixture(), original = t.ctx.chat[0].mes;
+    if (fullChat) markChatIdsDirty(t.ctx);
+    const remove = registerChatSavePreparation(async ctx => {
+      await Promise.resolve();
+      return () => { ctx.chat[0].mes = '候选已变化'; };
+    });
+    try {
+      await assert.rejects(saveChatMetadata(t.ctx, { finalCheck() {
+        if (t.ctx.chat[0].mes !== original) throw Error('stale candidate');
+      } }), /stale candidate/);
+      assert.equal(t.chatSaves(), 0); assert.equal(t.metadataSaves(), 0);
+    } finally { remove(); }
+    assert.equal(await saveChatMetadata(t.ctx), fullChat ? 'chat' : 'metadata');
+    assert.equal(t.chatSaves(), Number(fullChat));
+    assert.equal(t.metadataSaves(), Number(!fullChat));
+  }
+});
+
+test('the final check runs after all preparation checks with no await before host dispatch', async () => {
+  for (const fullChat of [false, true]) {
+    const t = fixture(), order = [];
+    if (fullChat) markChatIdsDirty(t.ctx);
+    const removeFirst = registerChatSavePreparation(async () => {
+      order.push('prepare-first');
+      return () => order.push('check-first');
+    });
+    const removeSecond = registerChatSavePreparation(async () => {
+      order.push('prepare-second');
+      return () => order.push('check-second');
+    });
+    const expected = ['prepare-first', 'prepare-second', 'check-first', 'check-second', 'final'];
+    const save = async () => {
+      assert.deepEqual(order, expected, 'host save must dispatch before a queued microtask');
+      order.push('save');
+    };
+    t.ctx.saveChat = save; t.ctx.saveMetadata = save;
+    try {
+      assert.equal(await saveChatMetadata(t.ctx, { finalCheck() {
+        order.push('final');
+        assert.deepEqual(order, expected);
+        queueMicrotask(() => order.push('microtask'));
+      } }), fullChat ? 'chat' : 'metadata');
+      assert.deepEqual(order, [...expected, 'save', 'microtask']);
+    } finally { removeSecond(); removeFirst(); }
+  }
 });

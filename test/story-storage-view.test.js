@@ -27,7 +27,8 @@ const button = (root, label) => {
 };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const recoveryError = '当前聊天的楼层变量尚未恢复完成';
-const fileInput = target => descendants(target).find(node => node.tagName === 'INPUT' && node.type === 'file');
+const fileInput = target => descendants(target).find(node => node.tagName === 'INPUT' && node.type === 'file' && node.accept === '.json,application/json');
+const originalChatInput = target => descendants(target).find(node => node.tagName === 'INPUT' && node.type === 'file' && node.accept === '.jsonl,application/x-ndjson');
 function pendingRecoveryFixture(runtime, chat = []) {
   const previousDocument = globalThis.document, previousHost = globalThis.SillyTavern;
   globalThis.document = { createElement: tag => new Element(tag), body: new Element('body') };
@@ -244,5 +245,158 @@ for (const mode of ['streaming', 'nonstreaming']) {
       assert.ok(fixture.messages.some(([message, state]) => /等待生成结束/.test(message) && state === 'error'));
       if (mode === 'nonstreaming') assert.equal(retry.disabled, true);
     } finally { fixture.dispose(); }
+  });
+}
+
+function identityRecoveryFixture(overrides = {}) {
+  const opaquePlan = Object.freeze({ opaque: 'verified-plan' });
+  const calls = { inspect: 0, repair: 0, restore: 0, import: 0 };
+  let ready = false;
+  const runtime = {
+    ready: () => ready,
+    status: () => ({ ready, restoreError: ready ? '' : recoveryError }),
+    storyStatus: () => ({ available: true, enabled: true }),
+    inspectStoryIdentityRecovery: async text => {
+      calls.inspect++;
+      assert.equal(text, 'original chat JSONL');
+      return { plan: opaquePlan, rows: [{ floor: 0, swipe: 0, oldId: 'copied-id', newId: 'original-id', stateId: null }], mirrors: [] };
+    },
+    repairStoryIdentities: async supplied => {
+      calls.repair++;
+      assert.equal(supplied, opaquePlan, 'apply must pass the exact opaque plan returned by inspection');
+      return { message: '候选标识已修复。' };
+    },
+    restoreChat: async () => { calls.restore++; ready = true; },
+    importStory: async () => { calls.import++; return { message: '备份已导入。' }; },
+    ...overrides,
+  };
+  const fixture = pendingRecoveryFixture(runtime, [{ name: 'assistant', is_user: false, mes: 'first', swipe_id: 0, swipes: ['first', 'second'] }]);
+  return { ...fixture, opaquePlan, calls };
+}
+async function previewIdentityRepair(fixture) {
+  button(fixture.target, '用原聊天校验 Swipe 标识').click();
+  const input = originalChatInput(fixture.target);
+  assert.ok(input, 'identity recovery must use a separate original JSONL file input');
+  input.files = [{ text: async () => 'original chat JSONL' }];
+  input.onchange();
+  await tick();
+}
+
+test('original-chat recovery previews without writing, applies only its verified plan, then requires explicit retry', async () => {
+  const fixture = identityRecoveryFixture();
+  try {
+    await tick();
+    const before = structuredClone(fixture.ctx);
+    const apply = button(fixture.target, '应用标识修复');
+    assert.equal(apply.disabled, true);
+    assert.ok(fileInput(fixture.target), 'backup JSON input must remain available');
+    await previewIdentityRepair(fixture);
+    assert.equal(originalChatInput(fixture.target).clicks, 1);
+    assert.equal(fixture.calls.inspect, 1);
+    assert.equal(fixture.calls.repair, 0);
+    assert.equal(fixture.calls.restore, 0);
+    assert.deepEqual(fixture.ctx, before, 'the preview must not change live chat data');
+    assert.equal(apply.disabled, false);
+    assert.match(fixture.target.textContent, /original-id/);
+    apply.click();
+    await tick();
+    assert.equal(fixture.calls.repair, 1);
+    assert.equal(fixture.calls.restore, 0, 'identity repair must not auto-restore variables');
+    assert.equal(apply.disabled, true, 'successful apply must clear the preview');
+    assert.ok(fixture.messages.some(([message]) => message === '候选标识已修复。'));
+    button(fixture.target, '重试恢复当前分支').click();
+    await tick();
+    assert.equal(fixture.calls.restore, 1);
+    assert.ok(fixture.messages.some(([message, state]) => /恢复/.test(message) && state !== 'error'));
+  } finally { fixture.dispose(); }
+});
+
+test('identity recovery buttons remain unavailable when their runtime APIs are absent', async () => {
+  const fixture = identityRecoveryFixture({ inspectStoryIdentityRecovery: undefined, repairStoryIdentities: undefined });
+  try {
+    await tick();
+    assert.equal(button(fixture.target, '用原聊天校验 Swipe 标识').disabled, true);
+    assert.equal(button(fixture.target, '应用标识修复').disabled, true);
+    assert.equal(button(fixture.target, '导入剧情备份文件').disabled, false);
+  } finally { fixture.dispose(); }
+});
+
+test('identity recovery controls are disabled while source inspection is pending', async () => {
+  let resolveInspection;
+  const fixture = identityRecoveryFixture({ inspectStoryIdentityRecovery: () => new Promise(resolve => { resolveInspection = resolve; }) });
+  try {
+    await tick();
+    await previewIdentityRepair(fixture);
+    assert.equal(typeof resolveInspection, 'function');
+    assert.equal(button(fixture.target, '用原聊天校验 Swipe 标识').disabled, true);
+    assert.equal(button(fixture.target, '应用标识修复').disabled, true);
+    resolveInspection({ plan: fixture.opaquePlan, rows: [{ floor: 0, swipe: 0, oldId: 'copied-id', newId: 'original-id', stateId: null }], mirrors: [] });
+    await tick();
+    assert.equal(button(fixture.target, '用原聊天校验 Swipe 标识').disabled, false);
+    assert.equal(button(fixture.target, '应用标识修复').disabled, false);
+  } finally { fixture.dispose(); }
+});
+
+for (const changeCount of ['none', 'mirror']) {
+  test(`identity recovery apply availability follows ${changeCount} preview changes`, async () => {
+    const fixture = identityRecoveryFixture({ inspectStoryIdentityRecovery: async () => ({
+      plan: {}, rows: [], mirrors: changeCount === 'mirror' ? [{ floor: 0, oldId: 'old-mirror', newId: 'new-mirror' }] : [],
+    }) });
+    try {
+      await tick();
+      await previewIdentityRepair(fixture);
+      assert.equal(button(fixture.target, '应用标识修复').disabled, changeCount === 'none');
+    } finally { fixture.dispose(); }
+  });
+}
+
+for (const stage of ['file read', 'preview to apply']) {
+  for (const change of ['chat', 'candidate']) {
+    test(`identity recovery rejects a ${change} change during ${stage}`, async () => {
+      const fixture = identityRecoveryFixture();
+      try {
+        await tick();
+        let resolveFile;
+        if (stage === 'file read') {
+          button(fixture.target, '用原聊天校验 Swipe 标识').click();
+          const input = originalChatInput(fixture.target);
+          input.files = [{ text: () => new Promise(resolve => { resolveFile = resolve; }) }];
+          input.onchange();
+          assert.equal(typeof resolveFile, 'function');
+        } else await previewIdentityRepair(fixture);
+        if (change === 'chat') fixture.ctx.chatId = 'different-chat';
+        else fixture.ctx.chat[0].swipes[1] = 'changed unselected candidate';
+        if (stage === 'file read') resolveFile('original chat JSONL');
+        else button(fixture.target, '应用标识修复').click();
+        await tick();
+        assert.equal(fixture.calls.repair, 0);
+        if (stage === 'file read') assert.equal(fixture.calls.inspect, 0);
+        assert.ok(fixture.messages.some(([message, state]) => /聊天或消息候选已变化/.test(message) && state === 'error'));
+      } finally { fixture.dispose(); }
+    });
+  }
+}
+
+for (const action of ['import', 'retry', 'dispose']) {
+  test(`identity recovery discards its preview after ${action}`, async () => {
+    const fixture = identityRecoveryFixture();
+    let disposed = false;
+    try {
+      await tick();
+      await previewIdentityRepair(fixture);
+      const apply = button(fixture.target, '应用标识修复');
+      assert.equal(apply.disabled, false);
+      if (action === 'import') {
+        button(fixture.target, '导入剧情备份文件').click();
+        const input = fileInput(fixture.target);
+        input.files = [{ text: async () => '{"version":1}' }];
+        input.onchange();
+      } else if (action === 'retry') button(fixture.target, '重试恢复当前分支').click();
+      else { fixture.dispose(); disposed = true; }
+      await tick();
+      assert.equal(apply.disabled, true);
+      assert.equal(fixture.calls.repair, 0);
+      if (action === 'import') assert.equal(fixture.calls.import, 1);
+    } finally { if (!disposed) fixture.dispose(); }
   });
 }

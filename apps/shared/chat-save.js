@@ -24,8 +24,10 @@ export function markChatIdsDirty(ctx) {
   pendingIds.set(metadata, { identity: identity(ctx) });
 }
 
-/** Persist metadata and newly assigned message IDs in one host save. */
-export async function saveChatMetadata(ctx, { prepared: receipts } = {}) {
+/** Persist metadata and newly assigned message IDs in one host save.
+ * finalCheck is synchronous and runs after every registered preparation/check.
+ */
+export async function saveChatMetadata(ctx, { prepared: receipts, finalCheck } = {}) {
   assertChatReady(ctx);
   const metadata = ctx?.chatMetadata;
   const prepared = performanceDiagnostics.begin('prepare');
@@ -38,6 +40,7 @@ export async function saveChatMetadata(ctx, { prepared: receipts } = {}) {
     // No await between these checks and dispatching the host save: a later
     // preparation must not invalidate an earlier external-state reference.
     for (const check of checks) check();
+    if (finalCheck !== undefined) finalCheck();
     prepared();
   }
   catch(error) { prepared({failed:true}); throw error; }

@@ -138,11 +138,63 @@ test('legacy pointers and a lazy first Swipe still migrate without mutating the 
     const cid = candidateId(legacy);
     legacy.swipes = [legacy.mes, '下一候选']; legacy.swipe_info = [{ extra: {} }, { extra: {} }];
     legacy.swipe_id = 1; legacy.mes = legacy.swipes[1];
-    const rebuilt = buildIndex([legacy], 'parent', migrated.index);
+    const before = JSON.stringify(legacy), previous = freeze(migrated.index), previousBefore = JSON.stringify(previous);
+    const rebuilt = buildIndex([legacy], 'parent', previous);
     assert.equal(candidateId(rebuilt.copies[0], 0), cid);
     assert.equal(rebuilt.index.messages[legacy[STORY_MESSAGE_ID]].candidates[cid].stateId, stateId(100));
     assert.equal(indexedState(rebuilt.index, rebuilt.copies[0]), null);
     assert.equal(legacy.swipe_info[0].extra[STORY_CANDIDATE_ID], undefined);
+    assert.equal(JSON.stringify(legacy), before);
+    assert.equal(JSON.stringify(previous), previousBefore);
+});
+
+test('a missing saved Swipe zero never inherits the selected Swipe one identity', () => {
+    const chat = [message(0, 2)], previous = freeze(initial(chat));
+    delete chat[0].swipe_info[0].extra[STORY_CANDIDATE_ID];
+    chat[0].swipe_id = 1; chat[0].mes = chat[0].swipes[1];
+    chat[0].extra[STORY_CANDIDATE_ID] = 'c-0-1';
+    const before = JSON.stringify(chat), previousBefore = JSON.stringify(previous);
+    assert.throws(() => buildIndex(chat, 'parent', previous), error =>
+        error.code === 'MISSING_CANDIDATE_ID' && /标识缺失/.test(error.message));
+    assert.equal(JSON.stringify(chat), before);
+    assert.equal(JSON.stringify(previous), previousBefore);
+});
+
+test('missing identities within the saved candidate range cannot silently drop history', () => {
+    const chat = [message(0, 3)], previous = freeze(initial(chat));
+    delete chat[0].swipe_info[1].extra[STORY_CANDIDATE_ID];
+    const before = JSON.stringify(chat), previousBefore = JSON.stringify(previous);
+    assert.throws(() => buildIndex(chat, 'parent', previous), { code: 'MISSING_CANDIDATE_ID' });
+    assert.equal(JSON.stringify(chat), before);
+    assert.equal(JSON.stringify(previous), previousBefore);
+    assert.equal(previous.messages['m-0'].candidates['c-0-1'].stateId, stateId(2));
+});
+
+test('an appended missing candidate receives a new identity while saved history remains intact', () => {
+    const chat = [message(0, 2)], previous = freeze(initial(chat));
+    chat[0].swipes.push('下一候选'); chat[0].swipe_info.push({ extra: {} });
+    chat[0].swipe_id = 2; chat[0].mes = chat[0].swipes[2];
+    const before = JSON.stringify(chat), previousBefore = JSON.stringify(previous);
+    const { index, copies } = buildIndex(chat, 'parent', previous);
+    assert.deepEqual(index.messages['m-0'].candidates['c-0-0'], { swipe: 0, stateId: stateId(1) });
+    assert.deepEqual(index.messages['m-0'].candidates['c-0-1'], { swipe: 1, stateId: stateId(2) });
+    assert.deepEqual(index.messages['m-0'].candidates[candidateId(copies[0], 2)], { swipe: 2, stateId: null });
+    assert.equal(JSON.stringify(chat), before);
+    assert.equal(JSON.stringify(previous), previousBefore);
+});
+
+test('lazy Swipe zero cannot borrow an original identity present in another slot or overwrite its own reference', () => {
+    for (const conflict of ['other-slot', 'own-reference']) {
+        const chat = [message(0)], previous = freeze(initial(chat));
+        chat[0].swipes = [chat[0].mes, '下一候选'];
+        chat[0].swipe_info = [{ extra: {} }, { extra: {} }];
+        if (conflict === 'other-slot') chat[0].swipe_info[1].extra[STORY_CANDIDATE_ID] = 'c-0-0';
+        else setReference(chat[0], stateId(999));
+        const before = JSON.stringify(chat), previousBefore = JSON.stringify(previous);
+        assert.throws(() => buildIndex(chat, 'parent', previous), { code: 'MISSING_CANDIDATE_ID' });
+        assert.equal(JSON.stringify(chat), before);
+        assert.equal(JSON.stringify(previous), previousBefore);
+    }
 });
 
 

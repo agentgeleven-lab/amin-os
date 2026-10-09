@@ -5,6 +5,7 @@ import { getReference, setReference, STORY_REFERENCE_KEY } from '../shared/story
 import { OWNED_VARIABLE_ROOTS, NATIVE_VARIABLE_ROOTS } from './storage.js';
 import { restoreExternalState2SnapshotToFloor } from './native-bridge.js';
 import { buildIndex, commitIdentities, validateIndex, indexedState, indexStateIds, candidateId, selectedCandidate, STORY_MESSAGE_ID, STORY_CANDIDATE_ID } from '../shared/story-chat-index.js';
+import { planCandidateIdentityRepair } from '../shared/story-identity-recovery.js';
 
 export const STORY_STORAGE_KEY = 'amin_os_story_storage_v2';
 const OWNER = 'amin-os/story-v2';
@@ -149,6 +150,7 @@ export function createStoryStorage(getContext, {
         throw new TypeError('外置剧情存储需要当前聊天接口与完整状态图。');
     let busy = false;
     const captureReceipts = new WeakMap();
+    const identityPlans = new WeakMap();
 
     function completedCapture(ctx, state, result, saveReceipt) {
         if (!saveReceipt) return result;
@@ -449,6 +451,83 @@ export function createStoryStorage(getContext, {
         });
     }
 
+    async function inspectIdentityRecovery(text) {
+        requireAvailable();
+        const ctx = current(), marker = assertMarker(ctx), token = contextToken(ctx);
+        if (!marker?.indexId) throw failure('STORY_IDENTITY_SOURCE', '当前聊天没有可校验的剧情索引。');
+        if (typeof text !== 'string' || new TextEncoder().encode(text).length > 64 * 1024 * 1024)
+            throw failure('STORY_IDENTITY_SOURCE', '请选择 64 MiB 以内的原聊天 JSONL 文件。');
+        let records;
+        try { records = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/).map(line => JSON.parse(line)); }
+        catch { throw failure('STORY_IDENTITY_SOURCE', '原聊天文件不是有效的 JSONL。'); }
+        const sourceMarker = assertMarker({chatMetadata: records[0]?.chat_metadata});
+        if (!sourceMarker?.indexId || sourceMarker.baseStateId !== marker.baseStateId)
+            throw failure('STORY_IDENTITY_SOURCE', '原聊天不属于当前剧情存档，不能用于恢复标识。');
+        const sourceIndex = validateIndex(await graph.load(sourceMarker.indexId)), index = await loadIndex(marker);
+        const repairs = planCandidateIdentityRepair(ctx.chat, records.slice(1), sourceIndex, index);
+        // A valid label is not sufficient if its original state cannot be read.
+        await visitStates([marker.baseStateId, ...indexStateIds(sourceIndex), ...indexStateIds(index)], decodeState);
+        assertCurrent(getContext, token);
+        const plan = Object.freeze({});
+        identityPlans.set(plan, { token, repairs, sourceIndexId: sourceMarker.indexId, indexId: marker.indexId });
+        return { plan, rows: clone(repairs.rows), mirrors: clone(repairs.mirrors) };
+    }
+
+    async function repairIdentities(plan) {
+        return locked(async () => {
+            requireAvailable();
+            const saved = plan && identityPlans.get(plan);
+            if (!saved) throw failure('STORY_IDENTITY_PLAN', '请先用原聊天文件校验候选标识。');
+            const ctx = assertCurrent(getContext, saved.token);
+            const sourceIndex = validateIndex(await graph.load(saved.sourceIndexId)), index = validateIndex(await graph.load(saved.indexId));
+            await visitStates(indexStateIds(index), decodeState);
+            assertCurrent(getContext, saved.token);
+            identityPlans.delete(plan);
+            const undo = [];
+            const container = (parent, key, array = false) => {
+                let value = parent[key];
+                if (value === undefined) {
+                    const existed = own(parent, key);
+                    value = parent[key] = array ? [] : {};
+                    const created = value;
+                    undo.push(() => {
+                        if (parent[key] === created && !Object.keys(created).length) {
+                            if (existed) parent[key] = undefined; else delete parent[key];
+                        }
+                    });
+                }
+                if (array ? !Array.isArray(value) : !plain(value)) throw failure('STORY_IDENTITY_SHAPE', '候选元数据格式无效，未修复标识。');
+                return value;
+            };
+            const write = (extra, id) => {
+                const existed = own(extra, STORY_CANDIDATE_ID), previous = extra[STORY_CANDIDATE_ID];
+                undo.push(() => { if (existed) extra[STORY_CANDIDATE_ID] = previous; else delete extra[STORY_CANDIDATE_ID]; });
+                extra[STORY_CANDIDATE_ID] = id;
+            };
+            try {
+                for (const row of saved.repairs.rows) {
+                    const message = ctx.chat[row.floor];
+                    let extra;
+                    if (Array.isArray(message.swipes)) {
+                        const slots = container(message, 'swipe_info', true), length = slots.length;
+                        if (row.swipe >= length) undo.push(() => { if (!Object.keys(slots).some(key => /^\d+$/.test(key) && Number(key) >= length)) slots.length = length; });
+                        extra = container(container(slots, row.swipe), 'extra');
+                    } else extra = container(message, 'extra');
+                    // Both indices were validated above; never create a new saved state.
+                    if (!own(sourceIndex.messages[message[STORY_MESSAGE_ID]]?.candidates ?? {}, row.newId)
+                        || !own(index.messages[message[STORY_MESSAGE_ID]]?.candidates ?? {}, row.newId))
+                        throw failure('STORY_IDENTITY_PLAN', '原候选关联已变化，请重新校验。');
+                    write(extra, row.newId);
+                }
+                for (const mirror of saved.repairs.mirrors) write(container(ctx.chat[mirror.floor], 'extra'), mirror.newId);
+            } catch (error) { for (const restore of undo.reverse()) restore(); throw error; }
+            const after = contextToken(ctx);
+            return { changed: undo.length > 0, repaired: saved.repairs.rows.length, mirrors: saved.repairs.mirrors.length,
+                check() { assertCurrent(getContext, after); },
+                rollback() { assertCurrent(getContext, after); for (const restore of [...undo].reverse()) restore(); } };
+        });
+    }
+
     async function restoreBeforeCandidate(kind) {
         if (!['regenerate', 'swipe'].includes(kind))
             throw failure('STORY_GENERATION_KIND', '仅能为重新生成或新候选恢复上一楼变量。');
@@ -558,5 +637,5 @@ export function createStoryStorage(getContext, {
         }
     }
 
-    return { enable, ensureIndex, capture, consumeCaptureReceipt, readFloor, readState, restoreFloor, inspectReferences, repairReferences, restoreBeforeCandidate, exportStory, importStory, inspectIndex, status };
+    return { enable, ensureIndex, capture, consumeCaptureReceipt, readFloor, readState, restoreFloor, inspectReferences, repairReferences, inspectIdentityRecovery, repairIdentities, restoreBeforeCandidate, exportStory, importStory, inspectIndex, status };
 }

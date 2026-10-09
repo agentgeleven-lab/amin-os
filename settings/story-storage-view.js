@@ -65,6 +65,7 @@ function downloadStory(bundle) {
 /** Management only. The runtime owns validation, file writes and chat binding. */
 export function mountStoryStorage(target, report, getRuntime = getState2Runtime) {
   let disposed = false, busy = false, revision = 0, importToken = null, inspection = null;
+  let sourceToken = null, identityPreview = null;
   const box = make('section', null, 'amin-card amin-stack');
   box.append(make('h3', '剧情文件存储', 'amin-section-heading'));
   const mode = make('p', '正在检查当前聊天…', 'amin-meta');
@@ -73,6 +74,8 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
   recovery.hidden = true;
   const stats = make('p', null, 'amin-meta');
   const indexView = make('section', null, 'amin-stack');
+  const identityView = make('section', null, 'amin-stack');
+  identityView.hidden = true;
   let indexInspection = null, indexPage = 0;
   const controls = make('div', null, 'amin-toolbar');
   const recoveryControls = make('div', null, 'amin-toolbar');
@@ -121,9 +124,55 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       const result = await runtime.importStory(bundle);
       assertManagementContext(token);
       inspection = null;
+      clearIdentityPreview();
       report(result?.message || '剧情备份已校验并导入；请点击「重试恢复当前分支」恢复楼层变量。');
     });
   };
+  const sourceInput = make('input');
+  sourceInput.type = 'file';
+  sourceInput.accept = '.jsonl,application/x-ndjson';
+  sourceInput.hidden = true;
+  const verifyIdentities = button('用原聊天校验 Swipe 标识', () => {
+    try {
+      sourceToken = captureManagementContext();
+      clearIdentityPreview();
+      sourceInput.value = '';
+      sourceInput.click();
+    } catch (error) { sourceToken = null; report(error.message, 'error'); }
+  }, recoveryControls);
+  sourceInput.onchange = () => {
+    const file = sourceInput.files?.[0], token = sourceToken;
+    sourceToken = null;
+    if (!file || !token) return;
+    void run(async runtime => {
+      const raw = await file.text();
+      if (disposed) return;
+      assertManagementContext(token);
+      const value = await runtime.inspectStoryIdentityRecovery(raw);
+      if (disposed) return;
+      assertManagementContext(token);
+      identityPreview = { token, value };
+      renderIdentityPreview();
+      report(value.rows.length || value.mirrors.length
+        ? '已用原聊天校验候选。请检查下方修复预览，再点击「应用标识修复」。'
+        : '候选标识与原聊天一致，无需修复。');
+    });
+  };
+  const applyIdentities = button('应用标识修复', () => void run(async runtime => {
+    const preview = identityPreview;
+    if (!preview) throw Error('请先用原聊天校验 Swipe 标识。');
+    assertManagementContext(preview.token);
+    // The service owns an opaque, one-use proof. Clear the preview even when a
+    // save fails; the current candidates must be checked again before retrying.
+    clearIdentityPreview();
+    const result = await runtime.repairStoryIdentities(preview.value.plan);
+    if (disposed) return;
+    assertManagementContext(preview.token);
+    inspection = null;
+    indexInspection = null; renderIndex();
+    report(result?.message || '候选标识已修复；正文与变量未改写，请点击「重试恢复当前分支」。');
+  }), identityView);
+  applyIdentities.disabled = true;
   const inspect = button('统计当前聊天占用', () => void run(async runtime => {
     const token = captureManagementContext();
     const value = await runtime.inspectStoryStorage();
@@ -152,13 +201,16 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     const restored = runtime.status?.();
     if (!runtime.ready?.()) throw Error(restored?.restoreError || restored?.message || '当前聊天的楼层变量尚未恢复完成，请重试。');
     inspection = null;
+    clearIdentityPreview();
     indexInspection = null; renderIndex();
     report(restored?.message || '已恢复当前分支楼层变量。');
   }), recoveryControls);
   const refresh = button('刷新状态', () => void loadStatus());
-  controls.append(fileInput);
+  controls.append(fileInput, sourceInput);
+  clearIdentityPreview();
   box.append(
-    mode, detail, recovery, recoveryControls,
+    mode, detail, recovery, recoveryControls, identityView,
+    make('p', '若提示 Swipe 标识重复或缺失：先导入剧情备份，再用原聊天 JSONL 校验并预览修复。标识修复只恢复候选与原存档的对应关系，不修改正文或当前变量；完成后再重试恢复当前分支。', 'amin-meta'),
     make('p', 'Amin 新增的历史记录使用短引用，实际剧情快照写入 TauriTavern 扩展文件存储。小白变量 2.0 的当前变量与原生楼层日志仍保存在聊天元数据。新聊天首次迁移变量时会自动启用文件模式；也可用下方按钮手动启用。启用时聊天最多只能有一条消息。', 'amin-meta'),
     stats, controls, indexView,
     make('p', '跨设备同步时，必须同时同步聊天文件和 extensions.store 扩展存储。只同步聊天文件会使历史状态引用无法读取。', 'amin-meta'),
@@ -170,6 +222,33 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
 
   const size = bytes => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(2)} MiB`
     : bytes >= 1024 ? `${(bytes / 1024).toFixed(2)} KiB` : `${bytes} B`;
+
+  function clearIdentityPreview() {
+    identityPreview = null;
+    identityView.textContent = '';
+    identityView.hidden = true;
+    identityView.append(applyIdentities);
+    applyIdentities.disabled = true;
+  }
+  function renderIdentityPreview() {
+    identityView.textContent = '';
+    const data = identityPreview?.value;
+    if (!data) return;
+    identityView.hidden = false;
+    identityView.append(make('h4', 'Swipe 标识修复预览'));
+    identityView.append(make('p', `需修复 ${data.rows.length} 个候选标识、${data.mirrors.length} 个当前候选镜像。正文、变量与存档文件不会在此步骤改写。`, 'amin-meta'));
+    for (const row of data.rows) {
+      const item = make('details', null, 'amin-card');
+      item.append(make('summary', `第 ${row.floor + 1} 楼 · Swipe ${row.swipe + 1}`));
+      for (const text of [`原标识：${row.oldId || '缺失'}`, `恢复标识：${row.newId}`, `原状态文件：${row.stateId || '沿用之前状态'}`]) {
+        const line = make('p', text, 'amin-meta');
+        line.style && (line.style.overflowWrap = 'anywhere'); item.append(line);
+      }
+      identityView.append(item);
+    }
+    for (const mirror of data.mirrors) identityView.append(make('p', `第 ${mirror.floor + 1} 楼：同步当前候选镜像标识。`, 'amin-meta'));
+    identityView.append(applyIdentities);
+  }
 
   function renderIndex() {
     indexView.textContent = '';
@@ -227,23 +306,28 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       if (disposed || ticket !== revision) return;
       if (context()?.chatMetadata !== metadata || chatIdentity(context()) !== identity) {
         inspection = null;
+        clearIdentityPreview();
         indexInspection = null; renderIndex();
         mode.textContent = '聊天已切换，请刷新当前聊天的剧情存储状态。';
         detail.textContent = '';
         recovery.textContent = ''; recovery.hidden = true;
         stats.textContent = '';
-        enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = true;
+        enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = verifyIdentities.disabled = applyIdentities.disabled = true;
         refresh.disabled = false;
         return;
       }
       const available = !!status?.available;
+      if (identityPreview) {
+        try { assertManagementContext(identityPreview.token); }
+        catch { clearIdentityPreview(); }
+      }
       if (indexInspection && (indexInspection.metadata !== metadata || indexInspection.identity !== identity)) {
         indexInspection = null; renderIndex();
       }
       mode.textContent = status?.enabled ? '当前聊天：剧情文件存储已启用。' : '当前聊天：尚未启用剧情文件存储。';
       detail.textContent = status?.message || (runtime ? '当前聊天的剧情存储状态尚不可用。' : '剧情存储尚未初始化，请刷新酒馆。');
       const native = runtime?.status?.();
-      recovery.textContent = native?.restoreError ? `楼层变量恢复未完成：${native.restoreError}。可先导入剧情备份文件，再重试恢复。`
+      recovery.textContent = native?.restoreError ? `楼层变量恢复未完成：${native.restoreError}。可导入剧情备份；若标识重复或缺失，请用原聊天校验并修复，再重试恢复。`
         : native?.restoring ? '正在恢复当前分支楼层变量，请稍候。' : '';
       recovery.hidden = !recovery.textContent;
       if (inspection?.metadata === metadata && inspection.identity === identity) showStats(inspection.value);
@@ -252,6 +336,10 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       enable.disabled = busy || !available || !!status?.enabled;
       exportButton.disabled = busy || !available || !status?.enabled;
       importButton.disabled = busy || !available;
+      verifyIdentities.disabled = busy || !available || !status?.enabled || typeof runtime?.inspectStoryIdentityRecovery !== 'function';
+      applyIdentities.disabled = busy || !available || !status?.enabled || typeof runtime?.repairStoryIdentities !== 'function'
+        || !identityPreview || !(identityPreview.value.rows.length || identityPreview.value.mirrors.length)
+        || !!native?.restoring || !!native?.generating;
       inspect.disabled = busy || !available || !status?.enabled;
       browse.disabled = busy || !available || !status?.enabled || typeof runtime?.inspectStoryIndex !== 'function';
       retry.disabled = busy || !available || !status?.enabled || typeof runtime?.restoreChat !== 'function'
@@ -263,7 +351,7 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       detail.textContent = error.message;
       stats.textContent = '';
       recovery.textContent = ''; recovery.hidden = true;
-      enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = true;
+      enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = verifyIdentities.disabled = applyIdentities.disabled = true;
       refresh.disabled = false;
       report(error.message, 'error');
     }
@@ -274,12 +362,12 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     const runtime = getRuntime();
     if (!runtime) { report('剧情存储尚未初始化，请刷新酒馆。', 'error'); return; }
     busy = true;
-    enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = refresh.disabled = true;
+    enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = refresh.disabled = verifyIdentities.disabled = applyIdentities.disabled = true;
     try { await work(runtime); }
     catch (error) { report(error.message, 'error'); }
     finally { busy = false; if (!disposed) await loadStatus(); }
   }
 
   void loadStatus();
-  return { dispose() { disposed = true; revision++; importToken = null; libraryView.dispose(); performanceView.dispose(); } };
+  return { dispose() { disposed = true; revision++; importToken = sourceToken = null; clearIdentityPreview(); libraryView.dispose(); performanceView.dispose(); } };
 }

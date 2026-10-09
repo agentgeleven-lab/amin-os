@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { createState2Runtime } from '../apps/state2/runtime.js';
 import { createStoryStorage } from '../apps/state2/story-storage.js';
 import { createStoryStateGraph } from '../apps/shared/story-state-graph.js';
-import { indexedState, STORY_MESSAGE_ID } from '../apps/shared/story-chat-index.js';
+import { candidateId, indexedState, STORY_MESSAGE_ID, STORY_CANDIDATE_ID } from '../apps/shared/story-chat-index.js';
 async function reference(f, message) {
     if (!message[STORY_MESSAGE_ID]) return null;
     const index = await f.graph.load(f.ctx.chatMetadata.amin_os_story_storage_v2.indexId);
     const stateId = indexedState(index, message);
     return stateId ? { stateId } : null;
 }
-import { saveChatMetadata } from '../apps/shared/chat-save.js';
+import { registerChatSavePreparation, saveChatMetadata } from '../apps/shared/chat-save.js';
 
 const clone = value => structuredClone(value);
 function fixture() {
@@ -21,7 +21,7 @@ function fixture() {
     };
     const graph = createStoryStateGraph(store);
     let saves = 0, fullSaves = 0, nativeCalls = 0;
-    const ctx = {
+    let ctx = {
         eventTypes: { CHAT_CHANGED:'chat',MESSAGE_SWIPED: 'swiped',GENERATION_AFTER_COMMANDS:'generating',GENERATION_ENDED:'ended' }, eventSource: { on(name,fn){handlers.set(name,fn);}, removeListener(name){handlers.delete(name);} },
         chatId: 'new-chat', getCurrentChatId() { return this.chatId; },
         characterId: 0, characters: [{ avatar: 'npc.png' }],
@@ -41,7 +41,7 @@ function fixture() {
     const reports = [];
     const runtime = createState2Runtime(() => ctx, { host, storyStorage: story, interval: 0,
         restoreNative: async () => ({ restored: true, stale: false }), report: message => reports.push(message) });
-    return { ctx, runtime, story, graph, nodes, reports, handlers,
+    return { get ctx() { return ctx; }, set ctx(next) { ctx = next; }, runtime, story, graph, nodes, reports, handlers,
         get saves() { return saves; }, get fullSaves() { return fullSaves; }, get nativeCalls() { return nativeCalls; } };
 }
 
@@ -143,6 +143,213 @@ for (const missing of ['state', 'index']) {
         } finally { f.runtime.destroy(); }
     });
 }
+
+async function brokenIdentityFixture() {
+    const f = fixture();
+    try {
+        await f.runtime.migrate();
+        const message = { name: 'NPC', mes: '第一候选', swipes: ['第一候选', '第二候选'], swipe_id: 0,
+            swipe_info: [{ extra: {} }, { extra: {} }] };
+        f.ctx.chat.push(message);
+        f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 2 } } });
+        await saveChatMetadata(f.ctx);
+        const first = await reference(f, message);
+        message.swipe_id = 1;
+        message.mes = message.swipes[1];
+        f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 3 } } });
+        await saveChatMetadata(f.ctx);
+        const second = await reference(f, message);
+        assert.notEqual(first.stateId, second.stateId);
+        const originalChat = clone(f.ctx.chat);
+        const source = [JSON.stringify({ chat_metadata: clone(f.ctx.chatMetadata) }),
+            ...originalChat.map(row => JSON.stringify(row))].join('\n');
+        const bundle = await f.runtime.exportStory();
+        message.swipe_info[1].extra[STORY_CANDIDATE_ID] = candidateId(message, 0);
+        message.extra[STORY_CANDIDATE_ID] = candidateId(message, 0);
+        f.ctx.chatMetadata = clone(f.ctx.chatMetadata);
+        f.ctx.chatMetadata.variables.状态栏 = JSON.stringify({ 项目: { 世界: { 时间: 99 } } });
+        await f.runtime.restoreChat();
+        assert.equal(f.runtime.ready(), false);
+        assert.match(f.runtime.status().restoreError, /重复 Swipe/);
+        return { f, message, source, bundle, originalChat, first, second };
+    } catch (error) { f.runtime.destroy(); throw error; }
+}
+
+test('runtime repairs candidate identities while unready and restores the original states only on explicit retry', async () => {
+    const { f, message, source, bundle, originalChat, first, second } = await brokenIdentityFixture();
+    try {
+        await assert.rejects(f.runtime.prepareGeneration(), /恢复失败|未恢复|重复 Swipe/);
+        const brokenChat = clone(f.ctx.chat), metadata = clone(f.ctx.chatMetadata), nodes = clone([...f.nodes]);
+        await f.runtime.importStory(bundle);
+        assert.deepEqual(f.ctx.chat, brokenChat, 'file import alone must not change identities');
+        assert.equal(f.runtime.ready(), false);
+        const preview = await f.runtime.inspectStoryIdentityRecovery(source);
+        assert.deepEqual(f.ctx.chat, brokenChat);
+        assert.deepEqual(f.ctx.chatMetadata, metadata);
+        const saves = f.fullSaves;
+        const result = await f.runtime.repairStoryIdentities(preview.plan);
+        assert.equal(result.changed, true);
+        assert.equal(f.fullSaves, saves + 1, 'message identities need one full host chat save');
+        assert.deepEqual(f.ctx.chat, originalChat);
+        assert.deepEqual(f.ctx.chatMetadata, metadata, 'identity save must skip capture and retain live variables and native logs');
+        assert.deepEqual([...f.nodes], nodes, 'identity save must not create states or replacement index files');
+        assert.equal(f.runtime.ready(), false);
+        assert.match(f.runtime.status().restoreError, /重试恢复/);
+
+        await f.runtime.restoreChat();
+        assert.equal(f.runtime.ready(), true);
+        assert.equal((await reference(f, message)).stateId, second.stateId);
+        assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).项目.世界.时间, 3);
+        message.swipe_id = 0;
+        message.mes = message.swipes[0];
+        message.extra[STORY_CANDIDATE_ID] = candidateId(message, 0);
+        await f.runtime.restoreChat();
+        assert.equal(f.runtime.ready(), true);
+        assert.equal((await reference(f, message)).stateId, first.stateId);
+        assert.equal(JSON.parse(f.ctx.chatMetadata.variables.状态栏).项目.世界.时间, 2);
+    } finally { f.runtime.destroy(); }
+});
+
+test('runtime identity repair rolls back on host save failure without capturing current variables', async () => {
+    const { f, source, originalChat } = await brokenIdentityFixture();
+    try {
+        const brokenChat = clone(f.ctx.chat), metadata = clone(f.ctx.chatMetadata), nodes = clone([...f.nodes]);
+        const preview = await f.runtime.inspectStoryIdentityRecovery(source);
+        const save = f.ctx.saveChat;
+        let attempts = 0;
+        f.ctx.saveChat = async () => { attempts++; throw Error('identity save unavailable'); };
+        await assert.rejects(f.runtime.repairStoryIdentities(preview.plan), /identity save unavailable/);
+        assert.equal(attempts, 1);
+        assert.deepEqual(f.ctx.chat, brokenChat);
+        assert.deepEqual(f.ctx.chatMetadata, metadata);
+        assert.deepEqual([...f.nodes], nodes);
+        assert.equal(f.runtime.ready(), false);
+        await assert.rejects(f.runtime.prepareGeneration(), /恢复失败|未恢复|重复 Swipe/);
+        f.ctx.saveChat = save;
+        const retry = await f.runtime.inspectStoryIdentityRecovery(source);
+        await f.runtime.repairStoryIdentities(retry.plan);
+        assert.deepEqual(f.ctx.chat, originalChat, 'failed save must release the write lock for a new explicit preview');
+        assert.deepEqual(f.ctx.chatMetadata, metadata);
+        assert.deepEqual([...f.nodes], nodes);
+        assert.equal(f.runtime.ready(), false);
+    } finally { f.runtime.destroy(); }
+});
+
+function deferred() {
+    let resolve, reject;
+    const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+    return { promise, resolve, reject };
+}
+
+function identityRecoveryDestination(ctx, originalChat) {
+    return { ...ctx, chatId: 'identity-recovery-destination', chat: clone(originalChat),
+        chatMetadata: clone(ctx.chatMetadata), async saveChat() {}, async saveMetadata() {} };
+}
+
+for (const destinationState of ['ready', 'restoring']) {
+    test(`a delayed identity save from the previous chat leaves the destination ${destinationState} state intact`, async () => {
+        const { f, source, originalChat } = await brokenIdentityFixture();
+        const hostSaveStarted = deferred(), finishHostSave = deferred(), destinationRestoreStarted = deferred(), finishDestinationRestore = deferred();
+        let destinationTask;
+        try {
+            const sourceContext = f.ctx;
+            const destination = identityRecoveryDestination(sourceContext, originalChat);
+            sourceContext.saveChat = async () => { hostSaveStarted.resolve(); await finishHostSave.promise; };
+            const preview = await f.runtime.inspectStoryIdentityRecovery(source);
+            const repairing = f.runtime.repairStoryIdentities(preview.plan)
+                .then(value => ({ value }), error => ({ error }));
+            await hostSaveStarted.promise;
+
+            if (destinationState === 'restoring') {
+                const restore = f.story.restoreFloor;
+                f.story.restoreFloor = async (...args) => {
+                    destinationRestoreStarted.resolve();
+                    await finishDestinationRestore.promise;
+                    return restore(...args);
+                };
+            }
+            f.ctx = destination;
+            destinationTask = f.runtime.restoreChat();
+            if (destinationState === 'ready') {
+                await destinationTask;
+                assert.equal(f.runtime.ready(), true);
+            } else {
+                await destinationRestoreStarted.promise;
+                assert.equal(f.runtime.status().restoring, true);
+            }
+            const destinationChat = clone(destination.chat), destinationMetadata = clone(destination.chatMetadata);
+            finishHostSave.resolve();
+            await repairing;
+            assert.deepEqual(destination.chat, destinationChat);
+            assert.deepEqual(destination.chatMetadata, destinationMetadata);
+            assert.equal(f.runtime.status().restoreError, '', 'the previous chat must not mark the destination failed');
+            assert.equal(f.runtime.status().restoring, destinationState === 'restoring',
+                'the previous chat must not clear a later restore task');
+            assert.equal(f.runtime.ready(), destinationState === 'ready');
+            finishDestinationRestore.resolve();
+            await destinationTask;
+            assert.equal(f.runtime.ready(), true);
+            assert.equal(JSON.parse(destination.chatMetadata.variables.状态栏).项目.世界.时间, 3);
+        } finally {
+            finishHostSave.resolve(); finishDestinationRestore.resolve();
+            if (destinationTask) await destinationTask;
+            f.runtime.destroy();
+        }
+    });
+}
+
+test('identity save rejects a changed candidate after asynchronous preparation before dispatching to the host', async () => {
+    const { f, message, source } = await brokenIdentityFixture();
+    const preparationStarted = deferred(), finishPreparation = deferred();
+    let removePreparation = () => {};
+    try {
+        const preview = await f.runtime.inspectStoryIdentityRecovery(source);
+        const metadata = clone(f.ctx.chatMetadata), nodes = clone([...f.nodes]);
+        let hostSaves = 0;
+        f.ctx.saveChat = async () => { hostSaves++; };
+        removePreparation = registerChatSavePreparation(async () => {
+            preparationStarted.resolve(); await finishPreparation.promise;
+        });
+        const repairing = f.runtime.repairStoryIdentities(preview.plan)
+            .then(value => ({ value }), error => ({ error }));
+        await preparationStarted.promise;
+        message.swipes[0] += ' changed during save preparation';
+        const changedBody = message.swipes[0];
+        finishPreparation.resolve();
+        const result = await repairing;
+        assert.ok(result.error, 'the final identity context check must reject changed candidate evidence');
+        assert.equal(hostSaves, 0, 'stale identity evidence must not reach the host save');
+        assert.equal(message.swipes[0], changedBody, 'rollback must not overwrite a concurrent body edit');
+        assert.deepEqual(f.ctx.chatMetadata, metadata);
+        assert.deepEqual([...f.nodes], nodes);
+        assert.equal(f.runtime.ready(), false);
+    } finally { finishPreparation.resolve(); removePreparation(); f.runtime.destroy(); }
+});
+
+test('identity save preserves the host error when a chat switch prevents rollback', async () => {
+    const { f, source, originalChat } = await brokenIdentityFixture();
+    const hostSaveStarted = deferred(), finishHostSave = deferred();
+    try {
+        const sourceContext = f.ctx, destination = identityRecoveryDestination(sourceContext, originalChat);
+        const hostError = Error('original host identity save failure');
+        sourceContext.saveChat = async () => { hostSaveStarted.resolve(); await finishHostSave.promise; };
+        const preview = await f.runtime.inspectStoryIdentityRecovery(source);
+        const repairing = f.runtime.repairStoryIdentities(preview.plan)
+            .then(value => ({ value }), error => ({ error }));
+        await hostSaveStarted.promise;
+        f.ctx = destination;
+        await f.runtime.restoreChat();
+        assert.equal(f.runtime.ready(), true);
+        const destinationChat = clone(destination.chat), destinationMetadata = clone(destination.chatMetadata);
+        finishHostSave.reject(hostError);
+        const result = await repairing;
+        assert.strictEqual(result.error, hostError, 'a failed context check in rollback must not replace the actual save error');
+        assert.deepEqual(destination.chat, destinationChat);
+        assert.deepEqual(destination.chatMetadata, destinationMetadata);
+        assert.equal(f.runtime.ready(), true);
+        assert.equal(f.runtime.status().restoreError, '');
+    } finally { finishHostSave.resolve(); f.runtime.destroy(); }
+});
 
 test('new candidate starts from the preceding floor without rewriting the old candidate ref', async () => {
     const f = fixture();

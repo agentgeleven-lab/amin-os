@@ -98,17 +98,20 @@ export function buildIndex(chat, identity, previous = null, previousId = null) {
         seen.add(id);
         const row = { selected: message.swipe_id ?? 0, candidates: {} }, candidateIds = new Set();
         const count = Array.isArray(message.swipes) ? message.swipes.length : 1;
+        const savedCandidates = Object.entries(savedRow?.candidates ?? {});
+        const lastSavedSwipe = Math.max(-1, ...savedCandidates.map(([, entry]) => entry.swipe));
+        const originalCid = savedCandidates.length === 1 && savedCandidates[0][1].swipe === 0 ? savedCandidates[0][0] : null;
         for (let swipe = 0; swipe < count; swipe++) {
             const extra = extraAt(message, swipe, true);
-            // ST introduces swipes lazily; candidate zero inherits the original
-            // non-swipe extra only when no candidate data was recorded yet.
-            if (swipe === 0 && !extra[STORY_CANDIDATE_ID] && previous?.messages[id]
-                && message.extra?.[STORY_CANDIDATE_ID]) extra[STORY_CANDIDATE_ID] = message.extra[STORY_CANDIDATE_ID];
+            // Only a single saved original can become a lazily introduced Swipe.
+            // A selected candidate's top-level extra cannot identify another slot.
+            if (swipe === 0 && extra[STORY_CANDIDATE_ID] === undefined && !Object.hasOwn(extra, STORY_REFERENCE_KEY)
+                && originalCid && message.extra?.[STORY_CANDIDATE_ID] === originalCid
+                && !(message.swipes ?? []).some((_, otherSwipe) => otherSwipe !== 0 && candidateId(message, otherSwipe) === originalCid))
+                extra[STORY_CANDIDATE_ID] = originalCid;
             let cid = extra[STORY_CANDIDATE_ID];
             if (cid !== undefined && !idPattern.test(cid)) fail('Swipe 稳定标识无效。');
             if (candidateIds.has(cid)) {
-                const saved = previous?.messages[id]?.candidates ?? {};
-                const lastSavedSwipe = Math.max(-1, ...Object.values(saved).map(entry => entry.swipe));
                 // TT may clone the current extra when appending generated swipes.
                 // Only an appended slot can receive a fresh identity this way.
                 // With no index yet, identity labels cannot select a saved state.
@@ -117,6 +120,8 @@ export function buildIndex(chat, identity, previous = null, previousId = null) {
                 if (!previous || swipe > lastSavedSwipe) cid = undefined;
                 else fail('同一消息出现重复 Swipe 标识，不能确认对应存档。');
             }
+            if (!cid && savedRow && swipe <= lastSavedSwipe)
+                fail('已有存档的 Swipe 稳定标识缺失，不能确认对应存档；请使用原聊天备份修复候选标识。', 'MISSING_CANDIDATE_ID');
             if (!cid) cid = extra[STORY_CANDIDATE_ID] = uuid();
             candidateIds.add(cid);
             let stateId = previous?.messages[id]?.candidates[cid]?.stateId ?? null;
