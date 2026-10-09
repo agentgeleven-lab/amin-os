@@ -77,7 +77,7 @@ function assertCurrent(getContext, token) {
 
 function clone(value) { return structuredClone(value); }
 
-function currentState(ctx) {
+export function currentState(ctx) {
     const metadata = ctx.chatMetadata;
     if (!plain(metadata?.variables ?? {}) || !plain(metadata?.LWB_RULES_V2 ?? {}))
         throw failure('STORY_STATE_INVALID', '小白变量或规则格式无效，无法保存剧情状态。');
@@ -94,7 +94,7 @@ function currentState(ctx) {
 // LWB stores most Amin roots as serialized JSON strings. Decode them inside
 // the graph so a one-field change can be stored as a delta, then restore the
 // original variable *type* for the native State 2.0 engine.
-function encodeState(state) {
+export function encodeState(state) {
     const variables = clone(state.variables), jsonStringRoots = [];
     for (const root of JSON_ROOTS) {
         if (typeof variables[root] !== 'string') continue;
@@ -106,7 +106,7 @@ function encodeState(state) {
     return { version: 2, variables, rules: clone(state.rules), jsonStringRoots: jsonStringRoots.sort() };
 }
 
-function decodeState(record) {
+export function decodeState(record) {
     if (!plain(record) || record.version !== 2 || !plain(record.variables) || !plain(record.rules)
         || Object.keys(record.variables).some(root => !JSON_ROOTS.has(root))
         || Object.keys(record.rules).some(path => !JSON_ROOTS.has(path.split(/[.\[]/, 1)[0]))
@@ -457,9 +457,16 @@ export function createStoryStorage(getContext, {
         if (!marker?.indexId) throw failure('STORY_IDENTITY_SOURCE', '当前聊天没有可校验的剧情索引。');
         if (typeof text !== 'string' || new TextEncoder().encode(text).length > 64 * 1024 * 1024)
             throw failure('STORY_IDENTITY_SOURCE', '请选择 64 MiB 以内的原聊天 JSONL 文件。');
-        let records;
-        try { records = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/).map(line => JSON.parse(line)); }
-        catch { throw failure('STORY_IDENTITY_SOURCE', '原聊天文件不是有效的 JSONL。'); }
+        const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+        while (lines.length && !lines.at(-1).trim()) lines.pop();
+        const records = lines.map((line, index) => {
+            try { return JSON.parse(line); }
+            catch {
+                const error = failure('STORY_IDENTITY_SOURCE', `原聊天文件 · 第 ${index + 1} 行：不是有效的 JSONL。请选用原聊天 JSONL 文件。`);
+                error.source = 'original'; error.line = index + 1;
+                throw error;
+            }
+        });
         const sourceMarker = assertMarker({chatMetadata: records[0]?.chat_metadata});
         if (!sourceMarker?.indexId || sourceMarker.baseStateId !== marker.baseStateId)
             throw failure('STORY_IDENTITY_SOURCE', '原聊天不属于当前剧情存档，不能用于恢复标识。');

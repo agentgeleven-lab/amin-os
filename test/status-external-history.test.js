@@ -41,6 +41,48 @@ test('external history rejects an old asynchronous floor result after the chat o
   }
 });
 
+for (const legacy of [false, true]) {
+  test(`current-only status history never stores floors or exposes legacy snapshots (legacy marker ${legacy})`, async () => {
+    const reads = [];
+    const f = fixture(async index => {
+      reads.push(index);
+      if (index !== f.ctx.chat.length - 1) throw Error('当前变量模式不保存旧楼层或 Swipe 状态。');
+      return { 项目: { 当前: { 值: 99 } } };
+    });
+    f.ctx.chatMetadata.amin_os_current_story_v1 = { version: 1, key: 'current-test', revision: 1 };
+    if (!legacy) delete f.ctx.chatMetadata.amin_os_story_storage_v2;
+    f.ctx.chat[0].extra.wsh_message_id = 'old-message';
+    f.ctx.chatMetadata[HISTORY_KEY] = { records: { 'old-message:0': { state: { 项目: { 旧: { 值: 1 } } }, savedAt: 123 } } };
+    const beforeMetadata = structuredClone(f.ctx.chatMetadata), beforeMessages = structuredClone(f.ctx.chat);
+    try {
+      f.history.sync();
+      assert.deepEqual(f.history.list().map(row => row.available), [false, true]);
+      assert.equal(f.history.list()[0].state, undefined);
+      assert.equal(f.history.list()[0].savedAt, undefined);
+      await assert.rejects(f.history.readFloor(0), /不保存旧楼层或 Swipe/);
+      assert.deepEqual((await f.history.readFloor(1)).state, { 项目: { 当前: { 值: 99 } } });
+      assert.deepEqual(reads, [0, 1], 'old-floor requests must receive the runtime no-history result');
+      assert.equal(f.history.adoptExternal(), true);
+      assert.deepEqual(f.ctx.chatMetadata, beforeMetadata);
+      assert.deepEqual(f.ctx.chat, beforeMessages);
+      assert.equal(f.saves(), 0);
+    } finally { f.history.dispose(); }
+  });
+}
+
+test('current-only status history rejects a pending current read after record revision changes', async () => {
+  let resolve;
+  const f = fixture(() => new Promise(done => { resolve = done; }));
+  f.ctx.chatMetadata.amin_os_current_story_v1 = { version: 1, key: 'current-test', revision: 1 };
+  try {
+    f.history.sync();
+    const read = f.history.readFloor(1);
+    f.ctx.chatMetadata.amin_os_current_story_v1.revision = 2;
+    resolve({ 项目: {} });
+    await assert.rejects(read, /聊天或楼层已变化/);
+  } finally { f.history.dispose(); }
+});
+
 class Node {
   constructor(tag,text='',className=''){this.tag=tag;this.textContent=text;this.className=className;this.children=[];this.disabled=false;this.classList={add:name=>{this.className+=' '+name;}};}
   append(...children){this.children.push(...children);}

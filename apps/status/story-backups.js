@@ -5,7 +5,9 @@ const STATE_ID = /^sha256:[a-f0-9]{64}$/u;
 const MAX_BACKUPS = 5;
 const MAX_LABEL = 160;
 
-export const usesStoryStorage = ctx => ctx?.chatMetadata?.[STORY_STORAGE_KEY]?.version === 2;
+export const usesCurrentStoryStorage = ctx => ctx?.chatMetadata?.amin_os_current_story_v1?.version === 1;
+export const usesStoryStorage = ctx => !usesCurrentStoryStorage(ctx)
+  && ctx?.chatMetadata?.[STORY_STORAGE_KEY]?.version === 2;
 
 export function storyBackups(ctx) {
   if (!usesStoryStorage(ctx)) return [];

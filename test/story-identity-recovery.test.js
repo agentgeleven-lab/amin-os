@@ -149,3 +149,95 @@ test('an unsafe later affected message rejects the complete repair plan', () => 
     f.chat.push(later);
     unchanged(f, () => assert.throws(() => plan(f), /原始备份没有同一消息/));
 });
+
+function locatedFixture(sourcePrefix = 2, currentPrefix = 2) {
+    const f = fixture();
+    const prefixes = Array.from({ length: Math.max(sourcePrefix, currentPrefix) }, (_, i) => ({
+        name: 'user', is_user: true, mes: `healthy prefix ${i}`,
+        amin_story_message_id: `prefix-message-${i}`, extra: { amin_story_candidate_id: `prefix-candidate-${i}` },
+    }));
+    f.sourceChat = [...structuredClone(prefixes.slice(0, sourcePrefix)), ...f.sourceChat];
+    f.chat = [...structuredClone(prefixes.slice(0, currentPrefix)), ...f.chat];
+    for (const [index, chat] of [[f.sourceIndex, f.sourceChat], [f.currentIndex, f.chat]]) {
+        index.order = {};
+        for (const [floor, message] of chat.entries()) {
+            const id = message.amin_story_message_id;
+            index.order[floor] = id;
+            if (id !== 'message-a') index.messages[id] = { selected: 0, candidates: {
+                [message.extra.amin_story_candidate_id]: { swipe: 0, stateId: state(100 + floor) },
+            } };
+        }
+    }
+    return f;
+}
+
+function assertLocatedError(f, expected, detail) {
+    unchanged(f, () => assert.throws(() => plan(f), error => {
+        assert.equal(error.source, expected.source);
+        assert.equal(error.floor, expected.floor);
+        if (expected.field !== undefined) assert.equal(error.field, expected.field);
+        if (expected.swipe !== undefined) {
+            assert.equal(error.swipe, expected.swipe);
+            assert.match(error.message, new RegExp(`Swipe\\s*${expected.swipe + 1}(?:\\D|$)`));
+        }
+        if (expected.code) assert.equal(error.code, expected.code);
+        assert.match(error.message, expected.source === 'original' ? /原聊天文件/ : /当前聊天/);
+        assert.match(error.message, new RegExp(`第\\s*${expected.floor + 1}\\s*楼`));
+        if (detail) assert.match(error.message, detail);
+        return true;
+    }));
+}
+
+const malformedUnselected = {
+    null: { mutate: message => { message.swipes[0] = null; }, detail: /null|空值/i },
+    sparse: { mutate: message => { delete message.swipes[0]; }, detail: /缺失|空位|不存在|undefined/i },
+    number: { mutate: message => { message.swipes[0] = 17; }, detail: /number|数字|数值/i },
+    undefined: { mutate: message => { message.swipes[0] = undefined; }, detail: /缺失|不存在|undefined/i },
+};
+for (const [label, source] of [['chat', 'current'], ['sourceChat', 'original']]) {
+    for (const [kind, malformed] of Object.entries(malformedUnselected)) {
+        test(`candidate diagnostics locate ${kind} unselected Swipe in the ${source} third floor`, () => {
+            const f = locatedFixture();
+            malformed.mutate(f[label][2]);
+            assert.equal(f[label][2].swipe_id, 1);
+            assertLocatedError(f, { source, floor: 2, swipe: 0, field: 'swipes' }, malformed.detail);
+        });
+    }
+
+    test(`selected candidate mismatch retains its error code and ${source} floor/Swipe location`, () => {
+        const f = locatedFixture();
+        f[label][2].mes = 'selected body does not match';
+        assertLocatedError(f, { source, floor: 2, swipe: 1, field: 'mes', code: 'INCOMPLETE_CANDIDATE' },
+            /不一致|不匹配|不同|尚未保存完整/);
+    });
+
+    for (const [kind, mutate, detail] of [
+        ['null', message => { message.mes = null; }, /null|空值/i],
+        ['missing', message => { delete message.mes; }, /缺失|不存在|undefined/i],
+        ['number', message => { message.mes = 23; }, /number|数字|数值/i],
+    ]) {
+        test(`candidate diagnostics distinguish ${kind} mes in the ${source} third floor`, () => {
+            const f = locatedFixture(); mutate(f[label][2]);
+            assertLocatedError(f, { source, floor: 2, field: 'mes' }, detail);
+        });
+    }
+
+    test(`candidate diagnostics locate invalid swipe_id in the ${source} third floor`, () => {
+        const f = locatedFixture();
+        f[label][2].swipe_id = -1;
+        assertLocatedError(f, { source, floor: 2, field: 'swipe_id' }, /编号|swipe_id/i);
+    });
+}
+
+test('all original rows are validated first and report their original position when current chat order differs', () => {
+    const f = locatedFixture(2, 1);
+    f.sourceChat[2].swipes[0] = null;
+    f.chat[1].swipes[0] = 29;
+    assertLocatedError(f, { source: 'original', floor: 2, swipe: 0, field: 'swipes' }, /null|空值/i);
+});
+
+test('candidate body matching failure points to the current position rather than the original file position', () => {
+    const f = locatedFixture(2, 1);
+    f.chat[1].swipes[0] = 'edited body absent from original';
+    assertLocatedError(f, { source: 'current', floor: 1, swipe: 0 }, /正文无法唯一匹配/);
+});

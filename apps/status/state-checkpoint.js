@@ -1,8 +1,26 @@
 // LittleWhiteBox State 2.0 restores owned roots from checkpoints, then replays WAL.
 // A /setvar alone is not part of that replay. Save an exact current-floor baseline
 // on explicit front-end writes only (never on polling or history browsing).
+const currentWriteListeners = new Set();
+
+/** Explicit front-end writes can release navigation protection without a checkpoint. */
+export function registerCurrentCheckpointWrite(callback) {
+  if (typeof callback !== 'function') throw TypeError('Current checkpoint write listener must be a function');
+  currentWriteListeners.add(callback);
+  return () => currentWriteListeners.delete(callback);
+}
+
 export function checkpointState(ctx) {
   const meta = ctx.chatMetadata;
+  // Current-only storage writes its single bounded native baseline during the
+  // save transaction. The legacy full checkpoint would duplicate unrelated
+  // variables at every manually edited floor and remove baseline provenance.
+  // Keep these constants local to avoid the storage/checkpoint import cycle.
+  const current = meta?.amin_os_current_story_v1;
+  if (current?.version === 1 && current?.owner === 'amin-os/current-story-v1') {
+    for (const callback of currentWriteListeners) callback(ctx);
+    return false;
+  }
   const lwb = meta?.extensions?.LittleWhiteBox;
   if (ctx.extensionSettings?.LittleWhiteBox?.variablesMode === '1.0') return false;
   const enabled = ctx.extensionSettings?.LittleWhiteBox?.variablesMode === '2.0';

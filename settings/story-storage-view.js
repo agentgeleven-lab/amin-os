@@ -66,6 +66,7 @@ function downloadStory(bundle) {
 export function mountStoryStorage(target, report, getRuntime = getState2Runtime) {
   let disposed = false, busy = false, revision = 0, importToken = null, inspection = null;
   let sourceToken = null, identityPreview = null;
+  let resetPreview = null, backupPreview = null;
   const box = make('section', null, 'amin-card amin-stack');
   box.append(make('h3', '剧情文件存储', 'amin-section-heading'));
   const mode = make('p', '正在检查当前聊天…', 'amin-meta');
@@ -79,6 +80,10 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
   let indexInspection = null, indexPage = 0;
   const controls = make('div', null, 'amin-toolbar');
   const recoveryControls = make('div', null, 'amin-toolbar');
+  const legacyNotes = make('div', null, 'amin-stack');
+  const simpleControls = make('div', null, 'amin-toolbar');
+  const resetView = make('section', null, 'amin-card amin-stack'); resetView.hidden = true;
+  const backupsView = make('section', null, 'amin-stack'); backupsView.hidden = true;
   const button = (label, action, target = controls) => {
     const node = make('button', label);
     node.type = 'button';
@@ -86,6 +91,59 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     target.append(node);
     return node;
   };
+  const nativeBasis = ctx => JSON.stringify([ctx.chatMetadata.variables ?? {}, ctx.chatMetadata.LWB_RULES_V2 ?? {}]);
+  const simpleSwitch = button('改用简洁存储（保留当前变量）', () => void run(async runtime => {
+    const token = captureManagementContext();
+    const result = await runtime.switchToCurrentStory({ clear: false });
+    assertManagementContext(token);
+    clearResetPreview(); clearBackupPreview(); clearIdentityPreview();
+    inspection = null; indexInspection = null; renderIndex();
+    report(result?.message || '已改用简洁存储：保留当前变量和最近 5 份备份，切换楼层和 Swipe 不再回退变量。');
+  }), simpleControls);
+  const resetCurrent = button('备份并清空当前变量', () => {
+    try {
+      const token = captureManagementContext(), ctx = assertManagementContext(token);
+      resetPreview = { token, basis: nativeBasis(ctx) };
+      resetView.hidden = false;
+      report('请核对清空范围，再点击「确认备份并清空」。');
+    } catch (error) { clearResetPreview(); report(error.message, 'error'); }
+  }, simpleControls);
+  resetView.append(make('p', '将先备份当前变量，再清空本聊天的人物、背包、关系、场景、剧情、持续效果、地图、信息、骰子、世界状态和势力资料。清空后可重新生成。聊天正文、全局能力库、世界书和 API 设置保留。清空会启用简洁存储，旧楼层和 Swipe 不再自动回退变量。', 'amin-meta'));
+  const confirmReset = button('确认备份并清空', () => void run(async runtime => {
+    if (!resetPreview) throw Error('请先核对清空范围。');
+    const preview = resetPreview, ctx = assertManagementContext(preview.token);
+    if (nativeBasis(ctx) !== preview.basis) throw Error('变量或规则已变化，请重新核对清空范围。');
+    clearResetPreview();
+    const result = await runtime.resetCurrentStory();
+    assertManagementContext(preview.token);
+    clearBackupPreview(); clearIdentityPreview();
+    inspection = null; indexInspection = null; renderIndex();
+    report(result?.message || '已备份并清空当前变量；可以重新生成资料。');
+  }), resetView);
+  const cancelReset = button('取消清空', () => clearResetPreview(), resetView);
+  const inspectBackups = button('查看最近备份', () => void run(async runtime => {
+    const token = captureManagementContext();
+    const basis = nativeBasis(assertManagementContext(token));
+    const value = await runtime.inspectCurrentStoryBackups();
+    if (nativeBasis(assertManagementContext(token)) !== basis) throw Error('变量或规则已变化，请重新查看备份。');
+    backupPreview = { token, value, basis };
+    renderBackups();
+    report(value.backups.length ? `已读取最近 ${value.backups.length} 份变量备份。` : '当前还没有变量备份。');
+  }), simpleControls);
+  const backupSelect = make('select'); backupSelect.setAttribute?.('aria-label', '选择变量备份');
+  const restoreBackup = button('恢复所选备份', () => void run(async runtime => {
+    if (!backupPreview) throw Error('请先查看最近备份。');
+    const preview = backupPreview;
+    const ctx = assertManagementContext(preview.token);
+    if (nativeBasis(ctx) !== preview.basis) throw Error('变量或规则已变化，请重新查看备份再恢复。');
+    const entry = preview.value.backups.find(item => item.index === Number(backupSelect.value));
+    if (!entry) throw Error('请选择一份变量备份。');
+    clearBackupPreview();
+    const result = await runtime.restoreCurrentStoryBackup(entry.index, { expectedHash: entry.hash });
+    assertManagementContext(preview.token);
+    clearResetPreview(); inspection = null;
+    report(result?.message || '已恢复所选变量备份，聊天正文保留。');
+  }), backupsView);
   const enable = button('为当前聊天启用文件存储', () => void run(async runtime => {
     const token = captureContext(context), metadata = token.metadata, identity = token.identity;
     const result = await runtime.enableStoryStorage();
@@ -125,7 +183,10 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       assertManagementContext(token);
       inspection = null;
       clearIdentityPreview();
-      report(result?.message || '剧情备份已校验并导入；请点击「重试恢复当前分支」恢复楼层变量。');
+      const simple = !!context()?.chatMetadata?.amin_os_current_story_v1;
+      report(result?.message || (simple
+        ? '变量备份已校验并导入；请点击「重新载入当前变量」。'
+        : '剧情备份已校验并导入；请点击「重试恢复当前分支」恢复楼层变量。'));
     });
   };
   const sourceInput = make('input');
@@ -206,19 +267,28 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     report(restored?.message || '已恢复当前分支楼层变量。');
   }), recoveryControls);
   const refresh = button('刷新状态', () => void loadStatus());
+  const simpleImport = button('导入变量备份', () => importButton.onclick(), simpleControls);
+  const simpleReload = button('重新载入当前变量', () => retry.onclick(), simpleControls);
   controls.append(fileInput, sourceInput);
   clearIdentityPreview();
+  legacyNotes.append(
+    make('p', '以下说明仅适用于旧式楼层存档。若提示 Swipe 标识重复或缺失：先导入剧情备份，再用原聊天 JSONL 校验并预览修复，完成后重试恢复当前分支。', 'amin-meta'),
+    make('p', '旧模式将历史快照写入扩展文件存储，聊天保存索引和小白变量楼层日志。手动启用旧模式时聊天最多只能有一条消息；已有长聊天可直接使用上方简洁存储入口。', 'amin-meta'),
+  );
   box.append(
-    mode, detail, recovery, recoveryControls, identityView,
-    make('p', '若提示 Swipe 标识重复或缺失：先导入剧情备份，再用原聊天 JSONL 校验并预览修复。标识修复只恢复候选与原存档的对应关系，不修改正文或当前变量；完成后再重试恢复当前分支。', 'amin-meta'),
-    make('p', 'Amin 新增的历史记录使用短引用，实际剧情快照写入 TauriTavern 扩展文件存储。小白变量 2.0 的当前变量与原生楼层日志仍保存在聊天元数据。新聊天首次迁移变量时会自动启用文件模式；也可用下方按钮手动启用。启用时聊天最多只能有一条消息。', 'amin-meta'),
+    mode, detail,
+    make('p', '简洁存储：每个聊天用一个外置文件保存当前变量及最近 5 份备份，无需校验 Swipe 或匹配旧楼层。备份数量固定；变量内容自身变多时文件也会变大。', 'amin-meta'),
+    simpleControls, resetView, backupsView, recovery, recoveryControls, identityView,
+    legacyNotes,
     stats, controls, indexView,
-    make('p', '跨设备同步时，必须同时同步聊天文件和 extensions.store 扩展存储。只同步聊天文件会使历史状态引用无法读取。', 'amin-meta'),
-    make('p', '导入会先验证备份并写入文件，不会自动覆盖当前小白变量。导入后点击「重试恢复当前分支」恢复楼层变量。旧聊天记录与原有数据不会自动删除。', 'amin-meta'),
+    make('p', '迁移设备需同步聊天及 extensions.store 扩展存储，或在目标设备导入对应聊天的变量备份。导入只写入备份文件，再手动重新载入变量。旧存档不会自动删除。', 'amin-meta'),
   );
   target.append(box);
-  const libraryView = mountStoryLibrary(target, { getRuntime, report });
-  const performanceView = mountPerformanceDiagnostics(target);
+  const advanced = make('details', null, 'amin-card amin-stack');
+  advanced.append(make('summary', '旧历史存档与诊断工具'));
+  target.append(advanced);
+  const libraryView = mountStoryLibrary(advanced, { getRuntime, report });
+  const performanceView = mountPerformanceDiagnostics(advanced);
 
   const size = bytes => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(2)} MiB`
     : bytes >= 1024 ? `${(bytes / 1024).toFixed(2)} KiB` : `${bytes} B`;
@@ -229,6 +299,25 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     identityView.hidden = true;
     identityView.append(applyIdentities);
     applyIdentities.disabled = true;
+  }
+  function clearResetPreview() { resetPreview = null; resetView.hidden = true; }
+  function clearBackupPreview() {
+    backupPreview = null; backupsView.textContent = ''; backupsView.hidden = true;
+    restoreBackup.disabled = true; backupsView.append(restoreBackup);
+  }
+  function renderBackups() {
+    backupsView.textContent = ''; backupsView.hidden = false;
+    backupsView.append(make('h4', '最近 5 份变量备份'));
+    backupSelect.textContent = '';
+    const entries = backupPreview.value.backups;
+    for (const entry of entries) {
+      const date = typeof entry.at === 'number' ? new Date(entry.at).toLocaleString() : entry.at;
+      const option = make('option', `${date || '时间未知'} · ${entry.label || '变量备份'}`);
+      option.value = String(entry.index); backupSelect.append(option);
+    }
+    backupSelect.value = entries.length ? String(entries[0].index) : '';
+    if (!entries.length) backupsView.append(make('p', '当前还没有变量备份。', 'amin-meta'));
+    backupsView.append(backupSelect, restoreBackup);
   }
   function renderIdentityPreview() {
     identityView.textContent = '';
@@ -306,6 +395,7 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       if (disposed || ticket !== revision) return;
       if (context()?.chatMetadata !== metadata || chatIdentity(context()) !== identity) {
         inspection = null;
+        clearResetPreview(); clearBackupPreview();
         clearIdentityPreview();
         indexInspection = null; renderIndex();
         mode.textContent = '聊天已切换，请刷新当前聊天的剧情存储状态。';
@@ -313,10 +403,23 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
         recovery.textContent = ''; recovery.hidden = true;
         stats.textContent = '';
         enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = verifyIdentities.disabled = applyIdentities.disabled = true;
+        simpleSwitch.disabled = resetCurrent.disabled = confirmReset.disabled = inspectBackups.disabled = restoreBackup.disabled = true;
+        simpleImport.disabled = simpleReload.disabled = true;
         refresh.disabled = false;
         return;
       }
       const available = !!status?.available;
+      const simple = status?.currentOnly || status?.mode === 'current-only';
+      for (const preview of [resetPreview, backupPreview]) {
+        if (!preview) continue;
+        try { assertManagementContext(preview.token); }
+        catch { clearResetPreview(); clearBackupPreview(); break; }
+      }
+      recoveryControls.hidden = !!simple;
+      legacyNotes.hidden = enable.hidden = browse.hidden = !!simple;
+      simpleSwitch.hidden = !!simple && !!status?.enabled;
+      simpleImport.hidden = simpleReload.hidden = !simple;
+      if (simple) { clearIdentityPreview(); indexInspection = null; renderIndex(); }
       if (identityPreview) {
         try { assertManagementContext(identityPreview.token); }
         catch { clearIdentityPreview(); }
@@ -324,24 +427,35 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       if (indexInspection && (indexInspection.metadata !== metadata || indexInspection.identity !== identity)) {
         indexInspection = null; renderIndex();
       }
-      mode.textContent = status?.enabled ? '当前聊天：剧情文件存储已启用。' : '当前聊天：尚未启用剧情文件存储。';
+      mode.textContent = simple && status?.enabled ? `当前聊天：简洁存储已启用 · 最近备份 ${status.backupCount ?? 0} / 5。`
+        : status?.enabled ? '当前聊天：剧情文件存储已启用。' : '当前聊天：尚未启用剧情文件存储。';
       detail.textContent = status?.message || (runtime ? '当前聊天的剧情存储状态尚不可用。' : '剧情存储尚未初始化，请刷新酒馆。');
       const native = runtime?.status?.();
-      recovery.textContent = native?.restoreError ? `楼层变量恢复未完成：${native.restoreError}。可导入剧情备份；若标识重复或缺失，请用原聊天校验并修复，再重试恢复。`
+      recovery.textContent = native?.restoreError ? simple ? `当前变量加载未完成：${native.restoreError}。可导入简洁存储备份，或备份并清空当前变量。`
+        : `楼层变量恢复未完成：${native.restoreError}。可以改用简洁存储并保留当前变量，或备份后清空；旧存档修复入口仍可使用。`
         : native?.restoring ? '正在恢复当前分支楼层变量，请稍候。' : '';
       recovery.hidden = !recovery.textContent;
       if (inspection?.metadata === metadata && inspection.identity === identity) showStats(inspection.value);
       else if (Number.isFinite(status?.bytes ?? status?.sizeBytes)) showStats({bytes:status.bytes ?? status.sizeBytes,records:status.records ?? status.recordCount});
       else stats.textContent = '点击「统计当前聊天占用」按需扫描剧情文件。';
       enable.disabled = busy || !available || !!status?.enabled;
+      const nativeBusy = !!native?.restoring || !!native?.generating;
+      simpleSwitch.disabled = busy || !available || !!simple && !!status?.enabled || nativeBusy || typeof runtime?.switchToCurrentStory !== 'function';
+      resetCurrent.disabled = busy || !available || nativeBusy || typeof runtime?.resetCurrentStory !== 'function';
+      confirmReset.disabled = resetCurrent.disabled || !resetPreview;
+      cancelReset.disabled = busy;
+      inspectBackups.disabled = busy || !available || !simple || !status?.enabled || typeof runtime?.inspectCurrentStoryBackups !== 'function';
+      restoreBackup.disabled = busy || !available || !simple || nativeBusy || !backupPreview?.value.backups.length || typeof runtime?.restoreCurrentStoryBackup !== 'function';
+      simpleImport.disabled = busy || !available || !simple || nativeBusy;
+      simpleReload.disabled = busy || !available || !simple || nativeBusy || typeof runtime?.restoreChat !== 'function';
       exportButton.disabled = busy || !available || !status?.enabled;
       importButton.disabled = busy || !available;
-      verifyIdentities.disabled = busy || !available || !status?.enabled || typeof runtime?.inspectStoryIdentityRecovery !== 'function';
+      verifyIdentities.disabled = busy || !available || !!simple || !status?.enabled || typeof runtime?.inspectStoryIdentityRecovery !== 'function';
       applyIdentities.disabled = busy || !available || !status?.enabled || typeof runtime?.repairStoryIdentities !== 'function'
         || !identityPreview || !(identityPreview.value.rows.length || identityPreview.value.mirrors.length)
         || !!native?.restoring || !!native?.generating;
       inspect.disabled = busy || !available || !status?.enabled;
-      browse.disabled = busy || !available || !status?.enabled || typeof runtime?.inspectStoryIndex !== 'function';
+      browse.disabled = busy || !available || !!simple || !status?.enabled || typeof runtime?.inspectStoryIndex !== 'function';
       retry.disabled = busy || !available || !status?.enabled || typeof runtime?.restoreChat !== 'function'
         || !!native?.restoring || !!native?.generating;
       refresh.disabled = busy;
@@ -352,6 +466,8 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
       stats.textContent = '';
       recovery.textContent = ''; recovery.hidden = true;
       enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = verifyIdentities.disabled = applyIdentities.disabled = true;
+      simpleSwitch.disabled = resetCurrent.disabled = confirmReset.disabled = inspectBackups.disabled = restoreBackup.disabled = true;
+      simpleImport.disabled = simpleReload.disabled = true;
       refresh.disabled = false;
       report(error.message, 'error');
     }
@@ -363,11 +479,13 @@ export function mountStoryStorage(target, report, getRuntime = getState2Runtime)
     if (!runtime) { report('剧情存储尚未初始化，请刷新酒馆。', 'error'); return; }
     busy = true;
     enable.disabled = exportButton.disabled = importButton.disabled = inspect.disabled = browse.disabled = retry.disabled = refresh.disabled = verifyIdentities.disabled = applyIdentities.disabled = true;
+    simpleSwitch.disabled = resetCurrent.disabled = confirmReset.disabled = cancelReset.disabled = inspectBackups.disabled = restoreBackup.disabled = true;
+    simpleImport.disabled = simpleReload.disabled = true;
     try { await work(runtime); }
     catch (error) { report(error.message, 'error'); }
     finally { busy = false; if (!disposed) await loadStatus(); }
   }
 
   void loadStatus();
-  return { dispose() { disposed = true; revision++; importToken = sourceToken = null; clearIdentityPreview(); libraryView.dispose(); performanceView.dispose(); } };
+  return { dispose() { disposed = true; revision++; importToken = sourceToken = null; clearIdentityPreview(); clearResetPreview(); clearBackupPreview(); libraryView.dispose(); performanceView.dispose(); } };
 }

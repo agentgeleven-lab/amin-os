@@ -276,6 +276,13 @@ function restoreOne(ctx, module, target, at) {
     throw Error('未知 Amin OS 变量模块。');
 }
 function externalStoryHistory(ctx) {
+    const current = ctx.chatMetadata.amin_os_current_story_v1;
+    if (current !== undefined) {
+        if (!plain(current) || current.version !== 1 || current.owner !== 'amin-os/current-story-v1'
+            || typeof current.chat !== 'string' || !/^current-[A-Za-z0-9_-]{1,100}$/u.test(current.key ?? ''))
+            throw Error('Amin OS 简洁剧情存储标记不兼容，原资料未改写。');
+        return true;
+    }
     const marker = ctx.chatMetadata[STORY_STORAGE_KEY];
     if (marker === undefined) return false;
     if (!plain(marker) || marker.version !== 2 || marker.owner !== 'amin-os/story-v2'

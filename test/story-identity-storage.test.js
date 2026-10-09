@@ -147,3 +147,82 @@ test('identity recovery refuses a source state whose external file is missing', 
     await assert.rejects(f.service.inspectIdentityRecovery(f.source));
     assert.deepEqual({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata }, before);
 });
+
+function storageLocatedError(source, field, swipe, detail) {
+    return error => {
+        assert.equal(error.source, source);
+        assert.equal(error.floor, 1);
+        if (field !== undefined) assert.equal(error.field, field);
+        assert.match(error.message, source === 'original' ? /原聊天文件/ : /当前聊天/);
+        assert.match(error.message, /第\s*2\s*楼/);
+        if (swipe !== undefined) {
+            assert.equal(error.swipe, swipe);
+            assert.match(error.message, new RegExp(`Swipe\\s*${swipe + 1}(?:\\D|$)`));
+        }
+        if (detail) assert.match(error.message, detail);
+        return true;
+    };
+}
+
+const malformedBodies = {
+    null: message => { message.swipes[0] = null; },
+    sparse: message => { delete message.swipes[0]; },
+    number: message => { message.swipes[0] = 17; },
+    undefined: message => { message.swipes[0] = undefined; },
+};
+for (const source of ['original', 'current']) {
+    for (const [kind, mutate] of Object.entries(malformedBodies)) {
+        test(`storage keeps the precise ${source} location for ${kind} unselected Swipe without writing`, async () => {
+            const f = await fixture(); f.corrupt();
+            const sourceChat = clone(f.originalChat);
+            mutate(source === 'original' ? sourceChat[1] : f.message);
+            const text = source === 'original' ? sourceText(f.originalMetadata, sourceChat) : f.source;
+            const before = clone({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes], sourceChat });
+            const detail = kind === 'number' ? /number|数字|数值/i
+                : source === 'original' || kind === 'null' ? /null|空值/i
+                : /缺失|空位|不存在|undefined/i;
+            await assert.rejects(f.service.inspectIdentityRecovery(text), storageLocatedError(source, 'swipes', 0, detail));
+            assert.deepEqual({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes], sourceChat }, before);
+            assert.equal(f.restores, 0);
+        });
+    }
+
+    test(`storage preserves selected mismatch code and the ${source} second-floor Swipe location`, async () => {
+        const f = await fixture(); f.corrupt();
+        const sourceChat = clone(f.originalChat);
+        (source === 'original' ? sourceChat[1] : f.message).mes = 'mismatched selected body';
+        const text = source === 'original' ? sourceText(f.originalMetadata, sourceChat) : f.source;
+        const before = clone({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes] });
+        await assert.rejects(f.service.inspectIdentityRecovery(text), error => {
+            assert.equal(error.code, 'INCOMPLETE_CANDIDATE');
+            return storageLocatedError(source, 'mes', 1, /不一致|不匹配|不同|尚未保存完整/)(error);
+        });
+        assert.deepEqual({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes] }, before);
+    });
+}
+
+test('storage retains a matching failure location after successful JSONL parsing instead of reporting a parse error', async () => {
+    const f = await fixture(); f.corrupt();
+    f.message.swipes[0] = 'body absent from supplied original';
+    const before = clone({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes] });
+    await assert.rejects(f.service.inspectIdentityRecovery(f.source), storageLocatedError('current', undefined, 0, /正文无法唯一匹配/));
+    assert.deepEqual({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes] }, before);
+});
+
+for (const line of [1, 2, 3]) {
+    test(`storage reports invalid JSONL line ${line}, including the header in the count, without writing`, async () => {
+        const f = await fixture(); f.corrupt();
+        const lines = f.source.split('\n');
+        lines[line - 1] = '{"unfinished":';
+        const before = clone({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes] });
+        await assert.rejects(f.service.inspectIdentityRecovery(lines.join('\n')), error => {
+            assert.equal(error.source, 'original');
+            assert.equal(error.line, line);
+            assert.equal(error.code, 'STORY_IDENTITY_SOURCE');
+            assert.match(error.message, new RegExp(`第\\s*${line}\\s*行`));
+            assert.match(error.message, /JSONL|JSON/);
+            return true;
+        });
+        assert.deepEqual({ chat: f.ctx.chat, metadata: f.ctx.chatMetadata, nodes: [...f.nodes] }, before);
+    });
+}
