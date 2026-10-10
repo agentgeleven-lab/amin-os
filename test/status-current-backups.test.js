@@ -77,7 +77,7 @@ class Element {
 const walk = root => [root, ...root.children.flatMap(walk)];
 async function application(f, runtime = { archiveStory: () => f.service.capture() }, loadVariables = async () => ({setLocalVariable:f.setLocalVariable})) {
   const document = { created: [], createElement(tag) { const element = new Element(tag); this.created.push(element); return element; } };
-  const messages = [], opened = [], target = new Element('main');
+  const messages = [], opened = [], generationViews = [], target = new Element('main');
   const history = { sync() {}, adoptExternal() {}, list() { throw Error('current backup picker must not load floor histories'); } };
   let templateWrite;
   const sandbox = { console, URL, setInterval: () => 1, clearInterval() {},
@@ -90,15 +90,16 @@ async function application(f, runtime = { archiveStory: () => f.service.capture(
     subscribeStateChanges() {}, chatIdentity: () => 'current-chat',
     captureContext: () => f.ctx.chatMetadata, assertContext: () => f.ctx, acquireMetadataWrite: () => () => {},
     mountWorldbookSources: () => ({ getValue: () => ({}), refresh() {}, dispose() {} }),
-    sourceSettings: () => ({}), saveSourceSettings() {}, createMapLink: () => ({ element: new Element('div') }),
+    sourceSettings: () => ({}), saveSourceSettings() {}, createMapLink: () => ({ element: new Element('div'), destroy() {} }),
     checkpointState() {}, compileRules: () => '', createRulesPage: () => new Element('section'),
     installUpdateEntry() {}, boundWorldbook: () => 'book', createHistory: () => history,
-    historyView: () => ({ element: new Element('section') }), installFloorButtons: () => ({ refresh() {} }),
+    historyView: () => ({ element: new Element('section'), dispose() {} }), installFloorButtons: () => ({ refresh() {} }),
     ...backups, createTemplatesPage: options => { templateWrite = options.write; return new Element('section'); },
     copyPrompt() {}, buildUpdatePrompt() {}, generateStatus() {}, hostSetLocalVariable: f.setLocalVariable,
     isIndependent, readStoryRoot, writeStoryRoot, STATE_KEY, prepareIndependentManualWrite,
+    mountGeneration: (_target, options) => {const view={options,opens:0,disposed:false,open(){this.opens++;},dispose(){this.disposed=true;}};generationViews.push(view);return view;},
     mountLinkage: () => ({ open() {}, dispose() {} }), getLinkageService: () => ({ subscribe: () => () => {} }),
-    managesModule: () => false, getState2Runtime: () => runtime, state2HistoryMode: () => ({ managed: true }),
+    managesModule: () => !!f.ctx.chatMetadata.amin_os_linkage_v1?.enabled, getState2Runtime: () => runtime, state2HistoryMode: () => ({ managed: true }),
   };
   const source = readFileSync(new URL('../apps/status/index.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gmu, '').replace('export async function initialize', 'async function initialize')
@@ -109,7 +110,7 @@ async function application(f, runtime = { archiveStory: () => f.service.capture(
     const node = document.created.find(element => element.tagName === 'BUTTON' && element.textContent === label);
     assert.ok(node, `missing action ${label}`); return node;
   };
-  return { app, find, document, messages, opened, target, get templateWrite() { return templateWrite; } };
+  return { app, find, document, messages, opened, target, generationViews, get templateWrite() { return templateWrite; } };
 }
 
 test('independent status application starts and applies a template without importing a host variables module', async () => {
@@ -179,4 +180,12 @@ test('current-only applying a status template saves the bounded record without c
     assert.equal(f.ctx.chatMetadata.variables.unrelated, 'keep');
     assert.deepEqual(Object.keys(f.ctx.chatMetadata.variables).filter(key => key.startsWith('状态栏_生成前备份_')), [oldKey]);
   } finally { unregister(); }
+});
+
+for(const managed of [false,true])test('both status update entries open one per-HUD draft editor even when managed '+managed,async()=>{
+  const f=fixture();f.ctx.chatMetadata.amin_os_linkage_v1={enabled:managed};const before=structuredClone(f.ctx.chatMetadata),b=await application(f);
+  await b.app.open('state');assert.equal(b.generationViews.length,1);assert.equal(b.generationViews[0].opens,0);assert.deepEqual([...b.generationViews[0].options.modules],['status']);
+  await b.find('按现有剧情更新状态').onclick();assert.equal(b.generationViews[0].opens,1);await b.find('按当前剧情更新值').onclick();assert.equal(b.generationViews[0].opens,2);
+  assert.deepEqual(f.ctx.chatMetadata,before);assert.deepEqual(f.writes,[]);assert.ok(b.document.created.some(node=>/预览确认后才会保存/.test(node.textContent)));
+  await b.app.open('state');assert.equal(b.generationViews[0].disposed,true);assert.equal(b.generationViews.length,2);assert.equal(b.generationViews[1].opens,0);
 });

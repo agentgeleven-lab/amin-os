@@ -24,7 +24,7 @@ async function input(root, label, value, tag = 'textarea') { const node = find(r
 const notice = root => walk(root).find(node => node.className === 'amin-notice')?.textContent;
 
 
-function fixture() {
+function fixture(options = {}) {
  const doc = { createElement(tag) { return new Node(tag, doc); } }, root = doc.createElement('div');
  const calls = [], listeners = new Set(); let draft = null, preview = null, dirty = false, failSave = false;
  const service = {
@@ -36,7 +36,7 @@ function fixture() {
   async retrySave() { calls.push(['retry']); dirty = false; preview = null; },
   discard() { preview = null; }, cancel() { calls.push(['cancel']); },
  };
- const view = mountGeneration(root, { service, getContext: () => ({ chat: [{}, {}, {}] }), mountSources: () => ({ getValue: () => ({ includeCharacter: true, readWorldbooks: false, selectedBooks: [] }), dispose() {} }) });
+ const view = mountGeneration(root, { ...options, service, getContext: () => ({ chat: [{}, {}, {}] }), mountSources: () => ({ getValue: () => ({ includeCharacter: true, readWorldbooks: false, selectedBooks: [] }), dispose() {} }) });
  return { root, view, calls, service, fail() { failSave = true; } };
 }
 test('generation panel stays lazy; source ranges convert once and suggestions require selection, preview, confirmation', async () => {
@@ -68,4 +68,18 @@ test('ordinary translated fields edit strings, quantities, booleans and nested d
 test('invalid ordinary numeric input blocks stage instead of silently using the previous quantity', async () => {
  const f = fixture(); f.view.open(); await click(f.root, '生成资料草稿'); await input(f.root, '建议 1 · 数量', '', 'input'); await click(f.root, '预览所选变更'); assert.equal(f.calls.length, 1);
  await input(f.root, '建议 1 · 数量', '0', 'input'); await click(f.root, '预览所选变更'); assert.equal(f.calls.at(-1)[1][0].data.quantity, 0); f.view.dispose();
+});
+
+
+test('status-only entry selects explicit recent chat floors, fixes update mode, and never includes characters',async()=>{
+ const f=fixture({modules:['status']});assert.equal(f.calls.length,0);f.view.open();assert.equal(f.calls.length,0);
+ assert.equal(find(f.root,'生成范围：人物卡','input'),undefined);assert.equal(find(f.root,'生成范围：世界状态','input').checked,true);
+ assert.equal(find(f.root,'生成方式','select').value,'update');assert.deepEqual(find(f.root,'生成方式','select').children.map(option=>option.value),['update']);
+ assert.equal(find(f.root,'读取指定聊天楼层','input').checked,true);await input(f.root,'起始楼层（从 1 开始）','2','input');await click(f.root,'生成资料草稿');
+ assert.deepEqual(f.calls[0][1].modules,['status']);assert.equal(f.calls[0][1].mode,'update');assert.equal(f.calls[0][1].sources.start,1);assert.equal(f.calls[0][1].sources.end,2);f.view.dispose();
+});
+
+test('joint initialization excludes update-only status and a reopened dirty service immediately shows retry',async()=>{
+ const joint=fixture({joint:true});joint.view.open();assert.equal(find(joint.root,'生成范围：世界状态','input'),undefined);joint.view.dispose();
+ const f=fixture({modules:['status']});f.service.dirty=()=>true;f.view.open();assert.ok(find(f.root,'重试保存生成资料'));assert.equal(find(f.root,'生成资料草稿').disabled,true);await click(f.root,'重试保存生成资料');assert.deepEqual(f.calls,[['retry']]);f.view.dispose();
 });

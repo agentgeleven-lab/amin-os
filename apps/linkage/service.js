@@ -3,7 +3,7 @@ import { uuid } from '../../uuid.js';
 import { createOperationService, subscribeStateChanges, chatIdentity, chatPath } from '../shared/operations.js';
 import { checkpointState } from '../status/state-checkpoint.js';
 import { adapters as allAdapters } from './registry.js';
-import { KEY, MODULES, SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate, readLinkageState, readLinkageSettings, validateLinkageState, compactLinkageReceipts, modulePolicy, moduleAvailable, mayWrite, plain, validateJSON } from './policy.js';
+import { KEY, MODULES, SCOPE_TEMPLATE_KEY, scopeTemplate, readScopeTemplate, readLinkageState, readLinkageSettings, validateLinkageState, compactLinkageReceipts, modulePolicy, moduleAvailable, mayWrite, mayManuallyUpdateStatus, plain, validateJSON } from './policy.js';
 import { parseUpdate, hasUpdate } from './protocol.js';
 import { buildUnifiedPrompt, buildDataPrompt, buildUpdateRules, buildDataPromptReport } from './prompt.js';
 import { buildReferenceIndex } from './references.js';
@@ -47,9 +47,9 @@ const sourceEqual = (a,b) => a.identity === b.identity && a.index === b.index &&
 const changesEqual = (record, changes) => record.changesHash ? record.changesHash === hash(changes) : same(record.changes, changes);
 
 export function createLinkageService(getContext = () => globalThis.SillyTavern?.getContext?.(), { adapters = allAdapters, createId = uuid, now = () => new Date().toISOString(), buildPrompt = buildUnifiedPrompt, manualModules = null } = {}) {
-    if (manualModules !== null && (!Array.isArray(manualModules) || !manualModules.length || manualModules.some(id => !['characters','inventory','relationships','scene','journal'].includes(id)) || new Set(manualModules).size !== manualModules.length)) throw Error('手动生成范围无效。');
+    if (manualModules !== null && (!Array.isArray(manualModules) || !manualModules.length || manualModules.some(id => !['characters','inventory','relationships','scene','journal','status'].includes(id)) || new Set(manualModules).size !== manualModules.length)) throw Error('手动生成范围无效。');
     const manualScope = manualModules === null ? null : new Set(manualModules);
-    const canWrite = (ctx, id) => manualScope ? manualScope.has(id) : mayWrite(ctx,id);
+    const canWrite = (ctx, id) => manualScope ? manualScope.has(id) && (id !== 'status' || mayManuallyUpdateStatus(ctx)) : mayWrite(ctx,id);
     const batchLabel = manualScope ? 'AI 资料生成' : '跨应用剧情更新';
     const operation = createOperationService(getContext), listeners = new Set(), candidates = new Map();
     const paths = [...new Map([[KEY], ...adapters.flatMap(a => a.paths).filter(path => !derivedHistories.has(path[0]))].map(path => [JSON.stringify(path), path])).values()];
@@ -89,6 +89,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
         const operationId = createId(), at = now(), sandbox = independent ? toLegacyContext(ctx) : { ...ctx, chatMetadata: clone(ctx.chatMetadata) };
         const touched = [], descriptions = [], changes = [], beforeData = rawData(sandbox);
         for (const [index, change] of parsed.changes.entries()) {
+            if (manualScope && change.module === 'status' && change.action !== 'set') throw Error('手动状态更新仅允许设置已有字段的最终值。');
             if (!canWrite(ctx,change.module)) throw Error(`${MODULES[change.module][0]} 未在本次操作的更新范围内。`);
             const adapter = adapters.find(a => a.id === change.module);
             if (!adapter?.apply) throw Error('这个模块目前只支持读取。');
@@ -134,6 +135,7 @@ export function createLinkageService(getContext = () => globalThis.SillyTavern?.
     function preview() { if (!operation.preview()) return null; return clone(pending ?? { label:'保存联动设置', changes:[], summary:[], warnings:[] }); }
     async function confirm() {
         const candidateId = pending?.candidateId;
+        if (manualScope && pending?.changes.some(change => !canWrite(context(), change.module))) throw Error('本次手动更新权限已变化，请重新预览。');
         try { const result = await operation.confirm(); pending = null; if (candidateId) candidates.delete(candidateId); message = '关联更新已保存。'; return result; }
         catch (error) { message = error.message; throw error; }
         finally { notify(); }

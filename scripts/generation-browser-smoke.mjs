@@ -145,7 +145,7 @@ try {
     await evaluate('(' + fixture.toString() + ')()'); await evaluate('(' + helpers.toString() + ')()');
     await waitFor('!!globalThis.AminOS&&document.querySelectorAll(".amin-extra-floor").length>=8', 'all app registration');
 
-    await evaluate(`window.modelCalls=[];window.modelOutput={version:1,changes:[]};window.holdModel=false;const ai=(await import('/ai/service.js')).getAI();ai.capture=app=>({app,fixture:true});ai.generate=async(label,context,request,options)=>{modelCalls.push({label,request,includeLinkage:options.includeLinkage});if(holdModel)await new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('mock generation cancelled')),{once:true}));return JSON.stringify(modelOutput);}`);
+    await evaluate(`window.modelCalls=[];window.modelOutput={version:1,changes:[]};window.holdModel=false;const ai=(await import('/ai/service.js')).getAI();ai.capture=app=>({app,fixture:true});ai.generate=async(label,context,request,options)=>{modelCalls.push({label,request,includeLinkage:options.includeLinkage,snapshot:options.snapshot});if(holdModel)await new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('mock generation cancelled')),{once:true}));return JSON.stringify(modelOutput);}`);
     for (const id of ['characters','inventory','relationships','scene','journal']) {
         await app(id); await expand(id,'AI 生成／补充');
         await waitFor(`!!pane('${id}').querySelector('.amin-generation [aria-label="生成方式"]')`,'generation entry '+id);
@@ -195,8 +195,46 @@ try {
     await failIfNotice('status','已变化');
     assert.equal(await evaluate("(await import('/apps/characters/model.js')).readCharacters(ctx).characters.some(p=>p.id==='gen_stale')"),false);
     checks.push('Changed selected chat source blocks stale confirmation without saving');
+    // Explicit status updates use the same reviewed transaction even when normal
+    // chat linkage is automatic. These tests never call a real model or host.
+    await evaluate(`ctx.chatMetadata.amin_os_linkage_v1={...(await import('/apps/linkage/policy.js')).emptyLinkageState(),enabled:true,mode:'auto',modules:{status:{enabled:true,read:true,write:true}}};`);
+    await app('status');
+    const beforeEntryCalls=await evaluate('modelCalls.length');
+    await click('status','按现有剧情更新状态');
+    assert.equal(await evaluate('modelCalls.length'),beforeEntryCalls,'opening status draft does not call model');
+    assert.equal(await evaluate("findField('status','生成方式').value"),'update');
+    assert.equal(await evaluate("findField('status','读取指定聊天楼层').checked"),true);
+    assert.equal(await evaluate("[...pane('status').querySelectorAll('[aria-label=\"生成范围：人物卡\"]')].some(visible)"),false);
+    await fill('status','起始楼层（从 1 开始）','2');await fill('status','结束楼层（含）','2');
+    await evaluate('modelOutput='+JSON.stringify({version:1,changes:[
+        {module:'status',action:'set',target:'玩家.生命',data:{value:7,component:'current'},reason:'第2楼明确的新事实'},
+        {module:'status',action:'set',target:'世界.地点',data:{value:'青云宗'},reason:'待用户选择的地点建议'}]}));
+    const beforeStatus=await evaluate('JSON.stringify(ctx.chatMetadata)'),beforeStatusChat=await evaluate('JSON.stringify(ctx.chat)');
+    await click('status','生成资料草稿');assert.equal(await evaluate('JSON.stringify(ctx.chatMetadata)'),beforeStatus);
+    assert.equal(await evaluate('modelCalls.at(-1).snapshot.app'),'status');
+    assert.deepEqual(await evaluate('JSON.parse(JSON.parse(modelCalls.at(-1).request.prompt).sources).chat.map(row=>row.index)'),[1]);
+    await setChecked('status','采用建议 2 · 世界状态',false);await fill('status','建议 1 · 数值','6');
+    await click('status','预览所选变更');assert.equal(await evaluate('JSON.stringify(ctx.chatMetadata)'),beforeStatus);await failIfNotice('status','8');
+    await layoutsAt('status','status-story-update-preview','.amin-generation');
+    await click('status','确认保存整组资料');await failIfNotice('status','整组资料已保存');assert.equal(await hp(),6);
+    assert.equal(await evaluate('JSON.parse(ctx.chatMetadata.variables.状态栏).项目.世界.地点'),'龙门市');
+    assert.equal(await evaluate('JSON.stringify(ctx.chat)'),beforeStatusChat);assert.equal(await evaluate('ctx.chatMetadata.amin_os_linkage_v1.mode'),'auto');
+    checks.push('Managed status button opens status-only range editor; status AI channel; editable selected proposals; preview read-only; explicit confirm despite auto mode; chat unchanged');
+    // The legacy settings button must reach the exact same editor without calling AI.
+    await click('status','按当前剧情更新值');assert.equal(await hp(),6);
+    await evaluate(`modelOutput={version:1,changes:[{module:'status',action:'set',target:'玩家.生命',data:{value:5,component:'current'},reason:'第2楼新的最终值'}]};window.failStatusSave=true;ctx.saveMetadata=async function(){this.saved++;if(failStatusSave)throw Error('status save offline');};`);
+    await click('status','生成资料草稿');await click('status','预览所选变更');await click('status','确认保存整组资料');await failIfNotice('status','保存失败');
+    assert.equal(await hp(),5);const callsBeforeRetry=await evaluate('modelCalls.length'),receiptsBeforeRetry=await evaluate('ctx.chatMetadata.amin_os_linkage_v1.applied.length');
+    await app('status');await click('status','按现有剧情更新状态');await failIfNotice('status','重试保存生成资料');
+    await evaluate('failStatusSave=false');await click('status','重试保存生成资料');assert.equal(await hp(),5);assert.equal(await evaluate('modelCalls.length'),callsBeforeRetry);assert.equal(await evaluate('ctx.chatMetadata.amin_os_linkage_v1.applied.length'),receiptsBeforeRetry);
+    checks.push('Both status entry buttons share draft flow; failed save survives HUD close/reopen with immediate retry and no second model request or application');
+    await evaluate('modelOutput={version:1,changes:[]}');await click('status','生成资料草稿');await failIfNotice('status','没有需要更新');assert.equal(await hp(),5);
+    await evaluate('holdModel=true');await click('status','生成资料草稿');await app('status');await click('status','按现有剧情更新状态');await evaluate('holdModel=false');
+    await failIfNotice('status','按现有剧情更新状态');assert.equal(await hp(),5);
+    await evaluate('ctx.chatMetadata.amin_os_linkage_v1.modules.status.write=false');const deniedCalls=await evaluate('modelCalls.length');await click('status','生成资料草稿');await failIfNotice('status','允许模型更新');assert.equal(await evaluate('modelCalls.length'),deniedCalls);
+    checks.push('Status empty output leaves state untouched; closing HUD aborts pending generation; disabled status permission refuses before any model request');
     assert.deepEqual(errors,[]);assert.deepEqual(consoleErrors,[]);assert.deepEqual(layoutIssues,[]);
-    fs.writeFileSync(path.join(artifacts,'report.json'),JSON.stringify({passed:true,environment:'Real headless Edge; isolated mock host/model; actual mounts, source collection, adapters and atomic saves; viewport emulation only',checks,layouts,layoutIssues,runtimeErrors:errors,consoleErrors},null,2));
+    fs.writeFileSync(path.join(artifacts,'report.json'),JSON.stringify({passed:true,environment:'Real headless Chromium; isolated mock host/model; actual mounts, source collection, adapters and atomic saves; viewport emulation only',checks,layouts,layoutIssues,runtimeErrors:errors,consoleErrors},null,2));
     console.log('PASS '+checks.length+' generation browser checks, '+layouts.length+' layouts. Artifacts: '+artifacts);
     await send('Browser.close').catch(()=>{});
 } catch (error) {
