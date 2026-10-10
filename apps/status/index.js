@@ -17,6 +17,7 @@ import { buildUpdatePrompt } from './state-tools.js';
 import { generateStatus } from './generator.js';
 import './story-state.js';
 import { isIndependent, readStoryRoot, writeStoryRoot, STATE_KEY, prepareIndependentManualWrite } from '../story-state/access.js';
+import { mountGeneration } from '../generation/view.js';
 import { mount as mountLinkage } from '../linkage/view.js';
 import { getSharedService as getLinkageService } from '../linkage/service.js';
 import { managesModule, mayWrite } from '../linkage/policy.js';
@@ -48,6 +49,7 @@ let generationForm, formHome, sourceHost, sourcePicker, sourceIdentity, restoreP
 let selectedPage = 'state';
 let selectHudPage = null;
 let requestUpdate = null;
+let openStatusUpdate = null;
 let invalidateStatusFrame = null;
 const linkageEnabled = () => managesModule(context(),'status');
 function statusUpdateCopyPrompt() {
@@ -203,6 +205,9 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   const generationPage = node('section', undefined, 'wsh-generation-page');
   generationPage.id = 'wsh-generation-page'; generationPage.setAttribute('role', 'tabpanel');
   generationPage.setAttribute('aria-labelledby', generateTab.id);
+  // Own this draft editor per HUD. Closing/moving the workbench cancels it.
+  const statusGeneration = mountGeneration(generationPage, { modules:['status'], getContext:() => { checkIdentity(id); validate(); return context(); }, instruction:getSettings().updateNote || '' });
+  openStatusUpdate = () => statusGeneration.open();
   if (generationForm) generationPage.append(generationForm);
   refreshSourceControls();
   const readCurrent = () => { checkIdentity(id); validate(); return parseState(readStoryRoot(context(), '状态栏')); };
@@ -240,7 +245,7 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
     rulesPage.refreshLinkageMode?.();
     for(const button of dialog.querySelectorAll('[data-legacy-update-entry]')){button.disabled=enabled;button.title=enabled?'已由联动更新接管；将世界状态移出联动后可使用此入口。':'';}
     for(const message of dialog.querySelectorAll('[data-linkage-ownership]'))message.textContent=enabled?'世界状态已由统一联动接管。请在“联动更新”中管理规则与世界书条目。':'世界状态未加入统一联动，可使用原世界状态更新入口。';
-    for(const button of dialog.querySelectorAll('[data-linkage-quick-update]'))button.textContent=enabled?'查看联动更新':'按剧情更新';
+    for(const button of dialog.querySelectorAll('[data-linkage-quick-update]'))button.textContent='按现有剧情更新状态';
     for(const button of dialog.querySelectorAll('[data-linkage-quick-copy]'))button.textContent=isIndependent(context())?'复制 Amin 更新提示词':enabled?'查看统一更新提示词':'复制更新提示词';
   }
   const unsubscribeLinkage=linkageApi.subscribe(refreshLegacyControls);
@@ -335,18 +340,15 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
   };
   addEventListener('message', listener);
   let closed=false;
-  dialog.close=()=>{if(closed)return;closed=true;recordsView.dispose();linkageView.dispose();unsubscribeLinkage();removeEventListener('message',listener);frame.srcdoc='';restorePanel?.remove();restorePanel=null;if(generationForm?.parentElement===generationPage)formHome?.append(generationForm);dialog.remove();mapLink.destroy();if(hudPanel===dialog){hudPanel=null;selectHudPage=null;invalidateStatusFrame=null;}onClose();};
+  dialog.close=()=>{if(closed)return;closed=true;recordsView.dispose();statusGeneration.dispose();linkageView.dispose();unsubscribeLinkage();removeEventListener('message',listener);frame.srcdoc='';restorePanel?.remove();restorePanel=null;if(generationForm?.parentElement===generationPage)formHome?.append(generationForm);dialog.remove();mapLink.destroy();if(hudPanel===dialog){hudPanel=null;selectHudPage=null;openStatusUpdate=null;invalidateStatusFrame=null;}onClose();};
   close.onclick = closeHud;
   const quickActions = node('div', undefined, 'wsh-actions');
   const quickStatus = node('p', '', 'wsh-quick-status'); quickStatus.setAttribute('role', 'status');
-  const update = node('button', '按剧情更新', 'menu_button amin-primary'); update.type = 'button'; update.title='根据近期对话更新当前状态值';
+  const update = node('button', '按现有剧情更新状态', 'menu_button amin-primary'); update.type = 'button'; update.title='选择已有聊天楼层，生成建议并确认后更新当前状态值';
   update.dataset.linkageQuickUpdate='true';
   update.onclick = async () => {
-    if(linkageEnabled()){selectPage('linkage');linkageView.open('updates');return;}
-    try { checkIdentity(id); validate(); update.disabled = true; quickStatus.textContent = '正在读取近期对话并更新…';
-      const result = await requestUpdate(); checkIdentity(id);
-      quickStatus.textContent = result?.ok ? (result.changed ? '数值已更新。' : '无需更新。') : result?.message || '更新未完成，请查看生成设置。';
-    } catch (e) { quickStatus.textContent = e.message; } finally { update.disabled = false; }
+    try { checkIdentity(id); validate(); await requestUpdate(); quickStatus.textContent = '请选择剧情楼层并生成草稿，预览确认后才会保存。'; }
+    catch (e) { quickStatus.textContent = e.message; }
   };
   const copy = node('button', '复制更新提示词', 'menu_button'); copy.type = 'button'; copy.title=isIndependent(context()) ? '复制当前 Amin 资料、模块权限与 amin_update 更新协议' : '复制当前状态、字段路径和模型更新要求';
   copy.dataset.linkageQuickCopy='true';
@@ -452,9 +454,7 @@ function mount() {
   sourceHost=node('div');generationForm.append(sourceHost);refreshSourceControls();
   field('includePersona', '读取用户设定描述（Persona）', 'checkbox');
   generationForm.append(node('p','默认不读取用户设定。勾选后每次读取当前用户名称与Persona描述，独立于角色资料和世界书；没有描述时提示补充。','wsh-note'));
-  field('updateNote', '当前情况补充（更新数值时使用，可留空）', 'textarea');
-  field('allowTypeChange', '允许更改已有字段类型（默认关闭，仅用于 AI 更新）', 'checkbox');
-  generationForm.append(node('p','未勾选时保留原类型。可在当前情况补充或状态栏要求中明确填写“把体力改为数字”，仅授权指定字段；填写“允许更改已有字段类型”可授权本次更新中的类型转换。'));
+  generationForm.append(node('p','按现有剧情更新请使用上方独立草稿面板：选择楼层、检查建议并确认保存。此流程保留已有类型；添加字段或改类型请使用状态栏编辑器。'));
   field('instructions', '状态栏要求', 'textarea').placeholder = '例如：仅显示玩家、世界、队伍；不要数值化感情。';
   Object.entries(settings).forEach(([k,v]) => { if (fields[k]) fields[k].type === 'checkbox' ? fields[k].checked = v : fields[k].value = v; });
   const report = node('p', '准备就绪。', 'wsh-report'); report.setAttribute('role', 'status');
@@ -474,7 +474,7 @@ function mount() {
   }
   const saveButton = action('保存配置', () => { save(); report.textContent = '状态栏配置已保存；模型与预设在 AI 设置中管理。'; });
   async function generate(mode) {
-    if(mode==='update'&&linkageEnabled()){if(selectHudPage)selectHudPage('linkage');else await openEmbedded('linkage');report.textContent='请在联动更新中查看和确认统一剧情更新。';return {ok:false,message:report.textContent};}
+    if(mode==='update'){if(running)throw Error('请先完成当前状态栏生成。');if(selectHudPage)selectHudPage('generate');else await openEmbedded('generate');openStatusUpdate?.();report.textContent='请选择已有剧情楼层并生成草稿，预览确认后才会保存。';return;}
     if (running) throw Error('生成任务已经运行。');
     if (mode === 'replace' && !confirm(usesCurrentStoryStorage(context())
       ? '重新生成将替换当前状态栏全部项目；最近整套变量备份在设置 → 剧情存储中管理。继续？'
@@ -539,7 +539,7 @@ function mount() {
   const ctx = context(); const events = ctx.eventTypes || ctx.event_types || {};
   subscribeStateChanges((change,metadata) => {
     if(change.phase!=='applied'||metadata!==context()?.chatMetadata||change.identity!==chatIdentity(context())||!change.paths.some(path=>path[0]===STATE_KEY||path[0]==='variables'&&path[1]==='状态栏'))return;
-    running?.abort();if(hudPanel&&selectedPage==='linkage')invalidateStatusFrame?.();else closeHud();
+    running?.abort();if(hudPanel&&['linkage','generate'].includes(selectedPage))invalidateStatusFrame?.();else closeHud();
     history.adoptExternal();floorButtons.refresh();
   });
   for (const name of ['CHAT_CHANGED', 'MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'GENERATION_ENDED', 'CHARACTER_MESSAGE_RENDERED']) { if (events[name]) ctx.eventSource?.on(events[name], syncHistory); }

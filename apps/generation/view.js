@@ -1,15 +1,16 @@
 import { createGenerationService } from './service.js';
 import { mountWorldbookSources } from '../worldbook-source-ui.js';
 
-const labels = { characters: '人物卡', inventory: '背包与账本', relationships: '人物关系', scene: '时间与场景', journal: '剧情档案' };
-const actionLabels = { 'create-character': '新增人物', 'save-character': '补充人物资料', 'set-appearance': '设置外观', 'save-stat': '设置人物数值', 'create-item': '新增物品', 'save-item': '更新物品', 'create-balance': '新增账户', 'save-balance': '更新账户', 'set-condition': '设置物品状态', save: '建立或更新关系', 'set-time': '设置时间', 'save-scene': '建立或更新场景', 'save-schedule': '设置日程', set_fact: '记录事实', set_knowledge: '记录人物知情', set_hook: '记录伏笔', set_task: '记录任务', set_clue: '记录线索', draft_chronicle: '起草编年史' };
+const labels = { status: '世界状态', characters: '人物卡', inventory: '背包与账本', relationships: '人物关系', scene: '时间与场景', journal: '剧情档案' };
+const actionLabels = { set: '设置状态最终值', 'create-character': '新增人物', 'save-character': '补充人物资料', 'set-appearance': '设置外观', 'save-stat': '设置人物数值', 'create-item': '新增物品', 'save-item': '更新物品', 'create-balance': '新增账户', 'save-balance': '更新账户', 'set-condition': '设置物品状态', save: '建立或更新关系', 'set-time': '设置时间', 'save-scene': '建立或更新场景', 'save-schedule': '设置日程', set_fact: '记录事实', set_knowledge: '记录人物知情', set_hook: '记录伏笔', set_task: '记录任务', set_clue: '记录线索', draft_chronicle: '起草编年史' };
 const fieldLabels = { name:'名称', title:'标题', description:'描述', notes:'备注', quantity:'数量', amount:'金额', value:'数值', unit:'单位', currency:'货币', kind:'类型', appearance:'外观', hairstyle:'发型', features:'特征', ownerId:'所属人物', characterId:'人物', from:'起点人物', to:'终点人物', sourceId:'起点人物', targetId:'终点人物', fromId:'起点人物', toId:'终点人物', label:'称呼', type:'类型', strength:'关系强度', reciprocal:'双向关系', enabled:'启用', equipped:'已装备', wear:'穿戴', slot:'部位', layer:'层次', condition:'状态', wetness:'潮湿程度', dirt:'污渍程度', damage:'损坏程度', content:'内容', text:'正文', reason:'原因', status:'状态', confidence:'可信度', location:'位置', mapId:'地图', nodeId:'地点', activate:'设为当前场景', year:'年', month:'月', day:'日', hour:'时', minute:'分', sourceStart:'来源起始序号（从 0 开始）', sourceEnd:'来源结束序号（含）' };
-/** Lazy, local draft editor shared by the five apps and the joint initializer. */
+/** Lazy, local draft editor shared by the apps and the joint initializer. */
 export function mountGeneration(target, options = {}) {
     const doc = options.document ?? target.ownerDocument ?? globalThis.document;
     const make = (tag, text = '', cls = '') => { const n = doc.createElement(tag); n.textContent = text; if (cls) n.className = cls; return n; };
     const root = make('details', '', 'amin-card amin-stack amin-generation');
-    const title = make('summary', options.joint ? '联合初始化' : 'AI 生成／补充'); root.append(title); target.append(root);
+    const statusOnly = options.modules?.length === 1 && options.modules[0] === 'status';
+    const title = make('summary', statusOnly ? '按现有剧情更新状态' : options.joint ? '联合初始化' : 'AI 生成／补充'); root.append(title); target.append(root);
     let api, picker, unsubscribe, disposed = false, initialized = false, localBusy = false, controller, rows = [], notice, review, draftHost, mode, instruction, persona, chat, start, end;
     const controls = [], modules = [];
     const context = options.getContext ?? (() => globalThis.SillyTavern.getContext());
@@ -86,30 +87,30 @@ export function mountGeneration(target, options = {}) {
         try {
             api = options.service ?? createGenerationService(context, options.ai ? { ai: options.ai } : {});
             const body = make('div', '', 'amin-stack'); root.append(body);
-            body.append(make('p', '读取所选来源和所选应用的现有资料；为关联已有记录，还会读取人物的名称和 ID，涉及人物数值时读取可绑定字段，涉及场景时读取可见地图地点。生成只形成草稿；预览并确认后才保存，不会自动开启联动更新。', 'amin-meta'));
+            body.append(make('p', statusOnly ? '选择已有聊天楼层，结合当前状态和启用的状态规则生成建议。仅更新已有字段的值，保持类型；先编辑、勾选并预览，确认后才保存。使用世界状态 AI 渠道，不改写聊天正文，也不自动更改联动权限。' : '读取所选来源和所选应用的现有资料；为关联已有记录，还会读取人物的名称和 ID，涉及人物数值时读取可绑定字段，涉及场景时读取可见地图地点。生成只形成草稿；预览并确认后才保存，不会自动开启联动更新。', 'amin-meta'));
             const scope = make('div', '', 'amin-form-grid'); body.append(scope);
             const initial = options.modules ?? ['characters'];
-            for (const id of Object.keys(labels)) if (options.joint || initial.includes(id) || id === 'characters') modules.push({ id, node: check(scope, `生成范围：${labels[id]}`, initial.includes(id) || !!options.joint) });
+            for (const id of Object.keys(labels)) if (statusOnly ? id === 'status' : id !== 'status' && (options.joint || initial.includes(id) || id === 'characters')) modules.push({ id, node: check(scope, `生成范围：${labels[id]}`, initial.includes(id) || !!options.joint) });
             mode = field(body, '生成方式', 'select');
-            for (const [value, text] of [['create', '从零建立（仅新增，保留已有）'], ['supplement', '补充缺项'], ['update', '按剧情更新']]) { const option = make('option', text); option.value = value; mode.append(option); } mode.value = 'supplement';
+            for (const [value, text] of (statusOnly ? [['update', '按剧情更新']] : [['create', '从零建立（仅新增，保留已有）'], ['supplement', '补充缺项'], ['update', '按剧情更新']])) { const option = make('option', text); option.value = value; mode.append(option); } mode.value = statusOnly ? 'update' : 'supplement';
             const sourceFields = make('fieldset', '', 'amin-stack'); body.append(sourceFields);
             controls.push({ node: sourceFields, blocked: () => busy() || api.dirty() || !!api.preview() });
             picker = (options.mountSources ?? mountWorldbookSources)(sourceFields, { context, value: { includeCharacter: false, readWorldbooks: false, selectedBooks: [] } });
-            persona = check(body, '读取用户设定', false); chat = check(body, '读取指定聊天楼层', false);
+            persona = check(body, '读取用户设定', false); chat = check(body, '读取指定聊天楼层', statusOnly);
             const range = make('div', '', 'amin-form-grid'); body.append(range); start = field(range, '起始楼层（从 1 开始）'); end = field(range, '结束楼层（含）');
-            start.type = end.type = 'number'; start.min = end.min = '1'; start.value = '1'; end.value = String(Math.max(1, context()?.chat?.length ?? 1));
-            instruction = field(body, '附加要求', 'textarea'); instruction.rows = 3;
+            start.type = end.type = 'number'; start.min = end.min = '1'; start.value = String(statusOnly ? Math.max(1, (context()?.chat?.length ?? 1) - 19) : 1); end.value = String(Math.max(1, context()?.chat?.length ?? 1));
+            instruction = field(body, '附加要求', 'textarea'); instruction.rows = 3; instruction.value = options.instruction ?? '';
             notice = make('p', '', 'amin-notice'); notice.setAttribute('role', 'status'); notice.setAttribute('aria-live', 'polite'); body.append(notice);
             const actions = make('div', '', 'amin-toolbar'); body.append(actions);
             button(actions, '生成资料草稿', async () => {
                 controller = new AbortController();
                 await api.generate({ modules: modules.filter(row => row.node.checked).map(row => row.id), mode: mode.value, instruction: instruction.value, sources: { ...picker.getValue(), includePersona: persona.checked, includeChat: chat.checked, start: Number(start.value) - 1, end: Number(end.value) - 1 } }, { signal: controller.signal });
-                if (!disposed) { renderDraft(); say('生成完成，请检查和选择建议。'); }
+                if (!disposed) { renderDraft(); say(api.draft()?.changes.length ? '生成完成，请检查和选择建议。' : '所选来源没有需要更新的内容，未修改资料。'); }
             }, () => busy() || api.dirty() || !!api.preview());
             const cancel = make('button', '停止生成'); cancel.type = 'button'; cancel.addEventListener('click', () => { controller?.abort(); api.cancel(); }); actions.append(cancel); controls.push({ node: cancel, blocked: () => !busy() });
             button(actions, '放弃生成草稿', () => { api.discard(); clear(draftHost); rows = []; say('已放弃草稿。'); }, () => busy() || api.dirty());
             draftHost = make('div', '', 'amin-stack'); review = make('section', '', 'amin-stack'); body.append(draftHost, review);
-            unsubscribe = api.subscribe?.(() => { if (!disposed) { renderReview(); lock(); } }); lock();
+            unsubscribe = api.subscribe?.(() => { if (!disposed) { renderReview(); lock(); } }); renderReview(); lock();
         } catch (e) { root.append(make('p', e.message ?? String(e), 'amin-notice')); }
     }
     title.addEventListener('click', initialize); root.addEventListener('toggle', () => { if (root.open) initialize(); });

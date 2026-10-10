@@ -134,3 +134,10 @@ export function mayWrite(ctx, id, state) {
     const policy = managedPolicy(ctx, id, state);
     return Boolean(policy?.read && policy.write && id !== 'dice');
 }
+
+/** Explicit manual status requests work with the master off, but never override
+ * a disabled module or its saved read/write permissions. */
+export function mayManuallyUpdateStatus(ctx) {
+    const policy = modulePolicy(ctx, 'status');
+    return policy.enabled && policy.read && policy.write;
+}

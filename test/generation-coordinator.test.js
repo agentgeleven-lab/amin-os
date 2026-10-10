@@ -26,7 +26,7 @@ test('manual scope is fixed and cannot write unchecked apps or adapter side effe
     assert.throws(()=>f.api.stage({version:1,changes:[person,item]}),/更新范围/);assert.equal(f.saved,0);assert.equal(characters.read(f.ctx).characters.length,0);f.api.dispose();
     const fake={...characters,apply:()=>({patches:[{path:['variables','状态栏'],value:'{}'}],summary:'invalid'})};
     const bad=fixture(['characters'],[fake]);assert.throws(()=>bad.api.stage({version:1,changes:[person]}),/没有修改/);assert.equal(bad.ctx.chatMetadata.variables,undefined);bad.api.dispose();
-    assert.throws(()=>fixture(['status']),/范围无效/);assert.throws(()=>fixture([]),/范围无效/);
+    assert.throws(()=>fixture(['unsupported']),/范围无效/);assert.throws(()=>fixture([]),/范围无效/);
 });
 test('manual generation uses shared stale and persistence guards without duplicate apply on retry',async()=>{
     const f=fixture(['characters']);f.api.stage({version:1,changes:[person]});f.ctx.chat.push({mes:'新消息',is_user:true});
