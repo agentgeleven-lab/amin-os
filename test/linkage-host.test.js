@@ -17,7 +17,7 @@ function context() {
         chatId: 'one', getCurrentChatId() { return this.chatId; }, chatMetadata: { state: 'private-one' },
         chat: [{ is_user: true, name: 'user', mes: 'before' }], getRequestHeaders: () => ({}) };
 }
-function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings, beforeGeneration } = {}) {
+function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings, beforeGeneration, independent } = {}) {
     let ctx = context();
     const injections = new Map();
     const callbacks = new Map(), captured = [], replies = [], logs = [], builds = [];
@@ -33,6 +33,7 @@ function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings
     const getContext = () => ctx;
     const host = createLinkageHost(getContext, {
         beforeGeneration,
+        ...(independent ? { independent } : {}),
         readSettings: readSettings ?? (() => settings),
         manages: (_ctx, module) => settings.enabled && settings.modules.includes(module),
         buildPrompt: builder ?? ((live, options) => { builds.push(options); return `${options.purpose}:${options.write}:${live.chatMetadata.state}`; }),
@@ -60,6 +61,31 @@ function hostFixture({ missingEvent, builder, dataBuilder, capture, readSettings
         async switchChat() { ctx = { ...ctx, chatId: 'two', chatMetadata: { state: 'private-two' }, chat: [] }; await source.emit('CHAT_CHANGED'); },
     };
 }
+
+test('independent scans suppress marked native rules with modules or master disabled without rewriting source books', async () => {
+    for (const enabled of [true, false]) {
+        const f = hostFixture({ independent: () => true });
+        f.settings.enabled = enabled; f.settings.modules = [];
+        const original = Object.freeze([
+            Object.freeze(owned()),
+            Object.freeze({ uid: 2, content: '<state>status</state>', world_status_hud_owner: 'world-status-hud/variable-update-v1' }),
+            Object.freeze({ uid: 3, content: '<state>organizations</state>', amin_organizations_owner: 'amin-os/organizations-v1' }),
+            Object.freeze({ uid: 4, content: '<state>map</state>', dynamic_map_owner: 'dynamic-map/tool-calling-v1' }),
+            Object.freeze({ uid: 5, content: '<state>user custom</state>' }),
+            Object.freeze({ uid: 6, content: 'another owner', amin_organizations_owner: 'another-plugin' }),
+        ]);
+        const before = clone(original), metadata = clone(f.ctx().chatMetadata), chat = clone(f.ctx().chat);
+        try {
+            await f.start(); const payload = await f.load({ globalLore: [...original] });
+            for (const entry of payload.globalLore.slice(0, 4)) {
+                assert.equal(entry.disable, true); assert.equal(entry.content, '');
+            }
+            assert.equal(payload.globalLore[4], original[4]); assert.equal(payload.globalLore[5], original[5]);
+            assert.deepEqual(original, before);
+            assert.deepEqual(f.ctx().chatMetadata, metadata); assert.deepEqual(f.ctx().chat, chat);
+        } finally { f.host.destroy(); }
+    }
+});
 
 test('unified template preserves unrelated entries and never serializes current-chat state', () => {
     const original = { name: 'book', entries: { 0: { uid: 0, comment: LINKAGE_ENTRY_TITLE, content: 'user-owned same title' } } };

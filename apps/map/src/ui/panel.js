@@ -1,5 +1,6 @@
 import { uuid } from '../../../../uuid.js';
 import { legacyModule, isIndependent } from '../../../story-state/access.js';
+import { mapIntegrationPrompt } from './integration-prompt.js';
 import {mountWorldbookSources} from '../../../worldbook-source-ui.js';
 import {sourceSettings,saveSourceSettings} from '../../../worldbook-sources.js';
 import {getAI} from '../../../../ai/service.js';
@@ -237,7 +238,7 @@ export function createPanel(store,persistence,preferences,options={}){
         const name=field(form,`新${label}类型名称`,input());form.append(button('添加类型',()=>edit(m=>{m.metadata[key].push({id:uid('type'),name:name.value.trim()});validateRules(m);})));
     }
     function renderSettings(){
-        const categories=[['appearance','界面外观'],...(options.integration?[['integration','变量与状态栏']]:[]),...(options.tools?[['tools','AI 动态更新']]:[]),['api','生成 API'],['presets','生成预设']];
+        const categories=[['appearance','界面外观'],...(options.integration?[['integration',isIndependent(globalThis.SillyTavern?.getContext?.())?'剧情资料与状态栏':'变量与状态栏']]:[]),...(options.tools?[['tools','AI 动态更新']]:[]),['api','生成 API'],['presets','生成预设']];
         if(!categories.some(([id])=>id===settingsCategory))settingsCategory='appearance';
         const nav=el('nav',undefined,'dm-settings-categories');nav.setAttribute('aria-label','设置分类');page.append(nav);
         const sections=new Map(),buttons=new Map();
@@ -248,11 +249,11 @@ export function createPanel(store,persistence,preferences,options={}){
         form.append(button('打开设置 · 统一外观',()=>globalThis.AminOS?.openApp('settings')));
         form.append(el('p','消息末尾的“🗺 地图”按钮在该消息下方展开完整地图窗口。界面设置立即生效，不修改地图和变量。','dm-help'));
         if(options.integration){
-            form=sections.get('integration');const bridge=options.integration,state=bridge.status();form.append(el('h3','小白X与状态栏联动'));
-            const controls=isIndependent(globalThis.SillyTavern?.getContext?.())?[['hud','在状态栏显示地图位置']]:[['variables','同步地图摘要到聊天变量'],['hud','在状态栏显示地图位置'],['allowMoves','允许小白X提交位置更新']];
+            form=sections.get('integration');const bridge=options.integration,state=bridge.status(),ctx=globalThis.SillyTavern?.getContext?.(),independent=isIndependent(ctx);form.append(el('h3',independent?'地图与剧情资料联动':'小白X与状态栏联动'));
+            const controls=independent?[['hud','在状态栏显示地图位置']]:[['variables','同步地图摘要到聊天变量'],['hud','在状态栏显示地图位置'],['allowMoves','允许小白X提交位置更新']];
             for(const [key,label] of controls){const toggle=field(form,label,input('','checkbox'));toggle.checked=state[key];toggle.onchange=()=>run(()=>bridge.configure({[key]:toggle.checked}));}
-            form.append(el('p',(state.littleWhiteBox?'已检测到小白X 2.0':'未检测到小白X 2.0；聊天变量仍可供其他插件读取')+' · 状态栏：'+(state.statusHud?'已检测到':'未检测到')+' · '+state.message,'dm-integration-status'),button('重试地图变量同步',()=>void bridge.sync()));
-            const help=field(form,'联动提示词（复制到你的世界书）',el('textarea'));help.readOnly=true;help.value='当前地图摘要（只读，不修改“地图”变量）：\n{{xbgetvar_yaml::地图}}\n只有剧情明确发生移动时，才在 <state> 中完整写入：\n地图移动请求: {"请求ID":"本次唯一编号","地图版本":摘要中的地图版本数字,"地图ID":"目标地图ID","地点ID":"目标地点ID"}\n</state>\n不得虚构 ID；未开启位置更新时请求不执行。位置更新仅记录叙事位置，不自动寻路或推进时间。';
+            form.append(el('p',(independent?'Amin 独立剧情资料':state.littleWhiteBox?'已检测到小白X 2.0':'未检测到小白X 2.0；聊天变量仍可供其他插件读取')+' · 状态栏：'+(state.statusHud?'已检测到':'未检测到')+' · '+state.message,'dm-integration-status'),button(independent?'刷新地图联动状态':'重试地图变量同步',async()=>{await bridge.sync();if(independent)render();}));
+            const help=field(form,independent?'当前地图联动资料与规则（只读预览）':'联动提示词（复制到你的世界书）',el('textarea'));help.readOnly=true;help.value=mapIntegrationPrompt(ctx);
         }
         if(options.tools){
             form=sections.get('tools');const tools=options.tools,state=tools.status();form.append(el('h3','AI 动态更新与 Tool Calling'));
@@ -344,7 +345,7 @@ export function createPanel(store,persistence,preferences,options={}){
         try{for(const item of library()){const row=el('div',undefined,'dm-route');row.append(el('strong',item.name),button('载入草稿',()=>run(()=>{draft.replace(item.document);notice='模板已载入草稿';camera=null;render();})),button('删除模板',()=>run(()=>{localStorage.setItem(libraryKey,JSON.stringify(library().filter(x=>x.id!==item.id)));render();})));form.append(row);}}catch(error){form.append(el('p',error.message));}
         form.append(el('p','模板保存在此浏览器。载入模板会替换未保存草稿；可先导出草稿备份。','dm-help'));
     }
-    const offIntegration=options.integration?.subscribe(state=>{for(const p of panel.querySelectorAll('.dm-integration-status'))p.textContent=(state.littleWhiteBox?'已检测到小白X 2.0':'未检测到小白X 2.0')+' · 状态栏：'+(state.statusHud?'已检测到':'未检测到')+' · '+state.message;});
+    const offIntegration=options.integration?.subscribe(state=>{for(const p of panel.querySelectorAll('.dm-integration-status'))p.textContent=(isIndependent(globalThis.SillyTavern?.getContext?.())?'Amin 独立剧情资料':state.littleWhiteBox?'已检测到小白X 2.0':'未检测到小白X 2.0')+' · 状态栏：'+(state.statusHud?'已检测到':'未检测到')+' · '+state.message;});
     const off=draft.subscribe(render),offPreferences=preferences.subscribe(render);setCollapsed(collapsed);
     return {open(options={}){if(options.current){browsedMap=store.snapshot().activeMap;navigationRevision++;}tab='view';camera=null;selected=null;setCollapsed(false);},resetPosition:floating.reset,setStatus(text){panel.querySelector('.dm-save-status').textContent=text;},destroy(){disposed=true;sourcePicker?.dispose();activeJob?.cancel('地图窗口已关闭，未应用生成结果');off();offPreferences();offIntegration?.();if(!options.draft)draft.destroy();floating.destroy();panel.remove();}};
 }

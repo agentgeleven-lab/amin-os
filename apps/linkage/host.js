@@ -159,11 +159,12 @@ export function createLinkageHost(getContext, {
         for (const bucket of buckets) if (Array.isArray(payload[bucket])) {
             payload[bucket].forEach((entry, index) => entries.push({ list: payload[bucket], index, entry }));
         }
-        // Suppress only Amin-owned old update rules for modules actually managed
-        // by this chat. Hand-written worldbook entries are never changed.
+        // Independent state never consumes native update rules, even when its
+        // master switch/module is off. Legacy mode suppresses managed modules.
+        // Only marked Amin entries change in this scan; original books stay intact.
         for (const row of entries) {
             const module = legacyModule(row.entry);
-            if (module && manages(ctx, module)) row.list[row.index] = disabledCopy(row.entry);
+            if (module && (independent(ctx) || manages(ctx, module))) row.list[row.index] = disabledCopy(row.entry);
         }
         const owned = entries.filter(row => isUnifiedEntry(row.entry));
         for (const row of owned) row.list[row.index] = disabledCopy(row.entry);

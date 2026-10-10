@@ -19,7 +19,8 @@ import './story-state.js';
 import { isIndependent, readStoryRoot, writeStoryRoot, STATE_KEY, prepareIndependentManualWrite } from '../story-state/access.js';
 import { mount as mountLinkage } from '../linkage/view.js';
 import { getSharedService as getLinkageService } from '../linkage/service.js';
-import { managesModule } from '../linkage/policy.js';
+import { managesModule, mayWrite } from '../linkage/policy.js';
+import { buildDataPrompt, buildUpdateRules } from '../linkage/prompt.js';
 import { getState2Runtime, state2HistoryMode } from '../state2/runtime.js';
 
 const KEY = 'world_status_hud_v1';
@@ -49,6 +50,16 @@ let selectHudPage = null;
 let requestUpdate = null;
 let invalidateStatusFrame = null;
 const linkageEnabled = () => managesModule(context(),'status');
+function statusUpdateCopyPrompt() {
+  const ctx = context();
+  if (isIndependent(ctx)) {
+    if (!mayWrite(ctx, 'status')) throw Error('请先在“联动更新”中启用世界状态、提供资料并允许模型更新，再复制更新提示词。');
+    const protocol = buildUpdateRules(ctx);
+    if (!protocol.trim()) throw Error('当前没有允许执行的 Amin 更新协议，请检查联动设置。');
+    return [buildDataPrompt(ctx), protocol].filter(Boolean).join('\n\n');
+  }
+  return buildUpdatePrompt(readCurrent()) + '\n\n' + compileRules(ctx, KEY, 'update').replaceAll('<', '＜').replaceAll('>', '＞');
+}
 const defaults = { theme: 'nexus', floorButtons: true, allowTypeChange: false, includePersona: false, baseUrl: '', model: '', includeGlobalBooks: true, extraBooks: '', instructions: '', maxTokens: 4096 };
 const getSettings = () => {const legacy={...defaults,...context().extensionSettings[KEY]};return {...legacy,...sourceSettings(context(),'status',{legacyBindings:true,includeGlobalBooks:legacy.includeGlobalBooks,extraBooks:legacy.extraBooks})};};
 function refreshSourceControls(){
@@ -230,7 +241,7 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
     for(const button of dialog.querySelectorAll('[data-legacy-update-entry]')){button.disabled=enabled;button.title=enabled?'已由联动更新接管；将世界状态移出联动后可使用此入口。':'';}
     for(const message of dialog.querySelectorAll('[data-linkage-ownership]'))message.textContent=enabled?'世界状态已由统一联动接管。请在“联动更新”中管理规则与世界书条目。':'世界状态未加入统一联动，可使用原世界状态更新入口。';
     for(const button of dialog.querySelectorAll('[data-linkage-quick-update]'))button.textContent=enabled?'查看联动更新':'按剧情更新';
-    for(const button of dialog.querySelectorAll('[data-linkage-quick-copy]'))button.textContent=enabled?'查看统一更新提示词':'复制更新提示词';
+    for(const button of dialog.querySelectorAll('[data-linkage-quick-copy]'))button.textContent=isIndependent(context())?'复制 Amin 更新提示词':enabled?'查看统一更新提示词':'复制更新提示词';
   }
   const unsubscribeLinkage=linkageApi.subscribe(refreshLegacyControls);
   for (const [tab, page] of [[historyTab, historyPage], [displayTab, displayPage], [rulesTab, rulesPage], [linkageTab,linkagePage]]) { tab.type = 'button'; tab.setAttribute('aria-controls', page.id); page.setAttribute('role', 'tabpanel'); page.setAttribute('aria-labelledby', tab.id); }
@@ -337,11 +348,11 @@ async function showHud(page = selectedPage, {target = embeddedMount, onClose = (
       quickStatus.textContent = result?.ok ? (result.changed ? '数值已更新。' : '无需更新。') : result?.message || '更新未完成，请查看生成设置。';
     } catch (e) { quickStatus.textContent = e.message; } finally { update.disabled = false; }
   };
-  const copy = node('button', '复制更新提示词', 'menu_button'); copy.type = 'button'; copy.title='复制当前状态、字段路径和模型更新要求';
+  const copy = node('button', '复制更新提示词', 'menu_button'); copy.type = 'button'; copy.title=isIndependent(context()) ? '复制当前 Amin 资料、模块权限与 amin_update 更新协议' : '复制当前状态、字段路径和模型更新要求';
   copy.dataset.linkageQuickCopy='true';
   copy.onclick = async () => {
-    if(linkageEnabled()){selectPage('linkage');linkageView.open('prompt');return;}
-    try { const text = buildUpdatePrompt(readCurrent()) + '\n\n' + compileRules(context(), KEY, 'update').replaceAll('<', '＜').replaceAll('>', '＞'); const ok = await copyPrompt(text,{mount:dialog}); quickStatus.textContent = ok ? '已复制当前变量、路径与更新要求，可粘贴到对话。' : '请在工作台下方的文本框中手动复制。'; }
+    if(!isIndependent(context()) && linkageEnabled()){selectPage('linkage');linkageView.open('prompt');return;}
+    try { checkIdentity(id); const text = statusUpdateCopyPrompt(); const ok = await copyPrompt(text,{mount:dialog}); quickStatus.textContent = ok ? isIndependent(context()) ? '已复制当前 Amin 资料与允许更新模块的 amin_update 协议，可粘贴到对话。' : '已复制当前变量、路径与更新要求，可粘贴到对话。' : '请在工作台下方的文本框中手动复制。'; }
     catch (e) { quickStatus.textContent = e.message; }
   };
   quickActions.append(update, copy);

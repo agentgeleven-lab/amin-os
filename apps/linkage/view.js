@@ -18,7 +18,7 @@ export function mount(target, options = {}) {
     const getContext = options.getContext ?? (() => globalThis.SillyTavern.getContext());
     const check = options.check ?? (() => {});
     const worldbook = options.worldbook ?? { install: installUnifiedWorldbook, inspect: inspectUnifiedWorldbook };
-    const independent = () => api.nativeState2Status?.()?.mode === 'independent' || api.status?.()?.mode === 'independent';
+    const independent = () => api.isIndependent?.() === true || api.nativeState2Status?.()?.mode === 'independent' || api.status?.()?.mode === 'independent';
     const make = (tag, content = '', className = '') => { const element = document.createElement(tag); element.textContent = content; if (className) element.className = className; return element; };
     if (document.head && !document.getElementById?.('amin-linkage-style')) {
         const style = make('link'); style.id = 'amin-linkage-style'; style.rel = 'stylesheet'; style.href = new URL('../../ui-linkage.css', import.meta.url).href; document.head.append(style);
@@ -97,9 +97,11 @@ export function mount(target, options = {}) {
             if (controls.module.id === 'dice' || controls.module.writable === false) controls.write.disabled = true;
         }
         if (saveButton) saveButton.disabled = block || !settingsDirty;
-        if (installButton) installButton.disabled = block || settingsDirty || !saved?.enabled;
+        if (installButton) { installButton.hidden = independent(); installButton.disabled = independent() || block || settingsDirty || !saved?.enabled; }
         if (dataStatus) dataStatus.textContent = settingsDirty ? '正在显示已保存配置的资料来源；未保存的修改尚未生效。' : dataError || (saved?.dataSource === 'external' ? '已选择由预设／世界书提供资料；Amin 不再插入重复资料。请确认外部宏覆盖全部已选模块。' : dataCache ? `按已保存的模块读取权限生成 · ${dataCache.length} 字符。` : '当前没有允许注入的资料。');
-        if (promptStatus) promptStatus.textContent = settingsDirty ? '正在显示已保存设置生成的条目；先保存设置，再更新世界书。' : promptError || (saved?.enabled ? `${worldbookTemplate === null ? independent() ? 'Amin 剧情更新规则；检查绑定世界书后可合并条目手写前后文' : '变量更新规则；检查绑定世界书后可合并条目手写前后文' : '已合并上次检查的世界书前后文；在世界书中修改后请重新检查'} · ${promptCache.length} 字符。` : '联动总开关已关闭，当前不会提供联动资料或接受模型更新。');
+        if (promptStatus) promptStatus.textContent = settingsDirty
+            ? independent() ? '正在显示插件按已保存设置提供的 Amin 更新规则；请先保存用户补充要求。' : '正在显示已保存设置生成的条目；先保存设置，再更新世界书。'
+            : promptError || (saved?.enabled ? `${independent() ? '插件直接提供的 Amin 更新规则；不合并旧世界书条目的前后文' : worldbookTemplate === null ? '变量更新规则；检查绑定世界书后可合并条目手写前后文' : '已合并上次检查的世界书前后文；在世界书中修改后请重新检查'} · ${promptCache.length} 字符。` : '联动总开关已关闭，当前不会提供联动资料或接受模型更新。');
     }
     function renderSettings() {
         settingsPanel.replaceChildren(make('h3', '联动范围与更新权限'), make('p', independent()
@@ -150,16 +152,19 @@ export function mount(target, options = {}) {
                 renderSettings(); say('已载入通用范围，请点击“保存联动设置”应用到当前聊天。');
             }));
             settingsPanel.append(make('h4', '通用联动范围模板'), make('p',
-                `${template ? '已设置通用模板。' : '尚未设置通用模板。'}保存前请先保存上面的联动设置。模板只包含总开关与模块权限；没有单独配置的聊天自动采用。单独保存后仅影响当前聊天，分支继承原聊天配置。世界书仍需绑定统一条目。`, 'amin-meta'), templateActions);
+                `${template ? '已设置通用模板。' : '尚未设置通用模板。'}保存前请先保存上面的联动设置。模板只包含总开关与模块权限；没有单独配置的聊天自动采用。单独保存后仅影响当前聊天，分支继承原聊天配置。${independent() ? 'Amin 更新规则由插件直接提供。' : '世界书仍需绑定统一条目。'}`, 'amin-meta'), templateActions);
         }
-        const rulesRow = make('label', '', 'amin-field'); extraControl = make('textarea'); extraControl.rows = 5; extraControl.maxLength = 40000; extraControl.value = draft.extraRules ?? ''; extraControl.setAttribute('aria-label', '额外联动规则');
+        const rulesLabel = independent() ? '用户补充要求' : '额外联动规则';
+        const rulesRow = make('label', '', 'amin-field'); extraControl = make('textarea'); extraControl.rows = 5; extraControl.maxLength = 40000; extraControl.value = draft.extraRules ?? ''; extraControl.setAttribute('aria-label', rulesLabel);
         extraControl.placeholder = '例如：只有正文明确发生的变化才能更新；传闻不得直接写成已确认事实。';
         extraControl.addEventListener('input', () => { draft.extraRules = extraControl.value; markDraft(); }); inputNodes.push(extraControl);
-        rulesRow.append(make('span', '额外联动规则'), extraControl, make('small', '随当前聊天保存，并写入统一世界书条目。请保持与上面的模块更新权限一致。')); settingsPanel.append(rulesRow);
+        rulesRow.append(make('span', rulesLabel), extraControl, make('small', independent()
+            ? '手写业务规则填写在这里，随当前聊天保存，由插件加入实际发送的 Amin 更新规则；不会读取旧条目前后文。请保持与上面的模块更新权限一致。'
+            : '随当前聊天保存，并写入统一世界书条目。请保持与上面的模块更新权限一致。')); settingsPanel.append(rulesRow);
         draftNotice = make('p', '', 'amin-meta');
         saveButton = button('保存联动设置', async () => {
             await api.saveSettings(clone(draft)); saved = clone(api.settings()); draft = clone(saved); draft.modules ??= {}; settingsDirty = false;
-            renderSettings(); refreshPrompt(); say('联动设置已保存。展开统一条目可查看当前内容。');
+            renderSettings(); refreshPrompt(); say(independent() ? '联动设置已保存。展开 Amin 更新规则预览可查看实际发送内容。' : '联动设置已保存。展开统一条目可查看当前内容。');
         }, { primary: true });
         const reset = button('放弃未保存修改', () => { saved = clone(api.settings()); draft = clone(saved); draft.modules ??= {}; settingsDirty = false; renderSettings(); say('已恢复当前聊天中保存的联动设置。'); });
         const actions = make('div', '', 'amin-toolbar'); actions.append(saveButton, reset); settingsPanel.append(draftNotice, actions); markDraft();
@@ -230,21 +235,21 @@ export function mount(target, options = {}) {
         }
     }
     function refreshPrompt() {
-        try { const dynamic = text(api.prompt()); promptCache = dynamic && worldbookTemplate !== null ? worldbookTemplate.replace('{{amin_os_linkage}}', () => dynamic) : dynamic; promptError = ''; }
+        try { const dynamic = text(api.prompt()); promptCache = !independent() && dynamic && worldbookTemplate !== null ? worldbookTemplate.replace('{{amin_os_linkage}}', () => dynamic) : dynamic; promptError = ''; }
         catch (error) { promptCache = ''; promptError = error?.message ?? String(error); }
         if (promptValue) promptValue.value = promptCache;
     }
     function createPromptPanel() {
-        promptPanel.append(make('summary', '统一世界书条目与预览'), make('p', independent()
-            ? '统一世界书条目提供 Amin 的 <amin_update> 格式、模块权限和更新规则。当前资料按“资料发送来源”设置提供；消息内资料预览使用已保存配置。检查绑定世界书后会合并条目手写前后文。'
+        promptPanel.append(make('summary', independent() ? 'Amin 更新规则与旧条目检查' : '统一世界书条目与预览'), make('p', independent()
+            ? '插件直接提供 <amin_update> 格式、模块权限和更新规则。这里预览和复制的内容与实际发送的规则一致。检查绑定世界书仅检查旧条目，不合并其前后文；手写业务规则请填入“用户补充要求”。当前资料按“资料发送来源”设置提供。'
             : '统一世界书条目提供小白变量 2.0 的 <state> 更新格式和规则。当前资料按上方“资料发送来源”设置提供，Amin 模式的内容可在下方“消息内资料预览”查看。此处使用已保存配置；检查绑定世界书后会合并条目手写前后文。', 'amin-meta'));
-        promptStatus = make('p', '', 'amin-meta'); promptValue = make('textarea', '', 'amin-linkage-code'); promptValue.readOnly = true; promptValue.rows = 14; promptValue.setAttribute('aria-label', '统一条目预览内容');
+        promptStatus = make('p', '', 'amin-meta'); promptValue = make('textarea', '', 'amin-linkage-code'); promptValue.readOnly = true; promptValue.rows = 14; promptValue.setAttribute('aria-label', independent() ? '更新规则预览内容' : '统一条目预览内容');
         const actions = make('div', '', 'amin-toolbar');
-        actions.append(button('刷新条目预览', () => { refreshPrompt(); if (promptError) throw Error(promptError); say('已刷新统一条目预览。'); }, { lock: 'busy' }), button('复制条目预览', async () => {
-            refreshPrompt(); if (promptError) throw Error(promptError); if (!promptCache) throw Error('当前没有可复制的条目内容。');
+        actions.append(button(independent() ? '刷新更新规则预览' : '刷新条目预览', () => { refreshPrompt(); if (promptError) throw Error(promptError); say(independent() ? '已刷新插件实际发送的 Amin 更新规则预览。' : '已刷新统一条目预览。'); }, { lock: 'busy' }), button(independent() ? '复制更新规则' : '复制条目预览', async () => {
+            refreshPrompt(); if (promptError) throw Error(promptError); if (!promptCache) throw Error(independent() ? '当前没有可复制的更新规则。' : '当前没有可复制的条目内容。');
             const clipboard = options.clipboard ?? document.defaultView?.navigator?.clipboard ?? globalThis.navigator?.clipboard;
-            if (clipboard?.writeText) { try { await clipboard.writeText(promptCache); say('已复制统一条目完整内容。'); return; } catch { /* The selected preview is a usable fallback in restricted webviews. */ } }
-            promptPanel.open = true; promptValue.focus(); promptValue.select?.(); say('请从已选中的预览文本中手动复制。');
+            if (clipboard?.writeText) { try { await clipboard.writeText(promptCache); say(independent() ? '已复制插件实际发送的 Amin 更新规则。' : '已复制统一条目完整内容。'); return; } catch { /* The selected preview is a usable fallback in restricted webviews. */ } }
+            promptPanel.open = true; promptValue.focus(); promptValue.select?.(); say(independent() ? '请从已选中的更新规则预览中手动复制。' : '请从已选中的预览文本中手动复制。');
         }, { lock: 'busy' }));
         worldbookStatus = make('p', worldbookMessage, 'amin-meta');
         inspectButton = button('检查绑定世界书', async () => {
@@ -262,7 +267,7 @@ export function mount(target, options = {}) {
         }, { primary: true });
         const worldbookActions = make('div', '', 'amin-toolbar'); worldbookActions.append(inspectButton, installButton);
         promptPanel.append(promptStatus, promptValue, actions, worldbookStatus, worldbookActions, make('p', independent()
-            ? '世界书模板提供 Amin 更新规则，当前资料按所选来源单独提供。再次安装保留条目的停用、位置、触发设置及自定义规则。额外联动规则按聊天保存。'
+            ? '独立模式的 Amin 更新规则由插件直接提供，不依赖旧世界书条目。世界书检查仅报告旧条目状态，不将其原文加入本预览。手写业务规则请放入“用户补充要求”并保存；当前资料按所选来源单独提供。'
             : '世界书模板在生成时只展开变量 2.0 更新规则，不包含插件生成的当前应用资料。再次安装保留条目的停用、位置、触发设置及自定义规则。额外联动规则按聊天保存。', 'amin-meta'));
     }
     function refreshData(report = null) {
